@@ -1,8 +1,8 @@
 site_name: MiniS3 Tutorial
 site_description: A chapter-oriented guide to object-storage mechanisms in miniature
-site_url: https://system-in-miniature.github.io/MiniS3/
-repo_url: https://github.com/system-in-miniature/MiniS3
-repo_name: system-in-miniature/MiniS3
+site_url: https://system-in-miniature.github.io/mini-s3/
+repo_url: https://github.com/system-in-miniature/mini-s3
+repo_name: system-in-miniature/mini-s3
 docs_dir: docs
 
 theme:
@@ -21,13 +21,13 @@ markdown_extensions:
 nav:
   - English:
       - Chapter 1 · Quick start: index.md
-      - Chapter 2 · Architecture overview: https://github.com/system-in-miniature/MiniS3#repository-tour
+      - Chapter 2 · Architecture overview: https://github.com/system-in-miniature/mini-s3#repository-tour
       - Chapter 3 · Mechanisms and Amazon S3 mapping: mapping.md
       - Chapter 4 · Hands-on experiments: labs-guide.md
       - Chapter 5 · Differences from Amazon S3: DIFFERENCES.md
   - 中文版:
       - 第 1 章 · 快速开始: zh/index.md
-      - 第 2 章 · 架构总览: https://github.com/system-in-miniature/MiniS3/blob/main/README.zh-CN.md
+      - 第 2 章 · 架构总览: https://github.com/system-in-miniature/mini-s3/blob/main/README.zh-CN.md
       - 第 3 章 · 机制与 Amazon S3 映射: zh/mapping.md
       - 第 4 章 · 动手实验: zh/labs-guide.md
       - 第 5 章 · 与 Amazon S3 的差异: zh/DIFFERENCES.md

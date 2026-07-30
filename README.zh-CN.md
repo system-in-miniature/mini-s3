@@ -2,7 +2,7 @@
 
 # MiniS3
 
-[![CI](https://github.com/system-in-miniature/MiniS3/actions/workflows/ci.yml/badge.svg)](https://github.com/system-in-miniature/MiniS3/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE) ![Python 3.12+](https://img.shields.io/badge/Python-3.12%2B-blue.svg)
+[![CI](https://github.com/system-in-miniature/mini-s3/actions/workflows/ci.yml/badge.svg)](https://github.com/system-in-miniature/mini-s3/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE) ![Python 3.12+](https://img.shields.io/badge/Python-3.12%2B-blue.svg)
 
 MiniS3 是第八个**微型系统（System-in-Miniature）**教学项目：一个小型、
 确定性的 S3 风格对象存储（S3-style object store），其重要机制都容纳在一个仓库中。

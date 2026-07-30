@@ -2,7 +2,7 @@
 
 # MiniS3
 
-[![CI](https://github.com/system-in-miniature/MiniS3/actions/workflows/ci.yml/badge.svg)](https://github.com/system-in-miniature/MiniS3/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE) ![Python 3.12+](https://img.shields.io/badge/Python-3.12%2B-blue.svg)
+[![CI](https://github.com/system-in-miniature/mini-s3/actions/workflows/ci.yml/badge.svg)](https://github.com/system-in-miniature/mini-s3/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE) ![Python 3.12+](https://img.shields.io/badge/Python-3.12%2B-blue.svg)
 
 MiniS3 is the eighth **System-in-Miniature** teaching project: a small,
 deterministic S3-style object store whose important mechanisms fit in one
