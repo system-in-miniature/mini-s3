@@ -9,10 +9,10 @@
 - **有意简化（Intentional simplification）：** 保留相同理念，但缩减了生产协议、
   规模、编排或边界情况。
 - **语义相反（Semantically opposite）：** 实现采用了 S3 有意不采用的路径；当前
-  M1 没有任何一行属于此分类。
+  M2 没有任何一行属于此分类。
 
 **可用性（Availability）**单独标记为**可用（Available）**或
-**未实现（Not implemented）**：前者表示可调用的 M1 行为，后者表示只有计划边界或
+**未实现（Not implemented）**：前者表示可调用的 M2 行为，后者表示只有计划边界或
 明确非目标。
 
 | MiniS3 概念 | 真实 S3 概念 | 语义档位 | 可用性 | 映射 |
@@ -27,10 +27,29 @@
 | 按版本寻址的 GET/DELETE | `versionId` 查询 | 等价 | 可用 | 精确寻址一个保留的数据版本或标记。 |
 | `prefix` + `delimiter` | ListObjectsV2 分组 | 等价 | 可用 | `CommonPrefixes` 由键字符串和请求参数派生。 |
 | 延续令牌（Continuation token） | ListObjectsV2 延续令牌 | 有意简化 | 可用 | 不透明且与查询绑定，但仅限本地且无签名；没有分布式快照租约。 |
-| 版本列表 | ListObjectVersions | 有意简化 | 可用 | 将所有条目展平并附带 `is_latest`；M1 的线协议 API 省略标记/分页字段。 |
+| 版本列表 | ListObjectVersions | 有意简化 | 可用 | 将所有条目展平并附带 `is_latest`；MiniS3 的线协议 API 省略标记/分页字段。 |
 | 清单重命名（Manifest rename） | 内部元数据提交 | 有意简化 | 可用 | 用于讲解原子可见性和完整的本地目录 fsync 链，而非 S3 的分布式元数据架构。 |
 | 启动恢复 | 服务恢复 | 有意简化 | 可用 | 移除本地临时文件/孤儿文件；没有复制或多节点修复。 |
-| 分段上传/条件请求/生命周期 | 对应的 S3 API | 有意简化 | 未实现 | M2 边界以文档字符串存在，但 M1 没有可调用行为。 |
+| Multipart 状态机 | CreateMultipartUpload / UploadPart / CompleteMultipartUpload / AbortMultipartUpload | 有意简化 | 可用 | 具备持久私有暂存、有序回执校验、最后一片尺寸例外、abort 与原子发布；本地在内存组装，并省略 upload listing、MD5 之外的校验和及分布式编排。 |
+| Multipart ETag | Multipart 对象 ETag | 等价 | 可用 | 精确实现带引号的 `md5(各 completed part 的 MD5 二进制拼接)-N`，刻意区别于完整 body MD5。 |
+| GET ETag 条件 | `If-Match` / `If-None-Match` | 等价 | 可用 | 精确/current 通配匹配产生 412/304 形态结果；直接 API 以具名异常代替 HTTP 响应。 |
+| 条件 PUT/DELETE | S3 conditional writes | 等价 | 可用 | ETag 比较和变更共用一个串行临界区，陈旧写者得到 `PreconditionFailed`。 |
+| Expiration tick | Lifecycle current/noncurrent expiration | 有意简化 | 可用 | 纯 prefix/age 规则在注入时间手动求值；版本化桶的当前数据产生 marker，noncurrent 数据被物理删除。没有后台调度或 storage-class 迁移。 |
+
+## 为什么 multipart ETag 不是内容哈希
+
+单 PUT `same-bytes` 得到完整字节的带引号 MD5。把相同字节分成两片上传，则会对两份
+**二进制** part digest 再做 MD5，并追加 `-2`。因此 part 边界也是 ETag 输入：最终
+body 相同，ETag 仍完全可能不同。
+
+MiniS3 忠实保留这个常被忽略的 S3 行为，但不声称所有真实 S3 ETag 都源自 MD5；
+加密和其他服务实现选择不在等价边界内。
+
+## 条件写为何构成 CAS
+
+只有当“比较当前 ETag”和“发布替换值”不会被另一个写者插入时，`If-Match` 才能作为
+CAS。MiniS3 在 store 写锁内完成二者。两个写者使用同一份观察到的 ETag 时只能有
+一个胜者；其发布改变 ETag 后，另一方得到 S3 形态的 `PreconditionFailed`。
 
 ## 为什么列表查询会产生目录错觉（directory illusion）
 

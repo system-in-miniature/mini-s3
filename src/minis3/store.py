@@ -11,9 +11,23 @@ from collections.abc import Callable
 from copy import deepcopy
 from pathlib import Path
 from threading import RLock
+from time import time
 
 from .bucket import Bucket, SequenceCounter, VersioningState
-from .errors import BucketAlreadyExists, BucketNotEmpty, NoSuchBucket
+from .conditional import require_if_match, require_if_none_match
+from .errors import (
+    BucketAlreadyExists,
+    BucketNotEmpty,
+    NoSuchBucket,
+    NoSuchKey,
+    NoSuchVersion,
+)
+from .lifecycle import (
+    ExpirationRule,
+    LifecycleAction,
+    LifecycleActionKind,
+    evaluate_expiration,
+)
 from .listing import (
     ListObjectsResult,
     ListObjectVersionsResult,
@@ -21,6 +35,15 @@ from .listing import (
     list_objects,
 )
 from .model import ObjectVersion, Version
+from .multipart import (
+    MAX_PART_NUMBER,
+    MIN_PART_SIZE,
+    CompletionEntry,
+    MultipartPart,
+    MultipartUpload,
+    StagedPart,
+    validate_completion,
+)
 from .storage import DiskStorage
 
 
@@ -33,9 +56,15 @@ class MiniS3:
         *,
         counter: Callable[[], int] | None = None,
         crash_injector: Callable[[str], None] | None = None,
+        clock: Callable[[], float] | None = None,
+        minimum_part_size: int = MIN_PART_SIZE,
     ) -> None:
+        if minimum_part_size < 1:
+            raise ValueError("minimum_part_size must be positive")
         self.root = Path(root)
         self._counter = counter or SequenceCounter()
+        self._clock = clock or time
+        self.minimum_part_size = minimum_part_size
         self._storage = DiskStorage(root, crash_injector=crash_injector)
         self._buckets, maximum_sequence = self._storage.load_buckets()
         ensure = getattr(self._counter, "ensure_at_least", None)
@@ -68,19 +97,38 @@ class MiniS3:
             self._storage.persist_bucket(candidate)
             self._buckets[name] = candidate
 
-    def put_object(self, bucket: str, key: str, body: bytes) -> Version:
+    def put_object(
+        self,
+        bucket: str,
+        key: str,
+        body: bytes,
+        *,
+        if_match: str | None = None,
+    ) -> Version:
         with self._lock:
             candidate = deepcopy(self._bucket(bucket))
-            result = candidate.put(key, body, self._counter)
+            require_if_match(self._current_etag(candidate, key), if_match)
+            result = candidate.put(
+                key, body, self._counter, now=self._clock()
+            )
             self._storage.persist_bucket(candidate)
             self._buckets[bucket] = candidate
             return result
 
     def get_object(
-        self, bucket: str, key: str, *, version_id: str | None = None
+        self,
+        bucket: str,
+        key: str,
+        *,
+        version_id: str | None = None,
+        if_match: str | None = None,
+        if_none_match: str | None = None,
     ) -> Version:
         with self._lock:
-            return self._bucket(bucket).get(key, version_id)
+            result = self._bucket(bucket).get(key, version_id)
+            require_if_match(result.etag, if_match)
+            require_if_none_match(result.etag, if_none_match)
+            return result
 
     def head_object(
         self, bucket: str, key: str, *, version_id: str | None = None
@@ -90,11 +138,21 @@ class MiniS3:
         return self.get_object(bucket, key, version_id=version_id)
 
     def delete_object(
-        self, bucket: str, key: str, *, version_id: str | None = None
+        self,
+        bucket: str,
+        key: str,
+        *,
+        version_id: str | None = None,
+        if_match: str | None = None,
     ) -> ObjectVersion | None:
         with self._lock:
             candidate = deepcopy(self._bucket(bucket))
-            result = candidate.delete(key, self._counter, version_id)
+            require_if_match(
+                self._addressed_etag(candidate, key, version_id), if_match
+            )
+            result = candidate.delete(
+                key, self._counter, version_id, now=self._clock()
+            )
             self._storage.persist_bucket(candidate)
             self._buckets[bucket] = candidate
             return result
@@ -122,6 +180,131 @@ class MiniS3:
     ) -> ListObjectVersionsResult:
         with self._lock:
             return list_object_versions(self._bucket(bucket).records, prefix=prefix)
+
+    def create_multipart_upload(
+        self, bucket: str, key: str
+    ) -> MultipartUpload:
+        """Initiate durable staging without adding a visible object record."""
+
+        with self._lock:
+            self._bucket(bucket)
+            sequence = self._counter()
+            upload = MultipartUpload(
+                bucket=bucket,
+                key=key,
+                upload_id=f"u{sequence:08d}",
+                sequence=sequence,
+                initiated_at=self._clock(),
+            )
+            self._storage.create_multipart_upload(upload)
+            return upload
+
+    def upload_part(
+        self,
+        bucket: str,
+        key: str,
+        upload_id: str,
+        part_number: int,
+        body: bytes,
+    ) -> MultipartPart:
+        """Durably add/replace a part; final-part size is decided at complete."""
+
+        if not 1 <= part_number <= MAX_PART_NUMBER:
+            raise ValueError(f"part_number must be between 1 and {MAX_PART_NUMBER}")
+        with self._lock:
+            self._bucket(bucket)
+            part = StagedPart(part_number, bytes(body))
+            self._storage.write_multipart_part(bucket, key, upload_id, part)
+            return part.receipt
+
+    def complete_multipart_upload(
+        self,
+        bucket: str,
+        key: str,
+        upload_id: str,
+        parts: list[CompletionEntry] | tuple[CompletionEntry, ...],
+    ) -> Version:
+        """Validate, assemble, and publish through the bucket manifest rename."""
+
+        with self._lock:
+            self._bucket(bucket)
+            _upload, staged = self._storage.load_multipart_upload(
+                bucket, key, upload_id
+            )
+            selected, etag = validate_completion(
+                staged, parts, minimum_part_size=self.minimum_part_size
+            )
+            body = b"".join(part.body for part in selected)
+            candidate = deepcopy(self._bucket(bucket))
+            result = candidate.put(
+                key,
+                body,
+                self._counter,
+                etag=etag,
+                now=self._clock(),
+                multipart_upload_id=upload_id,
+            )
+            self._storage.persist_bucket(candidate)
+            self._buckets[bucket] = candidate
+            self._storage.remove_multipart_upload(bucket, key, upload_id)
+            return result
+
+    def abort_multipart_upload(
+        self, bucket: str, key: str, upload_id: str
+    ) -> None:
+        """Discard one incomplete upload without affecting any object."""
+
+        with self._lock:
+            self._bucket(bucket)
+            self._storage.remove_multipart_upload(bucket, key, upload_id)
+
+    def lifecycle_tick(
+        self,
+        bucket: str,
+        rules: list[ExpirationRule] | tuple[ExpirationRule, ...],
+    ) -> tuple[LifecycleAction, ...]:
+        """Evaluate at the injected time and atomically apply selected actions."""
+
+        with self._lock:
+            candidate = deepcopy(self._bucket(bucket))
+            now = self._clock()
+            actions = evaluate_expiration(
+                candidate.records, rules, now=now
+            )
+            for action in actions:
+                if action.kind is LifecycleActionKind.EXPIRE_CURRENT:
+                    current = candidate.records[action.key].versions[0]
+                    if current.version_id == action.version_id:
+                        candidate.delete(
+                            action.key, self._counter, now=now
+                        )
+                else:
+                    candidate.delete(
+                        action.key,
+                        self._counter,
+                        action.version_id,
+                        now=now,
+                    )
+            if actions:
+                self._storage.persist_bucket(candidate)
+                self._buckets[bucket] = candidate
+            return actions
+
+    @staticmethod
+    def _current_etag(bucket: Bucket, key: str) -> str | None:
+        try:
+            return bucket.get(key).etag
+        except NoSuchKey:
+            return None
+
+    @staticmethod
+    def _addressed_etag(
+        bucket: Bucket, key: str, version_id: str | None
+    ) -> str | None:
+        try:
+            return bucket.get(key, version_id).etag
+        except (NoSuchKey, NoSuchVersion):
+            return None
 
     def _bucket(self, name: str) -> Bucket:
         try:

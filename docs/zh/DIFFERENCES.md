@@ -17,16 +17,15 @@
 - 事件通知（event notifications）
 - 配额（quotas）、计费、区域放置和生产环境存储桶名称验证
 
-## M1 的简化和语义差异
+## M2 的简化和语义差异
 
-- **ETag：** 每个数据版本都使用带引号的十六进制内容 MD5。真实 S3 的 ETag 并不
-  一定是内容 MD5：分段上传使用
-  `md5(concatenated binary part MD5 digests)-N`，而加密或其他实现选择也可能
-  进一步打破 MD5 假设。分段 ETag 行为属于 M2。
+- **ETag：** 单 PUT 使用带引号的完整 body MD5；multipart complete 忠实使用
+  `md5(concatenated binary part MD5 digests)-N`。真实 S3 的 ETag 仍不一定源自
+  MD5，因为加密和其他服务实现选择可能改变其含义。
 - **版本 ID（Version IDs）：** 真实 S3 的 ID 是由服务生成的不透明字符串。
   MiniS3 刻意使用注入的单调递增值（`v00000001`、……），以便测试、恢复和实验可复现。
-- **时间（Time）：** M1 不存储 Last-Modified 时间戳，也不调用挂钟。M2 中的
-  生命周期将加入注入时钟和手动滴答。
+- **时间（Time）：** 版本保存数值创建时间。测试与 lifecycle lab 注入时钟；
+  普通 store 默认使用进程挂钟。MiniS3 不建模完整 S3 Last-Modified 响应格式。
 - **HEAD：** `head_object` 返回与 GET 相同的不可变 `Version` 值，包括本地可用的
   字节内容。由于没有传输层，MiniS3 不对无响应体的 HTTP HEAD 响应进行建模。
 - **错误（Errors）：** Python 异常类表示 S3 形态的结果。不存在 HTTP 状态行、
@@ -34,7 +33,7 @@
 - **列表查询（Listing）：** 键和公共前缀按字典序排列，并共同计入 `max_keys`。
   令牌是不透明的，并与前缀和分隔符绑定，但它没有签名，也不会固定一个分布式快照。
   页面请求之间的变更可能移动分页边界。
-- **版本列表（Version listing）：** M1 在一个简化的结果中返回所有匹配的版本和
+- **版本列表（Version listing）：** MiniS3 在一个简化的结果中返回所有匹配的版本和
   删除标记。它省略了 S3 的键/版本标记、分页、所有权、时间戳和编码选项。
 - **并发（Concurrency）：** 单个进程使用锁对调用进行串行化。不存在多进程锁、
   分布式事务、仲裁或冲突协议。
@@ -45,12 +44,13 @@
   以及未被该清单引用的产物；不存在在线清理器或受损清单修复。
 - **存储桶表层（Bucket surface）：** 存储桶不具备区域、所有权控制、对象锁、
   标签、网站配置、CORS、日志或生产环境命名规则。
-
-## 计划用于 M2，当前不可用
-
-- 分段上传的发起/上传分段/完成/中止操作以及分段 ETag
-- 用于 GET 缓存和条件 PUT 的 If-Match / If-None-Match
-- 通过手动生命周期滴答确定性地使当前/非当前版本过期
-
-相应的源代码模块只包含解释性文档字符串，使其未来的职责归属清晰可见，同时不会暗示
-这些行为已经可用。
+- **Multipart：** upload 暂存持久且私有，但没有 list uploads/parts API、upload
+  自动过期、并行流式组装器、其他 checksum family、copy-part 或 5 TiB 规模模型。
+  Complete 先在内存拼接 part，再进入普通本地 atomic-write/manifest 发布路径。
+- **条件请求（Conditions）：** 直接 API 接受精确带引号 ETag、逗号分隔候选与
+  `*`；不解析 weak validator，也不复刻完整 HTTP header 优先级矩阵。
+  `NotModified` 与 `PreconditionFailed` 分别代替 304 和 412 响应。
+- **生命周期（Lifecycle）：** 规则随每次显式 tick 传入，而非保存为 bucket 配置。
+  noncurrent 版本也从创建时刻计算 age；真实 S3 的 noncurrent-day 语义从版本变为
+  noncurrent 时开始。未版本化 current expiration 物理删除 null 对象；版本化
+  current expiration 产生 marker。

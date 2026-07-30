@@ -4,7 +4,13 @@ from pathlib import Path
 
 import pytest
 
-from minis3 import InjectedCrash, MiniS3, NoSuchKey, SequenceCounter
+from minis3 import (
+    InjectedCrash,
+    MiniS3,
+    NoSuchKey,
+    NoSuchUpload,
+    SequenceCounter,
+)
 from minis3.bucket import Bucket
 from minis3.storage import atomic, disk
 from minis3.storage.disk import DiskStorage
@@ -152,3 +158,56 @@ def test_recovery_removes_spurious_tmp_files(tmp_path: Path) -> None:
     MiniS3(tmp_path)
 
     assert not stray.exists()
+
+
+def test_multipart_complete_crash_before_publish_keeps_upload_not_object(
+    tmp_path: Path,
+) -> None:
+    MiniS3(tmp_path).create_bucket("b")
+    staging = MiniS3(tmp_path, minimum_part_size=3)
+    upload = staging.create_multipart_upload("b", "movie")
+    first = staging.upload_part("b", "movie", upload.upload_id, 1, b"abc")
+    last = staging.upload_part("b", "movie", upload.upload_id, 2, b"x")
+    crashing = MiniS3(
+        tmp_path,
+        minimum_part_size=3,
+        crash_injector=CrashOnce("before_manifest_publish"),
+    )
+
+    with pytest.raises(InjectedCrash):
+        crashing.complete_multipart_upload(
+            "b", "movie", upload.upload_id, [first, last]
+        )
+
+    reopened = MiniS3(tmp_path, minimum_part_size=3)
+    with pytest.raises(NoSuchKey):
+        reopened.get_object("b", "movie")
+    completed = reopened.complete_multipart_upload(
+        "b", "movie", upload.upload_id, [first, last]
+    )
+    assert completed.body == b"abcx"
+
+
+def test_multipart_complete_crash_after_publish_recovers_object_and_cleans_upload(
+    tmp_path: Path,
+) -> None:
+    MiniS3(tmp_path).create_bucket("b")
+    staging = MiniS3(tmp_path, minimum_part_size=3)
+    upload = staging.create_multipart_upload("b", "movie")
+    first = staging.upload_part("b", "movie", upload.upload_id, 1, b"abc")
+    last = staging.upload_part("b", "movie", upload.upload_id, 2, b"x")
+    crashing = MiniS3(
+        tmp_path,
+        minimum_part_size=3,
+        crash_injector=CrashOnce("after_manifest_publish"),
+    )
+
+    with pytest.raises(InjectedCrash):
+        crashing.complete_multipart_upload(
+            "b", "movie", upload.upload_id, [first, last]
+        )
+
+    reopened = MiniS3(tmp_path, minimum_part_size=3)
+    assert reopened.get_object("b", "movie").body == b"abcx"
+    with pytest.raises(NoSuchUpload):
+        reopened.abort_multipart_upload("b", "movie", upload.upload_id)

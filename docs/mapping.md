@@ -9,9 +9,9 @@ The **Semantic tier** column uses the series-wide three-value vocabulary:
 - **Intentional simplification:** the same idea is present, but production
   protocol, scale, orchestration, or edge cases are reduced.
 - **Semantically opposite:** the implementation takes a path S3 deliberately
-  does not; no current M1 row has this classification.
+  does not; no current M2 row has this classification.
 
-**Availability** is separate: **Available** means callable M1 behavior, while
+**Availability** is separate: **Available** means callable M2 behavior, while
 **Not implemented** means only a planned boundary or explicit non-goal exists.
 
 | MiniS3 concept | Real S3 concept | Semantic tier | Availability | Mapping |
@@ -26,10 +26,33 @@ The **Semantic tier** column uses the series-wide three-value vocabulary:
 | Version-addressed GET/DELETE | `versionId` query | Equivalent | Available | Addresses one exact retained data version or marker. |
 | `prefix` + `delimiter` | ListObjectsV2 grouping | Equivalent | Available | `CommonPrefixes` is derived from key strings and request parameters. |
 | Continuation token | ListObjectsV2 continuation token | Intentional simplification | Available | Opaque and query-bound, but local and unsigned; no distributed snapshot lease. |
-| Version listing | ListObjectVersions | Intentional simplification | Available | Flattens all entries with `is_latest`; M1 omits markers/pagination fields from the wire API. |
+| Version listing | ListObjectVersions | Intentional simplification | Available | Flattens all entries with `is_latest`; MiniS3 omits markers/pagination fields from the wire API. |
 | Manifest rename | Internal metadata commit | Intentional simplification | Available | Teaches atomic visibility and a complete local directory-fsync chain, not S3's distributed metadata architecture. |
 | Startup recovery | Service recovery | Intentional simplification | Available | Removes local tmp/orphan files; no replication or multi-node repair. |
-| Multipart/conditions/lifecycle | Corresponding S3 APIs | Intentional simplification | Not implemented | M2 boundaries exist as docstrings, with no callable M1 behavior. |
+| Multipart state machine | CreateMultipartUpload / UploadPart / CompleteMultipartUpload / AbortMultipartUpload | Intentional simplification | Available | Durable private staging, ordered receipt validation, last-part size exception, abort, and atomic publication are present; local assembly is in memory and omits upload listing, checksums beyond MD5, and distributed orchestration. |
+| Multipart ETag | Multipart object ETag | Equivalent | Available | Exactly quotes `md5(concatenated binary MD5 digest of each completed part)-N`; it is deliberately distinct from whole-body MD5. |
+| GET ETag conditions | `If-Match` / `If-None-Match` | Equivalent | Available | Exact/current wildcard matches produce the 412/304-shaped outcomes; the direct API uses named exceptions instead of HTTP responses. |
+| Conditional PUT/DELETE | S3 conditional writes | Equivalent | Available | ETag comparison and mutation share one serialized critical section, so stale writers fail with `PreconditionFailed`. |
+| Expiration tick | Lifecycle current/noncurrent expiration | Intentional simplification | Available | Pure prefix/age rules are manually evaluated at injected time; current data in a versioned bucket creates a marker and noncurrent data is physically removed. No background scheduler or storage-class transition exists. |
+
+## Why multipart ETags are not content hashes
+
+A single PUT of `same-bytes` has the quoted MD5 of those complete bytes.
+Uploading the same bytes as two parts instead hashes the two **binary** part
+digests, then appends `-2`. Part boundaries are therefore part of the ETag
+input: equal final bodies can legitimately have different ETags.
+
+MiniS3 preserves that often-missed S3 behavior. It does not claim that every
+real S3 ETag is MD5-derived; encryption and other service choices are outside
+the equivalence boundary.
+
+## Why conditional writes form a CAS
+
+`If-Match` is useful only when “compare current ETag” and “publish replacement”
+cannot interleave with another writer. MiniS3 evaluates both while holding the
+store mutation lock. Two writers using the same observed ETag therefore have
+one winner; after its publication changes the ETag, the other receives the
+S3-shaped `PreconditionFailed` outcome.
 
 ## Why listing creates a directory illusion
 

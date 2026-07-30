@@ -17,18 +17,18 @@ not a wire-compatible, secure, or distributed S3 replacement.
 - event notifications
 - quotas, billing, regional placement, and production bucket-name validation
 
-## M1 simplifications and semantic departures
+## M2 simplifications and semantic departures
 
-- **ETag:** every data version uses quoted hexadecimal content MD5. Real S3
-  ETags are not universally content MD5: multipart uploads use
-  `md5(concatenated binary part MD5 digests)-N`, and encryption or other
-  implementation choices can further break the MD5 assumption. Multipart ETag
-  behavior belongs to M2.
+- **ETag:** single PUT uses quoted whole-body MD5; multipart complete faithfully
+  uses `md5(concatenated binary part MD5 digests)-N`. Real S3 ETags are still
+  not universally MD5-derived because encryption and other service choices
+  can change their meaning.
 - **Version IDs:** real S3 IDs are service-generated opaque strings. MiniS3
   deliberately uses injected monotonic values (`v00000001`, …) so tests,
   recovery, and labs are reproducible.
-- **Time:** M1 stores no Last-Modified timestamps and calls no wall clock.
-  Lifecycle in M2 will add an injected clock and manual ticks.
+- **Time:** versions store a numeric creation time. Tests and lifecycle labs
+  inject a clock; a normal store defaults to the process wall clock. MiniS3
+  does not model full S3 Last-Modified response formatting.
 - **HEAD:** `head_object` returns the same immutable `Version` value as GET,
   including locally available bytes. There is no transport, so MiniS3 does not
   model a body-less HTTP HEAD response.
@@ -39,7 +39,7 @@ not a wire-compatible, secure, or distributed S3 replacement.
   counted together for `max_keys`. The token is opaque and bound to prefix and
   delimiter, but it is not signed and does not pin a distributed snapshot.
   Mutation between page requests may move page boundaries.
-- **Version listing:** M1 returns all matching versions and delete markers in
+- **Version listing:** MiniS3 returns all matching versions and delete markers in
   one simplified result. It omits S3's key/version markers, pagination,
   ownership, timestamps, and encoding options.
 - **Concurrency:** one process serializes calls with a lock. There is no
@@ -53,12 +53,16 @@ not a wire-compatible, secure, or distributed S3 replacement.
   there is no online scrubber or damaged-manifest repair.
 - **Bucket surface:** buckets have no regions, ownership controls, object lock,
   tags, website configuration, CORS, logging, or production naming rules.
-
-## Planned M2, not available now
-
-- Multipart initiate/upload-part/complete/abort and multipart ETags
-- If-Match / If-None-Match for GET caching and conditional PUT
-- Deterministic current/non-current expiration through a manual lifecycle tick
-
-The corresponding source modules contain only explanatory docstrings so their
-future ownership is visible without suggesting that the behavior works.
+- **Multipart:** upload staging is durable and private, but there is no list
+  uploads/parts API, upload expiration, parallel streaming assembler, alternate
+  checksum family, copy-part, or 5 TiB scale model. Complete joins parts in
+  memory before the ordinary local atomic-write/manifest publication path.
+- **Conditions:** the direct API accepts exact quoted ETags, comma-separated
+  alternatives, and `*`; it does not parse weak validators or reproduce the
+  complete HTTP header precedence matrix. `NotModified` and
+  `PreconditionFailed` stand in for 304 and 412 responses.
+- **Lifecycle:** rules are passed to each explicit tick rather than stored as
+  bucket configuration. Age is measured from version creation time, including
+  for noncurrent versions; real S3's noncurrent-day semantics begin when a
+  version becomes noncurrent. Unversioned current expiration physically
+  removes the null object; versioned current expiration creates a marker.

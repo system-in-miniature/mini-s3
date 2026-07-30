@@ -69,7 +69,16 @@ class Bucket:
             raise ValueError("versioning must be enabled before it can be suspended")
         self.versioning = state
 
-    def put(self, key: str, body: bytes, next_sequence: Callable[[], int]) -> Version:
+    def put(
+        self,
+        key: str,
+        body: bytes,
+        next_sequence: Callable[[], int],
+        *,
+        etag: str | None = None,
+        now: float = 0.0,
+        multipart_upload_id: str | None = None,
+    ) -> Version:
         sequence = next_sequence()
         version_id = (
             f"v{sequence:08d}"
@@ -81,7 +90,9 @@ class Bucket:
             storage_id=f"e{sequence:08d}",
             sequence=sequence,
             body=bytes(body),
-            etag=content_etag(body),
+            etag=content_etag(body) if etag is None else etag,
+            created_at=now,
+            multipart_upload_id=multipart_upload_id,
         )
         old = self.records.get(key, ObjectRecord(key))
 
@@ -120,6 +131,8 @@ class Bucket:
         key: str,
         next_sequence: Callable[[], int],
         version_id: str | None = None,
+        *,
+        now: float = 0.0,
     ) -> ObjectVersion | None:
         record = self.records.get(key)
 
@@ -149,7 +162,9 @@ class Bucket:
             if self.versioning is VersioningState.ENABLED
             else NULL_VERSION_ID
         )
-        marker = DeleteMarker(marker_id, f"e{sequence:08d}", sequence)
+        marker = DeleteMarker(
+            marker_id, f"e{sequence:08d}", sequence, created_at=now
+        )
         old_versions = () if record is None else record.versions
         if self.versioning is VersioningState.SUSPENDED or has_named_history:
             old_versions = tuple(
