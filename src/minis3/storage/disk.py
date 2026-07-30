@@ -24,7 +24,7 @@ import shutil
 
 from ..bucket import Bucket, VersioningState
 from ..model import DeleteMarker, ObjectRecord, ObjectVersion, Version
-from .atomic import atomic_write, fsync_directory
+from .atomic import atomic_write, durable_mkdir, fsync_directory
 
 
 def _encoded_name(name: str) -> str:
@@ -48,7 +48,7 @@ class DiskStorage:
     ) -> None:
         self.root = Path(root)
         self.buckets_root = self.root / "buckets"
-        self.buckets_root.mkdir(parents=True, exist_ok=True)
+        durable_mkdir(self.buckets_root)
         self._inject = crash_injector or (lambda _point: None)
 
     def load_buckets(self) -> tuple[dict[str, Bucket], int]:
@@ -82,8 +82,9 @@ class DiskStorage:
         temporary = self.buckets_root / f".tmp-{final.name}"
         if temporary.exists():
             shutil.rmtree(temporary)
-        temporary.mkdir()
-        (temporary / "objects").mkdir()
+            fsync_directory(self.buckets_root)
+        durable_mkdir(temporary, parents=False)
+        durable_mkdir(temporary / "objects", parents=False)
         manifest = self._manifest_bytes(bucket)
         with (temporary / "manifest.json").open("wb") as handle:
             handle.write(manifest)
@@ -139,6 +140,11 @@ class DiskStorage:
         self, bucket_directory: Path, key: str, item: ObjectVersion
     ) -> None:
         directory = _object_directory(bucket_directory, key)
+        if not directory.exists():
+            directory.mkdir()
+            self._inject("after_object_directory_create")
+            fsync_directory(directory.parent)
+            self._inject("after_object_directory_parent_fsync")
         metadata_path = directory / f"{item.storage_id}.json"
         if metadata_path.exists():
             return

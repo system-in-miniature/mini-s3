@@ -30,10 +30,24 @@ def fsync_directory(path: Path) -> None:
         os.close(descriptor)
 
 
+def durable_mkdir(path: Path, *, parents: bool = True) -> None:
+    """Create directories and persist every new entry in its parent."""
+
+    missing: list[Path] = []
+    current = path
+    while not current.exists():
+        missing.append(current)
+        current = current.parent
+
+    path.mkdir(parents=parents, exist_ok=True)
+    for created in reversed(missing):
+        fsync_directory(created.parent)
+
+
 def atomic_write(path: Path, payload: bytes) -> None:
     """Publish one complete file using the series-wide crash-safe pattern."""
 
-    path.parent.mkdir(parents=True, exist_ok=True)
+    durable_mkdir(path.parent)
     temporary = path.with_name(path.name + ".tmp-write")
     with temporary.open("wb") as handle:
         handle.write(payload)
@@ -41,4 +55,3 @@ def atomic_write(path: Path, payload: bytes) -> None:
         os.fsync(handle.fileno())
     os.replace(temporary, path)
     fsync_directory(path.parent)
-

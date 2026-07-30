@@ -2,30 +2,34 @@
 
 # MiniS3 ↔ Amazon S3 mapping
 
-The labels distinguish a faithful teaching mechanism from a simplified
-surface and from planned or excluded behavior:
+The **Semantic tier** column uses the series-wide three-value vocabulary:
 
-- **A — aligned:** the core observable mechanism matches modern S3.
-- **S — simplified:** the teaching mechanism is present, but the production
-  surface, scale, or edge cases are reduced.
-- **N — not implemented:** deliberately outside M1 or outside the project.
+- **Equivalent:** the named observable invariant matches modern S3 within this
+  project's stated boundary.
+- **Intentional simplification:** the same idea is present, but production
+  protocol, scale, orchestration, or edge cases are reduced.
+- **Semantically opposite:** the implementation takes a path S3 deliberately
+  does not; no current M1 row has this classification.
 
-| MiniS3 concept | Real S3 concept | Level | Mapping |
-|---|---|---:|---|
-| Bucket | General purpose bucket | S | Named ownership boundary; no region, account, endpoint, or naming-rule model. |
-| Flat string key | Object key | A | `/` is an ordinary character; neither system stores directories. |
-| Whole-body PUT | PutObject | A | Replaces the complete current value rather than editing byte ranges in place. |
-| Quoted content MD5 | Single-part ETag | S | Matches the familiar unencrypted single-part form only. |
-| `null` version | Pre-versioning/suspended null version | A | One replaceable null slot coexists with named history after suspension. |
-| Enabled version IDs | S3-generated version IDs | S | State transitions align; IDs are readable injected-counter values for determinism. |
-| Delete marker | Delete marker | A | A marker becomes latest and hides older bytes without destroying them. |
-| Version-addressed GET/DELETE | `versionId` query | A | Addresses one exact retained data version or marker. |
-| `prefix` + `delimiter` | ListObjectsV2 grouping | A | `CommonPrefixes` is derived from key strings and request parameters. |
-| Continuation token | ListObjectsV2 continuation token | S | Opaque and query-bound, but local and unsigned; no distributed snapshot lease. |
-| Version listing | ListObjectVersions | S | Flattens all entries with `is_latest`; M1 omits markers/pagination fields from the wire API. |
-| Manifest rename | Internal metadata commit | S | Teaches atomic visibility, not S3's distributed metadata architecture. |
-| Startup recovery | Service recovery | S | Removes local tmp/orphan files; no replication or multi-node repair. |
-| Multipart/conditions/lifecycle | Corresponding S3 APIs | N | M2 boundaries exist as docstrings, with no callable M1 behavior. |
+**Availability** is separate: **Available** means callable M1 behavior, while
+**Not implemented** means only a planned boundary or explicit non-goal exists.
+
+| MiniS3 concept | Real S3 concept | Semantic tier | Availability | Mapping |
+|---|---|---|---|---|
+| Bucket | General purpose bucket | Intentional simplification | Available | Named ownership boundary; no region, account, endpoint, or naming-rule model. |
+| Flat string key | Object key | Equivalent | Available | `/` is an ordinary character; neither system stores directories. |
+| Whole-body PUT | PutObject | Equivalent | Available | Replaces the complete current value rather than editing byte ranges in place. |
+| Quoted content MD5 | Single-part ETag | Intentional simplification | Available | Matches the familiar unencrypted single-part form only. |
+| `null` version | Pre-versioning/suspended null version | Equivalent | Available | One replaceable null slot coexists with named history after suspension. |
+| Enabled version IDs | S3-generated version IDs | Intentional simplification | Available | State transitions align, including irreversible enablement; IDs are readable injected-counter values for determinism. |
+| Delete marker | Delete marker | Equivalent | Available | A marker becomes latest and hides older bytes without destroying them. |
+| Version-addressed GET/DELETE | `versionId` query | Equivalent | Available | Addresses one exact retained data version or marker. |
+| `prefix` + `delimiter` | ListObjectsV2 grouping | Equivalent | Available | `CommonPrefixes` is derived from key strings and request parameters. |
+| Continuation token | ListObjectsV2 continuation token | Intentional simplification | Available | Opaque and query-bound, but local and unsigned; no distributed snapshot lease. |
+| Version listing | ListObjectVersions | Intentional simplification | Available | Flattens all entries with `is_latest`; M1 omits markers/pagination fields from the wire API. |
+| Manifest rename | Internal metadata commit | Intentional simplification | Available | Teaches atomic visibility and a complete local directory-fsync chain, not S3's distributed metadata architecture. |
+| Startup recovery | Service recovery | Intentional simplification | Available | Removes local tmp/orphan files; no replication or multi-node repair. |
+| Multipart/conditions/lifecycle | Corresponding S3 APIs | Intentional simplification | Not implemented | M2 boundaries exist as docstrings, with no callable M1 behavior. |
 
 ## Why listing creates a directory illusion
 

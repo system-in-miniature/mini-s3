@@ -7,7 +7,9 @@
 MiniS3 is the eighth **System-in-Miniature** teaching project: a small,
 deterministic S3-style object store whose important mechanisms fit in one
 repository. M1 focuses on flat object keys, quoted MD5 ETags, bucket
-versioning, delete markers, S3-style listing, and crash-safe disk publication.
+versioning, delete markers, S3-style listing, and locally crash-consistent disk
+publication on filesystems that honor the documented POSIX rename/fsync
+assumptions.
 
 It is intentionally a direct Python API rather than an HTTP server. The runtime
 uses only the Python standard library; pytest is the sole development
@@ -49,8 +51,9 @@ groups matching strings.
 - Version-addressed GET and DELETE operate on one exact retained entry.
 - Suspended PUT replaces the `null` slot while named history remains.
 - Current-object and version listings are strongly consistent.
-- Durable writes publish immutable artifacts through one atomic manifest
-  rename; startup recovery removes temporary and unreferenced files.
+- Durable writes fsync newly created directory entries and immutable artifacts
+  before one atomic manifest rename; startup recovery removes temporary and
+  unreferenced files.
 
 ## Repository tour
 

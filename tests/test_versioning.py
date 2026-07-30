@@ -12,6 +12,48 @@ from minis3 import (
     SequenceCounter,
     VersioningState,
 )
+from minis3.bucket import Bucket
+
+
+@pytest.mark.parametrize(
+    ("initial", "requested", "allowed"),
+    [
+        (VersioningState.UNVERSIONED, VersioningState.UNVERSIONED, True),
+        (VersioningState.UNVERSIONED, VersioningState.ENABLED, True),
+        (VersioningState.UNVERSIONED, VersioningState.SUSPENDED, False),
+        (VersioningState.ENABLED, VersioningState.UNVERSIONED, False),
+        (VersioningState.ENABLED, VersioningState.ENABLED, True),
+        (VersioningState.ENABLED, VersioningState.SUSPENDED, True),
+        (VersioningState.SUSPENDED, VersioningState.UNVERSIONED, False),
+        (VersioningState.SUSPENDED, VersioningState.ENABLED, True),
+        (VersioningState.SUSPENDED, VersioningState.SUSPENDED, True),
+    ],
+)
+def test_versioning_state_machine_exhaustive(
+    initial: VersioningState,
+    requested: VersioningState,
+    allowed: bool,
+) -> None:
+    bucket = Bucket("b", versioning=initial)
+
+    if allowed:
+        bucket.set_versioning(requested)
+        assert bucket.versioning is requested
+    else:
+        with pytest.raises(ValueError):
+            bucket.set_versioning(requested)
+        assert bucket.versioning is initial
+
+
+def test_unversioned_delete_defensively_preserves_named_history() -> None:
+    bucket = Bucket("b")
+    bucket.set_versioning(VersioningState.ENABLED)
+    historical = bucket.put("k", b"named", SequenceCounter())
+    bucket.versioning = VersioningState.UNVERSIONED
+
+    bucket.delete("k", SequenceCounter(10))
+
+    assert bucket.get("k", historical.version_id) == historical
 
 
 def test_unversioned_put_replaces_null_and_delete_removes_it(tmp_path: Path) -> None:

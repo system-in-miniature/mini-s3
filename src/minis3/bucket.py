@@ -60,7 +60,12 @@ class Bucket:
 
     def set_versioning(self, state: VersioningState | str) -> None:
         state = VersioningState(state)
-        if self.versioning is VersioningState.UNVERSIONED and state is VersioningState.SUSPENDED:
+        if state is VersioningState.UNVERSIONED and self.versioning is not state:
+            raise ValueError("versioning cannot return to unversioned after it is enabled")
+        if (
+            self.versioning is VersioningState.UNVERSIONED
+            and state is VersioningState.SUSPENDED
+        ):
             raise ValueError("versioning must be enabled before it can be suspended")
         self.versioning = state
 
@@ -131,7 +136,10 @@ class Bucket:
                     return candidate
             raise NoSuchVersion(f"{key}:{version_id}")
 
-        if self.versioning is VersioningState.UNVERSIONED:
+        has_named_history = record is not None and any(
+            item.version_id != NULL_VERSION_ID for item in record.versions
+        )
+        if self.versioning is VersioningState.UNVERSIONED and not has_named_history:
             self.records.pop(key, None)
             return None
 
@@ -143,10 +151,9 @@ class Bucket:
         )
         marker = DeleteMarker(marker_id, f"e{sequence:08d}", sequence)
         old_versions = () if record is None else record.versions
-        if self.versioning is VersioningState.SUSPENDED:
+        if self.versioning is VersioningState.SUSPENDED or has_named_history:
             old_versions = tuple(
                 item for item in old_versions if item.version_id != NULL_VERSION_ID
             )
         self.records[key] = ObjectRecord(key, (marker, *old_versions))
         return marker
-

@@ -8,7 +8,8 @@ MiniS3 是第八个**微型系统（System-in-Miniature）**教学项目：一�
 确定性的 S3 风格对象存储（S3-style object store），其重要机制都容纳在一个仓库中。
 M1 聚焦于扁平对象键（flat object keys）、带引号的 MD5 ETag、存储桶版本控制
 （bucket versioning）、删除标记（delete markers）、S3 风格的列表查询
-（S3-style listing），以及崩溃安全的磁盘发布（crash-safe disk publication）。
+（S3-style listing），以及在符合文档所述 POSIX rename/fsync 假设的文件系统上实现
+本地崩溃一致的磁盘发布（locally crash-consistent disk publication）。
 
 它刻意采用直接的 Python API，而不是 HTTP 服务器。运行时（runtime）仅使用
 Python 标准库；pytest 是唯一的开发依赖。
@@ -48,8 +49,9 @@ print(stored.version_id, stored.etag)
 - 按版本寻址（version-addressed）的 GET 和 DELETE 会对一个确切的保留条目执行操作。
 - 暂停版本控制后，PUT 会替换 `null` 槽位，同时保留具名历史版本。
 - 当前对象列表和版本列表具有强一致性（strong consistency）。
-- 持久化写入通过一次原子清单重命名（atomic manifest rename）来发布不可变产物；
-  启动恢复（startup recovery）会删除临时文件和未被引用的文件。
+- 持久化写入会先 fsync 新建目录项和不可变产物，再通过一次原子清单重命名
+  （atomic manifest rename）进行发布；启动恢复（startup recovery）会删除临时
+  文件和未被引用的文件。
 
 ## 仓库导览
 
