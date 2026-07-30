@@ -2,6 +2,8 @@
 
 # MiniS3
 
+[![CI](https://github.com/system-in-miniature/MiniS3/actions/workflows/ci.yml/badge.svg)](https://github.com/system-in-miniature/MiniS3/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE) ![Python 3.12+](https://img.shields.io/badge/Python-3.12%2B-blue.svg)
+
 MiniS3 是第八个**微型系统（System-in-Miniature）**教学项目：一个小型、
 确定性的 S3 风格对象存储（S3-style object store），其重要机制都容纳在一个仓库中。
 M1 聚焦于扁平对象键（flat object keys）、带引号的 MD5 ETag、存储桶版本控制
@@ -69,3 +71,7 @@ docs/DIFFERENCES.md explicit omissions and semantic differences
 
 计划中的 M2 工作——分段上传、条件请求和生命周期——并未得到部分实现。请参阅
 [docs/DIFFERENCES.md](docs/DIFFERENCES.md)。
+
+## 商标声明
+
+MiniS3 是独立的教学项目，与 Amazon.com, Inc. or its affiliates 无隶属、背书或赞助关系。"Amazon S3" 商标归其所有者所有。

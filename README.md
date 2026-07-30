@@ -2,6 +2,8 @@
 
 # MiniS3
 
+[![CI](https://github.com/system-in-miniature/MiniS3/actions/workflows/ci.yml/badge.svg)](https://github.com/system-in-miniature/MiniS3/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE) ![Python 3.12+](https://img.shields.io/badge/Python-3.12%2B-blue.svg)
+
 MiniS3 is the eighth **System-in-Miniature** teaching project: a small,
 deterministic S3-style object store whose important mechanisms fit in one
 repository. M1 focuses on flat object keys, quoted MD5 ETags, bucket
@@ -70,3 +72,7 @@ docs/DIFFERENCES.md explicit omissions and semantic differences
 
 The planned M2 work—multipart upload, conditional requests, and lifecycle—is
 not partially implemented. See [docs/DIFFERENCES.md](docs/DIFFERENCES.md).
+
+## Trademark Notice
+
+MiniS3 is an independent educational project. It is not affiliated with, endorsed by, or sponsored by Amazon.com, Inc. or its affiliates. "Amazon S3" is a trademark of its respective owner.
