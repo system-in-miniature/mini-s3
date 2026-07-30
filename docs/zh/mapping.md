@@ -1,30 +1,36 @@
-> **Language**: [English](../mapping.md) | 简体中文
+> **语言**: [English](../mapping.md) | 简体中文
 
 # MiniS3 ↔ Amazon S3 映射
 
-以下标签用于区分忠实的教学机制、经过简化的表层，以及计划实现或明确排除的行为：
+**语义档位（Semantic tier）**使用系列统一的三个值：
 
-- **A — 对齐（aligned）：** 核心可观察机制与现代 S3 一致。
-- **S — 简化（simplified）：** 教学机制已经具备，但缩减了生产环境的表层、规模或
-  边界情况。
-- **N — 未实现（not implemented）：** 刻意置于 M1 或本项目范围之外。
+- **等价（Equivalent）：** 在本项目声明的边界内，具名的可观察不变量与现代 S3
+  一致。
+- **有意简化（Intentional simplification）：** 保留相同理念，但缩减了生产协议、
+  规模、编排或边界情况。
+- **语义相反（Semantically opposite）：** 实现采用了 S3 有意不采用的路径；当前
+  M1 没有任何一行属于此分类。
 
-| MiniS3 concept | Real S3 concept | Level | Mapping |
-|---|---|---:|---|
-| Bucket | General purpose bucket | S | Named ownership boundary; no region, account, endpoint, or naming-rule model. |
-| Flat string key | Object key | A | `/` is an ordinary character; neither system stores directories. |
-| Whole-body PUT | PutObject | A | Replaces the complete current value rather than editing byte ranges in place. |
-| Quoted content MD5 | Single-part ETag | S | Matches the familiar unencrypted single-part form only. |
-| `null` version | Pre-versioning/suspended null version | A | One replaceable null slot coexists with named history after suspension. |
-| Enabled version IDs | S3-generated version IDs | S | State transitions align; IDs are readable injected-counter values for determinism. |
-| Delete marker | Delete marker | A | A marker becomes latest and hides older bytes without destroying them. |
-| Version-addressed GET/DELETE | `versionId` query | A | Addresses one exact retained data version or marker. |
-| `prefix` + `delimiter` | ListObjectsV2 grouping | A | `CommonPrefixes` is derived from key strings and request parameters. |
-| Continuation token | ListObjectsV2 continuation token | S | Opaque and query-bound, but local and unsigned; no distributed snapshot lease. |
-| Version listing | ListObjectVersions | S | Flattens all entries with `is_latest`; M1 omits markers/pagination fields from the wire API. |
-| Manifest rename | Internal metadata commit | S | Teaches atomic visibility, not S3's distributed metadata architecture. |
-| Startup recovery | Service recovery | S | Removes local tmp/orphan files; no replication or multi-node repair. |
-| Multipart/conditions/lifecycle | Corresponding S3 APIs | N | M2 boundaries exist as docstrings, with no callable M1 behavior. |
+**可用性（Availability）**单独标记为**可用（Available）**或
+**未实现（Not implemented）**：前者表示可调用的 M1 行为，后者表示只有计划边界或
+明确非目标。
+
+| MiniS3 概念 | 真实 S3 概念 | 语义档位 | 可用性 | 映射 |
+|---|---|---|---|---|
+| 存储桶（Bucket） | 通用存储桶（General purpose bucket） | 有意简化 | 可用 | 具名所有权边界；没有区域、账户、端点或命名规则模型。 |
+| 扁平字符串键 | 对象键（Object key） | 等价 | 可用 | `/` 是普通字符；两个系统都不存储目录。 |
+| 完整对象体 PUT | PutObject | 等价 | 可用 | 替换完整的当前值，而不是原地编辑字节范围。 |
+| 带引号的内容 MD5 | 单段 ETag（Single-part ETag） | 有意简化 | 可用 | 只匹配常见的未加密单段形式。 |
+| `null` 版本 | 启用版本控制前/暂停后的空版本 | 等价 | 可用 | 暂停后，一个可替换的空槽位与具名历史版本并存。 |
+| 已启用的版本 ID | S3 生成的版本 ID | 有意简化 | 可用 | 状态转换一致，包括启用后不可逆；为了确定性，ID 使用可读的注入计数器值。 |
+| 删除标记（Delete marker） | 删除标记 | 等价 | 可用 | 标记成为最新版本并隐藏较旧字节，但不会销毁它们。 |
+| 按版本寻址的 GET/DELETE | `versionId` 查询 | 等价 | 可用 | 精确寻址一个保留的数据版本或标记。 |
+| `prefix` + `delimiter` | ListObjectsV2 分组 | 等价 | 可用 | `CommonPrefixes` 由键字符串和请求参数派生。 |
+| 延续令牌（Continuation token） | ListObjectsV2 延续令牌 | 有意简化 | 可用 | 不透明且与查询绑定，但仅限本地且无签名；没有分布式快照租约。 |
+| 版本列表 | ListObjectVersions | 有意简化 | 可用 | 将所有条目展平并附带 `is_latest`；M1 的线协议 API 省略标记/分页字段。 |
+| 清单重命名（Manifest rename） | 内部元数据提交 | 有意简化 | 可用 | 用于讲解原子可见性和完整的本地目录 fsync 链，而非 S3 的分布式元数据架构。 |
+| 启动恢复 | 服务恢复 | 有意简化 | 可用 | 移除本地临时文件/孤儿文件；没有复制或多节点修复。 |
+| 分段上传/条件请求/生命周期 | 对应的 S3 API | 有意简化 | 未实现 | M2 边界以文档字符串存在，但 M1 没有可调用行为。 |
 
 ## 为什么列表查询会产生目录错觉（directory illusion）
 
