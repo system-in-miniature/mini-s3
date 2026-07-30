@@ -223,12 +223,18 @@ prefix/delimiter 分组不变量在本项目边界内等价，见
 ??? note "参考答案"
 
     ```diff
-    +first = store.list_objects("b", prefix="a", max_keys=1)
+    +store = _populated_store(tmp_path)
+    +first = store.list_objects("b", max_keys=1)
+    +assert first.next_token is not None
     +with pytest.raises(InvalidContinuationToken):
     +    store.list_objects(
-    +        "b", prefix="b", continuation_token=first.next_token
+    +        "b", prefix="different", continuation_token=first.next_token
     +    )
     ```
+
+    第一次无 prefix 请求有多个结果，因此 `max_keys=1` 必然生成真实
+    token。随后用非空 prefix 重用该 token，才会真正进入 query binding
+    校验，而不是把 `None` 传回去。
 
     `tests/test_listing.py::test_malformed_or_query_mismatched_tokens_are_rejected`
     已提供这条契约。

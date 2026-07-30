@@ -260,12 +260,19 @@ formatting, and encoding options. See the listing and version-listing rows in
 ??? note "Reference answer"
 
     ```diff
-    +first = store.list_objects("b", prefix="a", max_keys=1)
+    +store = _populated_store(tmp_path)
+    +first = store.list_objects("b", max_keys=1)
+    +assert first.next_token is not None
     +with pytest.raises(InvalidContinuationToken):
     +    store.list_objects(
-    +        "b", prefix="b", continuation_token=first.next_token
+    +        "b", prefix="different", continuation_token=first.next_token
     +    )
     ```
+
+    The no-prefix first request has multiple results, so `max_keys=1`
+    necessarily produces a real token. Reusing that token with a nonempty
+    prefix therefore reaches query-binding validation rather than passing
+    `None`.
 
     `tests/test_listing.py::test_malformed_or_query_mismatched_tokens_are_rejected`
     already provides this contract.
