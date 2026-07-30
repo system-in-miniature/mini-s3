@@ -17,28 +17,52 @@ theme:
 markdown_extensions:
   - admonition
   - attr_list
+  - pymdownx.details
+  - pymdownx.superfences
   - toc:
       permalink: true
 
 nav:
-  - English:
-      - Chapter 1 · Quick start: index.md
-      - Chapter 2 · Architecture overview: https://github.com/system-in-miniature/mini-s3#repository-tour
-      - Chapter 3 · Mechanisms and Amazon S3 mapping: mapping.md
-      - Chapter 4 · Hands-on experiments:
+  - Tutorial:
+      - Book contents: tutorial/index.md
+      - 1 · Meet MiniS3: tutorial/01-getting-started.md
+      - 2 · Objects, flat keys, and ETags: tutorial/02-objects-etag.md
+      - 3 · Versioning and delete markers: tutorial/03-versioning.md
+      - 4 · Listing and the directory illusion: tutorial/04-listing.md
+      - 5 · Crash atomicity: tutorial/05-crash-atomicity.md
+      - 6 · Multipart upload: tutorial/06-multipart.md
+      - 7 · Conditional requests and CAS: tutorial/07-conditional.md
+      - 8 · Lifecycle expiration: tutorial/08-lifecycle.md
+      - 9 · Methodology and boundaries: tutorial/09-methodology.md
+  - 中文教程:
+      - 全书目录: zh/tutorial/index.md
+      - 第 1 章 · 认识 MiniS3: zh/tutorial/01-getting-started.md
+      - 第 2 章 · 对象、扁平 Key 与 ETag: zh/tutorial/02-objects-etag.md
+      - 第 3 章 · 版本化与删除标记: zh/tutorial/03-versioning.md
+      - 第 4 章 · List 与目录幻觉: zh/tutorial/04-listing.md
+      - 第 5 章 · 崩溃原子性: zh/tutorial/05-crash-atomicity.md
+      - 第 6 章 · 分片上传: zh/tutorial/06-multipart.md
+      - 第 7 章 · 条件请求与 CAS: zh/tutorial/07-conditional.md
+      - 第 8 章 · 生命周期过期: zh/tutorial/08-lifecycle.md
+      - 第 9 章 · 方法论与边界: zh/tutorial/09-methodology.md
+  - Reference:
+      - Quick start: index.md
+      - Architecture overview: https://github.com/system-in-miniature/mini-s3#repository-tour
+      - Mechanisms and Amazon S3 mapping: mapping.md
+      - Hands-on experiments:
           - Lab overview: labs-guide.md
           - Multipart ETag mystery: labs/multipart-etag.md
           - Conditional CAS: labs/conditional-cas.md
-      - Chapter 5 · Differences from Amazon S3: DIFFERENCES.md
-  - 中文版:
-      - 第 1 章 · 快速开始: zh/index.md
-      - 第 2 章 · 架构总览: https://github.com/system-in-miniature/mini-s3/blob/main/README.zh-CN.md
-      - 第 3 章 · 机制与 Amazon S3 映射: zh/mapping.md
-      - 第 4 章 · 动手实验:
+      - Differences from Amazon S3: DIFFERENCES.md
+  - 中文参考资料:
+      - 快速开始: zh/index.md
+      - 架构总览: https://github.com/system-in-miniature/mini-s3/blob/main/README.zh-CN.md
+      - 机制与 Amazon S3 映射: zh/mapping.md
+      - 动手实验:
           - Lab 总览: zh/labs-guide.md
           - Multipart ETag 之谜: zh/labs/multipart-etag.md
           - 条件 CAS: zh/labs/conditional-cas.md
-      - 第 5 章 · 与 Amazon S3 的差异: zh/DIFFERENCES.md
+      - 与 Amazon S3 的差异: zh/DIFFERENCES.md
   - Design history archive · 设计历史存档:
       - Archive notice · 存档说明: superpowers/README.md
       - M1 implementation plan: superpowers/plans/2026-07-30-minis3-m1.md
