@@ -1,0 +1,103 @@
+#!/usr/bin/env python3
+"""End-to-end tests for the learner-facing Journey workspace commands."""
+
+from __future__ import annotations
+
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
+import unittest
+
+
+ROOT = Path(__file__).resolve().parents[3]
+TOOL = ROOT / "journey" / "tools" / "build_journey.py"
+
+
+def run(
+    command: list[str],
+    *,
+    cwd: Path = ROOT,
+    check: bool = True,
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        command,
+        cwd=cwd,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        check=check,
+    )
+
+
+class LearningWorkspaceTest(unittest.TestCase):
+    def test_study_check_attempt_state_transition(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="minis3-journey-test-") as temporary:
+            workspace = Path(temporary) / "learner"
+            cli = [sys.executable, str(TOOL)]
+
+            help_output = run([*cli, "--help"]).stdout
+            self.assertIn("study N", help_output)
+            self.assertIn("attempt N", help_output)
+            self.assertIn("check N", help_output)
+
+            studied = run(
+                [*cli, "study", "2", "--workspace", str(workspace), "--yes"]
+            ).stdout
+            self.assertIn("[study stage-02] READY", studied)
+            self.assertIn("uncommitted reference patch", studied)
+            baseline_subject = run(
+                ["git", "log", "-1", "--pretty=%s"], cwd=workspace
+            ).stdout.strip()
+            self.assertEqual(baseline_subject, "journey baseline: stage-01")
+            first_status = run(
+                ["git", "status", "--short"], cwd=workspace
+            ).stdout
+            self.assertTrue(first_status.strip())
+
+            checked = run(
+                [*cli, "check", "2", "--workspace", str(workspace)]
+            ).stdout
+            self.assertIn("[check stage-02] PASS", checked)
+            self.assertIn("[reference diff --stat]", checked)
+            self.assertIn("(no differences)", checked)
+
+            run([*cli, "study", "2", "--workspace", str(workspace), "--yes"])
+            second_status = run(
+                ["git", "status", "--short"], cwd=workspace
+            ).stdout
+            self.assertEqual(second_status, first_status)
+
+            attempted = run(
+                [*cli, "attempt", "2", "--workspace", str(workspace), "--yes"]
+            ).stdout
+            self.assertIn("[attempt stage-02] READY", attempted)
+            self.assertIn(
+                str(
+                    ROOT
+                    / "journey"
+                    / "stages"
+                    / "02-bucket-state"
+                    / "goal.md"
+                ),
+                attempted,
+            )
+            self.assertIn("check 2", attempted)
+            self.assertEqual(
+                run(["git", "status", "--short"], cwd=workspace).stdout,
+                "",
+            )
+            self.assertEqual(
+                run(["git", "log", "-1", "--pretty=%s"], cwd=workspace)
+                .stdout.strip(),
+                "journey baseline: stage-01",
+            )
+            attempt_check = run(
+                [*cli, "check", "2", "--workspace", str(workspace)]
+            ).stdout
+            self.assertIn("[check stage-02] PASS", attempt_check)
+            self.assertIn("src/minis3/bucket.py", attempt_check)
+
+
+if __name__ == "__main__":
+    unittest.main()

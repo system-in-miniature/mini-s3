@@ -1,0 +1,204 @@
+# Stage 11 · Atomic multipart completion
+
+### Goal
+
+Validate an ordered client manifest, assemble bytes, and publish exactly one visible object.
+
+### Hands-on task
+
+Starting from stage-10, Implement `MiniS3.complete_multipart_upload(...)` and connect composite ETags to `Bucket.put(...)`. Keep all behavior inside the listed source-like boundaries; do not copy the patch first.
+
+### Deliverable files / 交付文件
+
+- `src/minis3/store.py`
+- `tests/test_multipart.py`
+
+### Self-check
+
+1. Where is this stage's visibility or state transition owned?
+
+    ??? note "Answer"
+        Completion becomes visible only through the same bucket-manifest publication boundary as PUT.
+
+2. Which test would fail first if the new boundary were bypassed?
+
+    ??? note "Answer"
+        Read `tests.txt`, identify the narrowest new node, and name the public call it exercises.
+
+### Pass command
+
+`uv run pytest -q $(cat journey/stages/11-multipart-complete/tests.txt)`
+
+### The real S3 lesson
+
+Completion becomes visible only through the same bucket-manifest publication boundary as PUT.
+
+### Textbook
+
+[Chapter 6](https://github.com/system-in-miniature/mini-s3/blob/main/docs/tutorial/06-multipart.md)
+
+[Compare this stage on GitHub](https://github.com/system-in-miniature/mini-s3/compare/stage-10...stage-11)
+
+After finishing, use `git checkout stage-11` to compare your result.
+
+??? note "Try first, then peek: stage.patch"
+    ```diff
+    diff --git a/src/minis3/store.py b/src/minis3/store.py
+    index 0d7e596..9b50aa2 100644
+    --- a/src/minis3/store.py
+    +++ b/src/minis3/store.py
+    @@ -177,6 +177,39 @@ class MiniS3:
+                 return part.receipt
+     
+     
+    +    def complete_multipart_upload(
+    +        self,
+    +        bucket: str,
+    +        key: str,
+    +        upload_id: str,
+    +        parts: list[CompletionEntry] | tuple[CompletionEntry, ...],
+    +    ) -> Version:
+    +        """Validate, assemble, and publish through the bucket manifest rename."""
+    +
+    +        with self._lock:
+    +            self._bucket(bucket)
+    +            _upload, staged = self._storage.load_multipart_upload(
+    +                bucket, key, upload_id
+    +            )
+    +            selected, etag = validate_completion(
+    +                staged, parts, minimum_part_size=self.minimum_part_size
+    +            )
+    +            body = b"".join(part.body for part in selected)
+    +            candidate = deepcopy(self._bucket(bucket))
+    +            result = candidate.put(
+    +                key,
+    +                body,
+    +                self._counter,
+    +                etag=etag,
+    +                now=self._clock(),
+    +                multipart_upload_id=upload_id,
+    +            )
+    +            self._storage.persist_bucket(candidate)
+    +            self._buckets[bucket] = candidate
+    +            self._storage.remove_multipart_upload(bucket, key, upload_id)
+    +            return result
+    +
+    +
+         def abort_multipart_upload(
+             self, bucket: str, key: str, upload_id: str
+         ) -> None:
+    diff --git a/tests/test_multipart.py b/tests/test_multipart.py
+    index 0b61034..adcb3f7 100644
+    --- a/tests/test_multipart.py
+    +++ b/tests/test_multipart.py
+    @@ -17,6 +17,104 @@ from minis3 import (
+     )
+     
+     
+    +def _md5(payload: bytes) -> bytes:
+    +    return md5(payload, usedforsecurity=False).digest()
+    +
+    +
+    +def test_multipart_is_invisible_until_ordered_atomic_complete(
+    +    tmp_path: Path,
+    +) -> None:
+    +    store = MiniS3(tmp_path, counter=SequenceCounter(), minimum_part_size=3)
+    +    store.create_bucket("b")
+    +    upload = store.create_multipart_upload("b", "movie")
+    +    second = store.upload_part("b", "movie", upload.upload_id, 2, b"end")
+    +    first = store.upload_part("b", "movie", upload.upload_id, 1, b"abc")
+    +
+    +    with pytest.raises(NoSuchKey):
+    +        store.get_object("b", "movie")
+    +    assert store.list_objects("b").contents == ()
+    +
+    +    completed = store.complete_multipart_upload(
+    +        "b", "movie", upload.upload_id, [first, second]
+    +    )
+    +
+    +    expected = md5(_md5(b"abc") + _md5(b"end"), usedforsecurity=False).hexdigest()
+    +    assert completed.body == b"abcend"
+    +    assert completed.etag == f'"{expected}-2"'
+    +    assert completed.etag != content_etag(completed.body)
+    +    assert [item.key for item in store.list_objects("b").contents] == ["movie"]
+    +
+    +
+    +def test_uploading_same_part_number_replaces_the_staged_part(tmp_path: Path) -> None:
+    +    store = MiniS3(tmp_path, minimum_part_size=3)
+    +    store.create_bucket("b")
+    +    upload = store.create_multipart_upload("b", "k")
+    +    store.upload_part("b", "k", upload.upload_id, 1, b"old")
+    +    first = store.upload_part("b", "k", upload.upload_id, 1, b"new")
+    +    last = store.upload_part("b", "k", upload.upload_id, 2, b"x")
+    +
+    +    completed = store.complete_multipart_upload(
+    +        "b", "k", upload.upload_id, [first, last]
+    +    )
+    +
+    +    assert completed.body == b"newx"
+    +
+    +
+    +def test_complete_validates_order_presence_etag_and_nonfinal_size(
+    +    tmp_path: Path,
+    +) -> None:
+    +    store = MiniS3(tmp_path, minimum_part_size=3)
+    +    store.create_bucket("b")
+    +    upload = store.create_multipart_upload("b", "k")
+    +    small = store.upload_part("b", "k", upload.upload_id, 1, b"x")
+    +    final = store.upload_part("b", "k", upload.upload_id, 2, b"last")
+    +
+    +    with pytest.raises(InvalidPartOrder):
+    +        store.complete_multipart_upload(
+    +            "b", "k", upload.upload_id, [final, small]
+    +        )
+    +    with pytest.raises(InvalidPart):
+    +        store.complete_multipart_upload(
+    +            "b",
+    +            "k",
+    +            upload.upload_id,
+    +            [(1, '"00000000000000000000000000000000"'), final],
+    +        )
+    +    with pytest.raises(InvalidPart):
+    +        store.complete_multipart_upload(
+    +            "b", "k", upload.upload_id, [(3, final.etag)]
+    +        )
+    +    with pytest.raises(EntityTooSmall):
+    +        store.complete_multipart_upload(
+    +            "b", "k", upload.upload_id, [small, final]
+    +        )
+    +
+    +    # A small part is legal when the completion manifest makes it the last.
+    +    completed = store.complete_multipart_upload(
+    +        "b", "k", upload.upload_id, [small]
+    +    )
+    +    assert completed.body == b"x"
+    +
+    +
+    +def test_abort_removes_upload_and_restart_preserves_unfinished_parts(
+    +    tmp_path: Path,
+    +) -> None:
+    +    store = MiniS3(tmp_path, minimum_part_size=3)
+    +    store.create_bucket("b")
+    +    upload = store.create_multipart_upload("b", "k")
+    +    first = store.upload_part("b", "k", upload.upload_id, 1, b"abc")
+    +
+    +    reopened = MiniS3(tmp_path, minimum_part_size=3)
+    +    last = reopened.upload_part("b", "k", upload.upload_id, 2, b"x")
+    +    reopened.abort_multipart_upload("b", "k", upload.upload_id)
+    +
+    +    with pytest.raises(NoSuchUpload):
+    +        reopened.complete_multipart_upload(
+    +            "b", "k", upload.upload_id, [first, last]
+    +        )
+    +    assert not list(tmp_path.rglob(upload.upload_id))
+    +
+    +
+     def test_upload_identity_and_part_number_are_validated(tmp_path: Path) -> None:
+         store = MiniS3(tmp_path)
+         store.create_bucket("b")
+    @@ -28,3 +126,4 @@ def test_upload_identity_and_part_number_are_validated(tmp_path: Path) -> None:
+             store.upload_part("b", "right", upload.upload_id, 0, b"x")
+         with pytest.raises(ValueError):
+             store.upload_part("b", "right", upload.upload_id, 10_001, b"x")
+    +
+    ```
