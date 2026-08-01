@@ -15,27 +15,7 @@
 
 发布前测试在 `before_manifest_publish` 崩溃，重开后使用同一个 upload 成功完成。如果恢复一律删除 Staging，即使对象从未提交也无法重试。
 
-### 基本概念
-
-发布前，Staging 是完成请求唯一持久所有者，必须保留。发布后，对象版本的 `multipart_upload_id` 证明该 upload 已提交，残留 Staging 就是可删除冗余。
-
-### 为什么需要这个机制
-
-只看目录存在无法区分“未完成上传”和“提交后清理被崩溃打断”。用已发布来源关联 upload ID，两个场景都有确定答案。
-
-### 运行时心智模型
-
-每条测试准备持久 upload 与 parts，注入一个崩溃点，丢弃崩溃服务再重开。Before 场景重试完成；After 场景读取对象，并确认 Abort 得到 `NoSuchUpload`，因为恢复已清理 Staging。
-
-### 机制板块
-
-#### Multipart 发布恢复
-
-证明完成操作在 Manifest 发布两侧崩溃时，只会恢复到旧对象或新对象的精确可见状态。
-
-??? note "查看本板块差异（1 个文件）"
-    **`tests/test_storage.py`**
-
+??? note "文件差异：tests/test_storage.py"
     ```diff
     diff --git a/tests/test_storage.py b/tests/test_storage.py
     index afc9a8a..96bc973 100644
@@ -115,9 +95,6 @@
     +        reopened.abort_multipart_upload("b", "movie", upload.upload_id)
     ```
 
-
-**讲解: `tests/test_storage.py`**
-
 **是什么，为什么现在需要**
 
 存储恢复套件增加 Multipart 完成的双侧崩溃契约。
@@ -135,6 +112,24 @@ assert reopened.get_object("b", "movie").body == b"abcx"
 **关键语句理解**
 
 在发布后场景，即使清理尚未运行，可见完整对象仍是权威。恢复必须保留它，只删除匹配的 upload Staging。
+
+### 基本概念
+
+发布前，Staging 是完成请求唯一持久所有者，必须保留。发布后，对象版本的 `multipart_upload_id` 证明该 upload 已提交，残留 Staging 就是可删除冗余。
+
+### 为什么需要这个机制
+
+只看目录存在无法区分“未完成上传”和“提交后清理被崩溃打断”。用已发布来源关联 upload ID，两个场景都有确定答案。
+
+### 运行时心智模型
+
+每条测试准备持久 upload 与 parts，注入一个崩溃点，丢弃崩溃服务再重开。Before 场景重试完成；After 场景读取对象，并确认 Abort 得到 `NoSuchUpload`，因为恢复已清理 Staging。
+
+### 机制板块
+
+#### Multipart 发布恢复
+
+证明完成操作在 Manifest 发布两侧崩溃时，只会恢复到旧对象或新对象的精确可见状态。
 
 ### 验证证据
 

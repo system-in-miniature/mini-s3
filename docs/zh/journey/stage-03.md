@@ -18,6 +18,52 @@ Stage 02 已有正确内存历史，但进程退出就会全部消失。直接�
 
 存储契约写入 Bucket 后，用同一目录创建全新的 `DiskStorage`，要求恢复完全相同的 Body、ETag、版本和最大序列。缺少 fsync 或发布顺序错误可能在进程内读取时看不出来，却会在这次重启观察中失败。
 
+??? note "文件差异：tests/test_storage_boundary.py"
+    ```diff
+    diff --git a/tests/test_storage_boundary.py b/tests/test_storage_boundary.py
+    new file mode 100644
+    index 0000000..74c9d9e
+    --- /dev/null
+    +++ b/tests/test_storage_boundary.py
+    @@ -0,0 +1,18 @@
+    +"""Focused contract for manifest publication before service wiring."""
+    +
+    +from minis3.bucket import Bucket, SequenceCounter, VersioningState
+    +from minis3.storage import DiskStorage
+    +
+    +
+    +def test_disk_storage_publishes_and_recovers_one_complete_bucket(tmp_path) -> None:
+    +    storage = DiskStorage(tmp_path)
+    +    bucket = Bucket("b", versioning=VersioningState.ENABLED)
+    +    version = bucket.put("key", b"value", SequenceCounter())
+    +
+    +    storage.create_bucket(Bucket("b"))
+    +    storage.persist_bucket(bucket)
+    +    recovered, maximum_sequence = DiskStorage(tmp_path).load_buckets()
+    +
+    +    assert recovered["b"].get("key") == version
+    +    assert maximum_sequence == version.sequence
+    +    assert not list(tmp_path.rglob("*.tmp-*"))
+    ```
+
+**是什么，为什么现在需要**
+
+这是第一条存储契约，证明一个完整 Bucket 能跨越类似进程重启的边界。
+
+**在运行时做什么**
+
+它持久化状态、创建新适配器，再比较恢复后的值与序列元数据。它比序列化单测更广，但还没到公开 MiniS3 服务。
+
+**关键代码**
+
+```python
+recovered, maximum_sequence = DiskStorage(tmp_path).load_buckets()
+```
+
+**关键语句理解**
+
+必须使用新适配器；读取原内存 Bucket 无法证明字节已发布并可恢复。返回 `maximum` 还能避免未来复用序列。
+
 ### 基本概念
 
 原子可见性与持久性不是一件事。`os.replace` 让读者看到旧完整文件或新完整文件；文件 `fsync` 持久化内容字节，父目录 `fsync` 持久化名称变化。
@@ -38,9 +84,7 @@ MiniS3 保存不可变数据/元数据 Artifact 与较小的可变 `manifest.jso
 
 把原子文件替换、不可变 Artifact、Manifest 可见性和重启重建连成一套持久化协议。
 
-??? note "查看本板块差异（3 个文件）"
-    **`src/minis3/storage/atomic.py`**
-
+??? note "文件差异：src/minis3/storage/atomic.py"
     ```diff
     diff --git a/src/minis3/storage/atomic.py b/src/minis3/storage/atomic.py
     new file mode 100644
@@ -107,8 +151,26 @@ MiniS3 保存不可变数据/元数据 Artifact 与较小的可变 `manifest.jso
     +    fsync_directory(path.parent)
     ```
 
-    **`src/minis3/storage/disk.py`**
+**是什么，为什么现在需要**
 
+这个文件拥有可复用的文件系统发布原语，不负责 S3 领域决策。
+
+**在运行时做什么**
+
+当文件或目录项必须跨崩溃保存时，DiskStorage 调用它；这里是检查可见性与持久化顺序的最底层边界。
+
+**关键代码**
+
+```python
+os.replace(temporary, path)
+fsync_directory(path.parent)
+```
+
+**关键语句理解**
+
+replace 改变最终名称指向哪份完整文件，随后的目录 fsync 才持久化这次 rename。省略第二行可能出现“现在看得到，掉电后却消失”。
+
+??? note "文件差异：src/minis3/storage/disk.py"
     ```diff
     diff --git a/src/minis3/storage/disk.py b/src/minis3/storage/disk.py
     new file mode 100644
@@ -345,59 +407,6 @@ MiniS3 保存不可变数据/元数据 Artifact 与较小的可变 `manifest.jso
     +                path.rmdir()
     ```
 
-    **`tests/test_storage_boundary.py`**
-
-    ```diff
-    diff --git a/tests/test_storage_boundary.py b/tests/test_storage_boundary.py
-    new file mode 100644
-    index 0000000..74c9d9e
-    --- /dev/null
-    +++ b/tests/test_storage_boundary.py
-    @@ -0,0 +1,18 @@
-    +"""Focused contract for manifest publication before service wiring."""
-    +
-    +from minis3.bucket import Bucket, SequenceCounter, VersioningState
-    +from minis3.storage import DiskStorage
-    +
-    +
-    +def test_disk_storage_publishes_and_recovers_one_complete_bucket(tmp_path) -> None:
-    +    storage = DiskStorage(tmp_path)
-    +    bucket = Bucket("b", versioning=VersioningState.ENABLED)
-    +    version = bucket.put("key", b"value", SequenceCounter())
-    +
-    +    storage.create_bucket(Bucket("b"))
-    +    storage.persist_bucket(bucket)
-    +    recovered, maximum_sequence = DiskStorage(tmp_path).load_buckets()
-    +
-    +    assert recovered["b"].get("key") == version
-    +    assert maximum_sequence == version.sequence
-    +    assert not list(tmp_path.rglob("*.tmp-*"))
-    ```
-
-
-**讲解: `src/minis3/storage/atomic.py`**
-
-**是什么，为什么现在需要**
-
-这个文件拥有可复用的文件系统发布原语，不负责 S3 领域决策。
-
-**在运行时做什么**
-
-当文件或目录项必须跨崩溃保存时，DiskStorage 调用它；这里是检查可见性与持久化顺序的最底层边界。
-
-**关键代码**
-
-```python
-os.replace(temporary, path)
-fsync_directory(path.parent)
-```
-
-**关键语句理解**
-
-replace 改变最终名称指向哪份完整文件，随后的目录 fsync 才持久化这次 rename。省略第二行可能出现“现在看得到，掉电后却消失”。
-
-**讲解: `src/minis3/storage/disk.py`**
-
 **是什么，为什么现在需要**
 
 这是 Bucket 磁盘布局、Manifest 发布和启动恢复的唯一所有者。
@@ -418,31 +427,11 @@ self._inject("after_manifest_publish")
 
 Manifest 写入被两个命名崩溃点夹住，因为它正是可见性边界。此前的 Artifact 尚未被引用；此后恢复必须把新状态视为已提交。
 
-**讲解: `tests/test_storage_boundary.py`**
-
-**是什么，为什么现在需要**
-
-这是第一条存储契约，证明一个完整 Bucket 能跨越类似进程重启的边界。
-
-**在运行时做什么**
-
-它持久化状态、创建新适配器，再比较恢复后的值与序列元数据。它比序列化单测更广，但还没到公开 MiniS3 服务。
-
-**关键代码**
-
-```python
-recovered, maximum_sequence = DiskStorage(tmp_path).load_buckets()
-```
-
-**关键语句理解**
-
-必须使用新适配器；读取原内存 Bucket 无法证明字节已发布并可恢复。返回 `maximum` 还能避免未来复用序列。
-
 #### 存储包接线
 
 向后续服务代码暴露存储边界；本 Stage 的导出层不引入独立机制。
 
-??? note "查看本板块差异（1 个文件）"
+??? note "支撑文件差异（1 个文件）"
     **`src/minis3/storage/__init__.py`**
 
     ```diff

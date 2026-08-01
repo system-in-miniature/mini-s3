@@ -19,6 +19,115 @@
 
 并发契约让两个写入者携带相同初始 ETag。只能有一个通过 `If-Match`；第二个必须看到变化后的当前 ETag 并失败。如果检查在变更锁外，两者都可能校验旧状态并同时获胜。
 
+??? note "文件差异：tests/test_conditional.py"
+    ```diff
+    diff --git a/tests/test_conditional.py b/tests/test_conditional.py
+    new file mode 100644
+    index 0000000..137e7a1
+    --- /dev/null
+    +++ b/tests/test_conditional.py
+    @@ -0,0 +1,81 @@
+    +"""Conditional requests turn current ETags into an object-level CAS token."""
+    +
+    +from concurrent.futures import ThreadPoolExecutor
+    +from pathlib import Path
+    +from threading import Barrier
+    +
+    +import pytest
+    +
+    +from minis3 import MiniS3, NoSuchKey, NotModified, PreconditionFailed
+    +
+    +
+    +def test_get_if_none_match_has_304_semantics_and_if_match_has_412(
+    +    tmp_path: Path,
+    +) -> None:
+    +    store = MiniS3(tmp_path)
+    +    store.create_bucket("b")
+    +    current = store.put_object("b", "k", b"value")
+    +
+    +    with pytest.raises(NotModified):
+    +        store.get_object("b", "k", if_none_match=current.etag)
+    +    with pytest.raises(NotModified):
+    +        store.get_object("b", "k", if_none_match="*")
+    +    with pytest.raises(PreconditionFailed):
+    +        store.get_object(
+    +            "b", "k", if_match='"00000000000000000000000000000000"'
+    +        )
+    +    assert store.get_object("b", "k", if_match=current.etag) == current
+    +
+    +
+    +def test_put_and_delete_if_match_compare_against_current_visible_etag(
+    +    tmp_path: Path,
+    +) -> None:
+    +    store = MiniS3(tmp_path)
+    +    store.create_bucket("b")
+    +    initial = store.put_object("b", "k", b"old")
+    +    winner = store.put_object("b", "k", b"new", if_match=initial.etag)
+    +
+    +    with pytest.raises(PreconditionFailed):
+    +        store.put_object("b", "k", b"stale", if_match=initial.etag)
+    +    with pytest.raises(PreconditionFailed):
+    +        store.delete_object("b", "k", if_match=initial.etag)
+    +
+    +    removed = store.delete_object("b", "k", if_match=winner.etag)
+    +    assert removed is None
+    +    with pytest.raises(NoSuchKey):
+    +        store.get_object("b", "k")
+    +
+    +
+    +def test_if_match_wildcard_requires_a_current_visible_object(tmp_path: Path) -> None:
+    +    store = MiniS3(tmp_path)
+    +    store.create_bucket("b")
+    +
+    +    with pytest.raises(PreconditionFailed):
+    +        store.put_object("b", "missing", b"x", if_match="*")
+    +    with pytest.raises(PreconditionFailed):
+    +        store.delete_object("b", "missing", if_match="*")
+    +
+    +    store.put_object("b", "present", b"x")
+    +    assert store.put_object("b", "present", b"y", if_match="*").body == b"y"
+    +
+    +
+    +def test_two_conditional_writers_have_exactly_one_winner(tmp_path: Path) -> None:
+    +    store = MiniS3(tmp_path)
+    +    store.create_bucket("b")
+    +    observed = store.put_object("b", "counter", b"0").etag
+    +    barrier = Barrier(2)
+    +
+    +    def writer(value: bytes) -> str:
+    +        barrier.wait()
+    +        try:
+    +            store.put_object("b", "counter", value, if_match=observed)
+    +        except PreconditionFailed:
+    +            return "412"
+    +        return "stored"
+    +
+    +    with ThreadPoolExecutor(max_workers=2) as pool:
+    +        outcomes = list(pool.map(writer, (b"writer-a", b"writer-b")))
+    +
+    +    assert sorted(outcomes) == ["412", "stored"]
+    +    assert store.get_object("b", "counter").body in {b"writer-a", b"writer-b"}
+    +
+    ```
+
+**是什么，为什么现在需要**
+
+四条契约覆盖 GET 校验、变更 guard、wildcard 和双写者 CAS 竞争。
+
+**在运行时做什么**
+
+线程测试证明顺序 helper 单测无法证明的串行化行为。
+
+**关键代码**
+
+```python
+assert sorted(outcomes) == ["412", "stored"]
+```
+
+**关键语句理解**
+
+一个 `stored` 与一个 `412` 是外部可见 CAS 保证；两个 stored 会证明检查与变更并不原子。
+
 ### 基本概念
 
 GET 的 `If-None-Match` 是缓存校验：匹配表示 representation 未修改（304 语义）。`If-Match` 是前置条件：不匹配表示请求不能作用于当前状态（412 语义）。
@@ -39,9 +148,7 @@ Compare-and-swap 表示“只有当前身份仍等于我观察到的身份才修
 
 把通配符和 ETag 列表匹配从变更中分离，并定义精确的公开失败语义。
 
-??? note "查看本板块差异（2 个文件）"
-    **`src/minis3/conditional.py`**
-
+??? note "文件差异：src/minis3/conditional.py"
     ```diff
     diff --git a/src/minis3/conditional.py b/src/minis3/conditional.py
     new file mode 100644
@@ -86,30 +193,6 @@ Compare-and-swap 表示“只有当前身份仍等于我观察到的身份才修
     +        raise NotModified(condition)
     ```
 
-    **`src/minis3/errors.py`**
-
-    ```diff
-    diff --git a/src/minis3/errors.py b/src/minis3/errors.py
-    index 9db3b4c..5f255e0 100644
-    --- a/src/minis3/errors.py
-    +++ b/src/minis3/errors.py
-    @@ -43,3 +43,11 @@ class InvalidPartOrder(MiniS3Error):
-
-     class EntityTooSmall(MiniS3Error):
-         """A non-final multipart part is below the configured minimum size."""
-    +
-    +
-    +class PreconditionFailed(MiniS3Error):
-    +    """An If-Match condition failed (the S3-shaped HTTP 412 outcome)."""
-    +
-    +
-    +class NotModified(MiniS3Error):
-    +    """An If-None-Match condition matched (the HTTP 304 control outcome)."""
-    ```
-
-
-**讲解: `src/minis3/conditional.py`**
-
 **是什么，为什么现在需要**
 
 这个纯策略模块解析 ETag 条件并抛出正确语义失败。
@@ -129,7 +212,25 @@ if condition is not None and not etag_matches(condition, current_etag):
 
 条件缺失表示不加 guard；条件存在但不匹配必须在变更前停止。只返回可能被调用方忽略的 `False` 会削弱契约。
 
-**讲解: `src/minis3/errors.py`**
+??? note "文件差异：src/minis3/errors.py"
+    ```diff
+    diff --git a/src/minis3/errors.py b/src/minis3/errors.py
+    index 9db3b4c..5f255e0 100644
+    --- a/src/minis3/errors.py
+    +++ b/src/minis3/errors.py
+    @@ -43,3 +43,11 @@ class InvalidPartOrder(MiniS3Error):
+
+     class EntityTooSmall(MiniS3Error):
+         """A non-final multipart part is below the configured minimum size."""
+    +
+    +
+    +class PreconditionFailed(MiniS3Error):
+    +    """An If-Match condition failed (the S3-shaped HTTP 412 outcome)."""
+    +
+    +
+    +class NotModified(MiniS3Error):
+    +    """An If-None-Match condition matched (the HTTP 304 control outcome)."""
+    ```
 
 **是什么，为什么现在需要**
 
@@ -153,9 +254,7 @@ Not-modified 是校验器的控制流证据，不能和针对旧状态的变更�
 
 在同一把锁下判断前置条件并执行 PUT、GET 或 DELETE，使过期写入者无法获胜。
 
-??? note "查看本板块差异（2 个文件）"
-    **`src/minis3/store.py`**
-
+??? note "文件差异：src/minis3/store.py"
     ```diff
     diff --git a/src/minis3/store.py b/src/minis3/store.py
     index 9b50aa2..e47e1ac 100644
@@ -267,101 +366,6 @@ Not-modified 是校验器的控制流证据，不能和针对旧状态的变更�
                  return self._buckets[name]
     ```
 
-    **`tests/test_conditional.py`**
-
-    ```diff
-    diff --git a/tests/test_conditional.py b/tests/test_conditional.py
-    new file mode 100644
-    index 0000000..137e7a1
-    --- /dev/null
-    +++ b/tests/test_conditional.py
-    @@ -0,0 +1,81 @@
-    +"""Conditional requests turn current ETags into an object-level CAS token."""
-    +
-    +from concurrent.futures import ThreadPoolExecutor
-    +from pathlib import Path
-    +from threading import Barrier
-    +
-    +import pytest
-    +
-    +from minis3 import MiniS3, NoSuchKey, NotModified, PreconditionFailed
-    +
-    +
-    +def test_get_if_none_match_has_304_semantics_and_if_match_has_412(
-    +    tmp_path: Path,
-    +) -> None:
-    +    store = MiniS3(tmp_path)
-    +    store.create_bucket("b")
-    +    current = store.put_object("b", "k", b"value")
-    +
-    +    with pytest.raises(NotModified):
-    +        store.get_object("b", "k", if_none_match=current.etag)
-    +    with pytest.raises(NotModified):
-    +        store.get_object("b", "k", if_none_match="*")
-    +    with pytest.raises(PreconditionFailed):
-    +        store.get_object(
-    +            "b", "k", if_match='"00000000000000000000000000000000"'
-    +        )
-    +    assert store.get_object("b", "k", if_match=current.etag) == current
-    +
-    +
-    +def test_put_and_delete_if_match_compare_against_current_visible_etag(
-    +    tmp_path: Path,
-    +) -> None:
-    +    store = MiniS3(tmp_path)
-    +    store.create_bucket("b")
-    +    initial = store.put_object("b", "k", b"old")
-    +    winner = store.put_object("b", "k", b"new", if_match=initial.etag)
-    +
-    +    with pytest.raises(PreconditionFailed):
-    +        store.put_object("b", "k", b"stale", if_match=initial.etag)
-    +    with pytest.raises(PreconditionFailed):
-    +        store.delete_object("b", "k", if_match=initial.etag)
-    +
-    +    removed = store.delete_object("b", "k", if_match=winner.etag)
-    +    assert removed is None
-    +    with pytest.raises(NoSuchKey):
-    +        store.get_object("b", "k")
-    +
-    +
-    +def test_if_match_wildcard_requires_a_current_visible_object(tmp_path: Path) -> None:
-    +    store = MiniS3(tmp_path)
-    +    store.create_bucket("b")
-    +
-    +    with pytest.raises(PreconditionFailed):
-    +        store.put_object("b", "missing", b"x", if_match="*")
-    +    with pytest.raises(PreconditionFailed):
-    +        store.delete_object("b", "missing", if_match="*")
-    +
-    +    store.put_object("b", "present", b"x")
-    +    assert store.put_object("b", "present", b"y", if_match="*").body == b"y"
-    +
-    +
-    +def test_two_conditional_writers_have_exactly_one_winner(tmp_path: Path) -> None:
-    +    store = MiniS3(tmp_path)
-    +    store.create_bucket("b")
-    +    observed = store.put_object("b", "counter", b"0").etag
-    +    barrier = Barrier(2)
-    +
-    +    def writer(value: bytes) -> str:
-    +        barrier.wait()
-    +        try:
-    +            store.put_object("b", "counter", value, if_match=observed)
-    +        except PreconditionFailed:
-    +            return "412"
-    +        return "stored"
-    +
-    +    with ThreadPoolExecutor(max_workers=2) as pool:
-    +        outcomes = list(pool.map(writer, (b"writer-a", b"writer-b")))
-    +
-    +    assert sorted(outcomes) == ["412", "stored"]
-    +    assert store.get_object("b", "counter").body in {b"writer-a", b"writer-b"}
-    +
-    ```
-
-
-**讲解: `src/minis3/store.py`**
-
 **是什么，为什么现在需要**
 
 公开 GET、PUT、DELETE 接受条件参数，并在已有锁内计算。
@@ -380,31 +384,11 @@ require_if_match(self._current_etag(candidate, key), if_match)
 
 检查在服务锁内读取候选快照；从这行到变更之间，不会有其他写入者改变当前可见 ETag。
 
-**讲解: `tests/test_conditional.py`**
-
-**是什么，为什么现在需要**
-
-四条契约覆盖 GET 校验、变更 guard、wildcard 和双写者 CAS 竞争。
-
-**在运行时做什么**
-
-线程测试证明顺序 helper 单测无法证明的串行化行为。
-
-**关键代码**
-
-```python
-assert sorted(outcomes) == ["412", "stored"]
-```
-
-**关键语句理解**
-
-一个 `stored` 与一个 `412` 是外部可见 CAS 保证；两个 stored 会证明检查与变更并不原子。
-
 #### 公开导出接线
 
 导出条件失败类型，同时让匹配和变更所有权留在两个核心板块。
 
-??? note "查看本板块差异（1 个文件）"
+??? note "支撑文件差异（1 个文件）"
     **`src/minis3/__init__.py`**
 
     ```diff

@@ -17,6 +17,74 @@ Whole-object PUT 无法表示客户端把大内容拆成可独立重试的 Part�
 
 领域契约提供暂存 Part 与客户端完成清单。调换两个条目必须得到 `InvalidPartOrder`；Part 正确但 ETag 错误必须得到 `InvalidPart`。没有这些检查，完成操作可能静默拼装客户端未授权的字节。
 
+??? note "文件差异：tests/test_multipart_domain.py"
+    ```diff
+    diff --git a/tests/test_multipart_domain.py b/tests/test_multipart_domain.py
+    new file mode 100644
+    index 0000000..9b7026a
+    --- /dev/null
+    +++ b/tests/test_multipart_domain.py
+    @@ -0,0 +1,40 @@
+    +"""Focused contract for multipart validation before storage orchestration."""
+    +
+    +from hashlib import md5
+    +
+    +import pytest
+    +
+    +from minis3.errors import EntityTooSmall, InvalidPartOrder
+    +from minis3.multipart import StagedPart, validate_completion
+    +
+    +
+    +def test_completion_validation_orders_parts_and_hashes_binary_digests() -> None:
+    +    first = StagedPart(1, b"abc")
+    +    last = StagedPart(2, b"x")
+    +    staged = {1: first, 2: last}
+    +
+    +    selected, etag = validate_completion(
+    +        staged,
+    +        [first.receipt, last.receipt],
+    +        minimum_part_size=3,
+    +    )
+    +
+    +    binary_digests = b"".join(
+    +        md5(part.body, usedforsecurity=False).digest() for part in selected
+    +    )
+    +    expected = md5(binary_digests, usedforsecurity=False).hexdigest()
+    +    assert selected == (first, last)
+    +    assert etag == f'"{expected}-2"'
+    +
+    +    with pytest.raises(InvalidPartOrder):
+    +        validate_completion(
+    +            staged,
+    +            [last.receipt, first.receipt],
+    +            minimum_part_size=3,
+    +        )
+    +    with pytest.raises(EntityTooSmall):
+    +        validate_completion(
+    +            {1: StagedPart(1, b"a"), 2: last},
+    +            [StagedPart(1, b"a").receipt, last.receipt],
+    +            minimum_part_size=3,
+    +        )
+    ```
+
+**是什么，为什么现在需要**
+
+这个聚焦契约在加入持久暂存以前就让完成规则可见。
+
+**在运行时做什么**
+
+它提供显式暂存 Part 与清单，证明可接受顺序/组合 ETag 和主要拒绝路径。
+
+**关键代码**
+
+```python
+def test_completion_validation_orders_parts_and_hashes_binary_digests() -> None:
+```
+
+**关键语句理解**
+
+测试名锁定两个独立义务：客户端顺序有语义，组合哈希使用二进制摘要而不是十六进制文本拼接。
+
 ### 基本概念
 
 `MultipartUpload` 标识一次私有暂存会话。`StagedPart` 拥有字节并派生 receipt（Part 编号、ETag、size）。完成清单是客户端对“哪些暂存 Part 按什么顺序组成对象”的声明。
@@ -37,9 +105,7 @@ Multipart ETag 不是组装后 Body 的 MD5。MiniS3 把每个带引号 Part MD5
 
 把上传身份、有序 Part 回执、校验失败和组合 ETag 计算定义成纯领域契约。
 
-??? note "查看本板块差异（3 个文件）"
-    **`src/minis3/errors.py`**
-
+??? note "文件差异：src/minis3/errors.py"
     ```diff
     diff --git a/src/minis3/errors.py b/src/minis3/errors.py
     index e1a2230..9db3b4c 100644
@@ -66,8 +132,25 @@ Multipart ETag 不是组装后 Body 的 MD5。MiniS3 把每个带引号 Part MD5
     +    """A non-final multipart part is below the configured minimum size."""
     ```
 
-    **`src/minis3/multipart.py`**
+**是什么，为什么现在需要**
 
+公开失败词汇增加缺上传、无效 Part、顺序无效和 Part 太小。
+
+**在运行时做什么**
+
+领域验证和后续服务/存储共享这些精确类型，使调用方能区分上传身份错误与无效完成请求。
+
+**关键代码**
+
+```python
+class EntityTooSmall(MiniS3Error):
+```
+
+**关键语句理解**
+
+Part 尺寸错误不是普通 `ValueError`，而是公开边界含义稳定的 S3 风格完成失败。
+
+??? note "文件差异：src/minis3/multipart.py"
     ```diff
     diff --git a/src/minis3/multipart.py b/src/minis3/multipart.py
     new file mode 100644
@@ -184,80 +267,6 @@ Multipart ETag 不是组装后 Body 的 MD5。MiniS3 把每个带引号 Part MD5
     +    return tuple(selected), f'"{composite}-{len(selected)}"'
     ```
 
-    **`tests/test_multipart_domain.py`**
-
-    ```diff
-    diff --git a/tests/test_multipart_domain.py b/tests/test_multipart_domain.py
-    new file mode 100644
-    index 0000000..9b7026a
-    --- /dev/null
-    +++ b/tests/test_multipart_domain.py
-    @@ -0,0 +1,40 @@
-    +"""Focused contract for multipart validation before storage orchestration."""
-    +
-    +from hashlib import md5
-    +
-    +import pytest
-    +
-    +from minis3.errors import EntityTooSmall, InvalidPartOrder
-    +from minis3.multipart import StagedPart, validate_completion
-    +
-    +
-    +def test_completion_validation_orders_parts_and_hashes_binary_digests() -> None:
-    +    first = StagedPart(1, b"abc")
-    +    last = StagedPart(2, b"x")
-    +    staged = {1: first, 2: last}
-    +
-    +    selected, etag = validate_completion(
-    +        staged,
-    +        [first.receipt, last.receipt],
-    +        minimum_part_size=3,
-    +    )
-    +
-    +    binary_digests = b"".join(
-    +        md5(part.body, usedforsecurity=False).digest() for part in selected
-    +    )
-    +    expected = md5(binary_digests, usedforsecurity=False).hexdigest()
-    +    assert selected == (first, last)
-    +    assert etag == f'"{expected}-2"'
-    +
-    +    with pytest.raises(InvalidPartOrder):
-    +        validate_completion(
-    +            staged,
-    +            [last.receipt, first.receipt],
-    +            minimum_part_size=3,
-    +        )
-    +    with pytest.raises(EntityTooSmall):
-    +        validate_completion(
-    +            {1: StagedPart(1, b"a"), 2: last},
-    +            [StagedPart(1, b"a").receipt, last.receipt],
-    +            minimum_part_size=3,
-    +        )
-    ```
-
-
-**讲解: `src/minis3/errors.py`**
-
-**是什么，为什么现在需要**
-
-公开失败词汇增加缺上传、无效 Part、顺序无效和 Part 太小。
-
-**在运行时做什么**
-
-领域验证和后续服务/存储共享这些精确类型，使调用方能区分上传身份错误与无效完成请求。
-
-**关键代码**
-
-```python
-class EntityTooSmall(MiniS3Error):
-```
-
-**关键语句理解**
-
-Part 尺寸错误不是普通 `ValueError`，而是公开边界含义稳定的 S3 风格完成失败。
-
-**讲解: `src/minis3/multipart.py`**
-
 **是什么，为什么现在需要**
 
 这里拥有 Multipart 领域值与纯完成验证器。
@@ -275,26 +284,6 @@ return tuple(selected), f'"{composite}-{len(selected)}"'
 **关键语句理解**
 
 返回值把已验证顺序和派生组合指纹绑定在一起；`-N` 记录 Part 数，也让 Multipart ETag 与普通 ETag 可区分。
-
-**讲解: `tests/test_multipart_domain.py`**
-
-**是什么，为什么现在需要**
-
-这个聚焦契约在加入持久暂存以前就让完成规则可见。
-
-**在运行时做什么**
-
-它提供显式暂存 Part 与清单，证明可接受顺序/组合 ETag 和主要拒绝路径。
-
-**关键代码**
-
-```python
-def test_completion_validation_orders_parts_and_hashes_binary_digests() -> None:
-```
-
-**关键语句理解**
-
-测试名锁定两个独立义务：客户端顺序有语义，组合哈希使用二进制摘要而不是十六进制文本拼接。
 
 ### 验证证据
 

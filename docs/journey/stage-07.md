@@ -15,27 +15,7 @@ Stage 03 described publish-last storage, and clean restarts pass. That is not ye
 
 One test injects `before_manifest_publish` after new artifacts are durable. Reopening must still return the old object and remove the unreferenced new artifact. If artifact existence alone controls visibility, the new value leaks despite the manifest never committing it.
 
-### Basic concepts
-
-A linearization point is the instant a concurrent or recovering observer treats an operation as having taken effect. A crash matrix probes both sides: before the point the old state wins; after the point the complete new state wins. There is no legal half-state.
-
-### Why this mechanism is necessary
-
-Documentation and happy-path tests cannot prove crash atomicity. Deliberate process-like interruption turns publication order into executable evidence and prevents a future refactor from moving visibility to artifact creation accidentally.
-
-### Runtime mental model
-
-The test prepares old state, installs `CrashOnce`, attempts a mutation, catches `InjectedCrash`, and constructs a fresh service. It then checks visible data and disk debris. The production code does not change in this stage; the new value is confidence in the existing boundary.
-
-### Mechanism blocks
-
-#### Manifest publication failure matrix
-
-Use injected crash points to distinguish every pre-publication state from the first post-publication state.
-
-??? note "View block diff (1 file)"
-    **`tests/test_storage.py`**
-
+??? note "File diff: tests/test_storage.py"
     ```diff
     diff --git a/tests/test_storage.py b/tests/test_storage.py
     index c96a7a6..5faad97 100644
@@ -113,9 +93,6 @@ Use injected crash points to distinguish every pre-publication state from the fi
     +    assert visible.etag == '"2063c1608d6e0baf80249c42e2be5804"'
     ```
 
-
-**Explanation: `tests/test_storage.py`**
-
 **What it is and why it appears**
 
 The storage integration suite gains a parameterized crash matrix around artifact and manifest publication.
@@ -133,6 +110,24 @@ crash_injector=CrashOnce("before_manifest_publish"),
 **Statement understanding**
 
 The named hook fixes the exact interruption boundary. Assertions after a fresh open can therefore distinguish “artifacts durable” from “state published.”
+
+### Basic concepts
+
+A linearization point is the instant a concurrent or recovering observer treats an operation as having taken effect. A crash matrix probes both sides: before the point the old state wins; after the point the complete new state wins. There is no legal half-state.
+
+### Why this mechanism is necessary
+
+Documentation and happy-path tests cannot prove crash atomicity. Deliberate process-like interruption turns publication order into executable evidence and prevents a future refactor from moving visibility to artifact creation accidentally.
+
+### Runtime mental model
+
+The test prepares old state, installs `CrashOnce`, attempts a mutation, catches `InjectedCrash`, and constructs a fresh service. It then checks visible data and disk debris. The production code does not change in this stage; the new value is confidence in the existing boundary.
+
+### Mechanism blocks
+
+#### Manifest publication failure matrix
+
+Use injected crash points to distinguish every pre-publication state from the first post-publication state.
 
 ### Verification evidence
 

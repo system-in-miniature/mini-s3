@@ -33,9 +33,7 @@ User imports resolve through `src/minis3/__init__.py`. Separately, `build_journe
 
 Turn package exports into an intentional compatibility contract and close the Journey with exact reconstruction evidence.
 
-??? note "View block diff (1 file)"
-    **`src/minis3/__init__.py`**
-
+??? note "File diff: src/minis3/__init__.py"
     ```diff
     diff --git a/src/minis3/__init__.py b/src/minis3/__init__.py
     index 36bc1f3..86d6755 100644
@@ -81,9 +79,6 @@ Turn package exports into an intentional compatibility contract and close the Jo
     +    "evaluate_expiration",
     +]
     ```
-
-
-**Explanation: `src/minis3/__init__.py`**
 
 **What it is and why it appears**
 

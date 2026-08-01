@@ -18,6 +18,127 @@ Version listing can expose history, but normal object listing still has no answe
 
 The delimiter contract stores `a.txt`, `raw`, and several `photos/...` keys. Listing the root with delimiter `/` must return two contents plus exactly one `photos/` common prefix. If the implementation walks directories or returns every photo key, the externally visible projection is wrong.
 
+??? note "File diff: tests/test_listing.py"
+    ```diff
+    diff --git a/tests/test_listing.py b/tests/test_listing.py
+    new file mode 100644
+    index 0000000..741dacb
+    --- /dev/null
+    +++ b/tests/test_listing.py
+    @@ -0,0 +1,93 @@
+    +"""Listing tests make the directory illusion and ordering observable."""
+    +
+    +from pathlib import Path
+    +
+    +import pytest
+    +
+    +from minis3 import InvalidContinuationToken, MiniS3
+    +
+    +
+    +def _populated_store(root: Path) -> MiniS3:
+    +    store = MiniS3(root)
+    +    store.create_bucket("b")
+    +    for key in ("a.txt", "photos/2025/a.jpg", "photos/2026/b.jpg", "raw"):
+    +        store.put_object("b", key, key.encode())
+    +    return store
+    +
+    +
+    +def test_delimiter_derives_common_prefixes_from_flat_keys(tmp_path: Path) -> None:
+    +    store = _populated_store(tmp_path)
+    +
+    +    root = store.list_objects("b", delimiter="/")
+    +    photos = store.list_objects("b", prefix="photos/", delimiter="/")
+    +    flat = store.list_objects("b", prefix="photos/")
+    +
+    +    assert [item.key for item in root.contents] == ["a.txt", "raw"]
+    +    assert root.common_prefixes == ("photos/",)
+    +    assert photos.common_prefixes == ("photos/2025/", "photos/2026/")
+    +    assert [item.key for item in flat.contents] == [
+    +        "photos/2025/a.jpg",
+    +        "photos/2026/b.jpg",
+    +    ]
+    +
+    +
+    +def test_pagination_counts_contents_and_prefixes_and_token_is_opaque(
+    +    tmp_path: Path,
+    +) -> None:
+    +    store = _populated_store(tmp_path)
+    +    first = store.list_objects("b", delimiter="/", max_keys=2)
+    +    second = store.list_objects(
+    +        "b", delimiter="/", max_keys=2, continuation_token=first.next_token
+    +    )
+    +
+    +    assert first.key_count == 2
+    +    assert first.next_token is not None
+    +    assert "photos/" not in first.next_token
+    +    assert {
+    +        *(item.key for item in first.contents),
+    +        *first.common_prefixes,
+    +        *(item.key for item in second.contents),
+    +        *second.common_prefixes,
+    +    } == {"a.txt", "photos/", "raw"}
+    +    assert second.next_token is None
+    +
+    +
+    +def test_current_listing_hides_key_behind_delete_marker(tmp_path: Path) -> None:
+    +    store = MiniS3(tmp_path)
+    +    store.create_bucket("b")
+    +    store.set_bucket_versioning("b", "enabled")
+    +    store.put_object("b", "hidden", b"value")
+    +    store.delete_object("b", "hidden")
+    +
+    +    assert store.list_objects("b").contents == ()
+    +
+    +
+    +def test_version_listing_flattens_versions_and_marks_latest(tmp_path: Path) -> None:
+    +    store = MiniS3(tmp_path)
+    +    store.create_bucket("b")
+    +    store.set_bucket_versioning("b", "enabled")
+    +    one = store.put_object("b", "a", b"one")
+    +    two = store.put_object("b", "a", b"two")
+    +    marker = store.delete_object("b", "a")
+    +
+    +    items = store.list_object_versions("b").versions
+    +
+    +    assert [item.version_id for item in items] == [
+    +        marker.version_id,
+    +        two.version_id,
+    +        one.version_id,
+    +    ]
+    +    assert [item.is_latest for item in items] == [True, False, False]
+    +    assert items[0].is_delete_marker is True
+    +
+    +
+    +def test_malformed_or_query_mismatched_tokens_are_rejected(tmp_path: Path) -> None:
+    +    store = _populated_store(tmp_path)
+    +    first = store.list_objects("b", max_keys=1)
+    +
+    +    with pytest.raises(InvalidContinuationToken):
+    +        store.list_objects("b", continuation_token="not-base64!")
+    +    with pytest.raises(InvalidContinuationToken):
+    +        store.list_objects(
+    +            "b", prefix="different", continuation_token=first.next_token
+    +        )
+    ```
+
+**What it is and why it appears**
+
+Five contracts cover directory illusion, combined pagination, marker hiding, flattened version history, and invalid tokens.
+
+**Runtime role**
+
+They build state through `MiniS3` and inspect public results, so the examples connect model semantics to the final read view.
+
+**Key code**
+
+```python
+assert root.common_prefixes == ("photos/",)
+```
+
+**Statement understanding**
+
+Several flat keys collapse into one projected prefix at the root. The tuple does not mean a `photos/` object or directory was stored.
+
 ### Basic concepts
 
 `prefix` filters keys by exact string start. `delimiter` groups the remaining suffix at its first delimiter into a `common_prefix`; this is a computed view, not a stored folder. A page counts both returned objects and common prefixes because both consume result slots.
@@ -38,9 +159,7 @@ The service locks a Bucket snapshot and calls `list_objects`. The function selec
 
 Derive prefix, delimiter, pagination, and continuation behavior from flat exact keys without creating directories.
 
-??? note "View block diff (3 files)"
-    **`src/minis3/listing.py`**
-
+??? note "File diff: src/minis3/listing.py"
     ```diff
     diff --git a/src/minis3/listing.py b/src/minis3/listing.py
     index 3c40e0d..c6e95b3 100644
@@ -187,8 +306,25 @@ Derive prefix, delimiter, pagination, and continuation behavior from flat exact 
     +
     ```
 
-    **`src/minis3/store.py`**
+**What it is and why it appears**
 
+The read-side projection now owns current-object listing, delimiter grouping, and pagination tokens alongside version listing.
+
+**Runtime role**
+
+It consumes Bucket records without mutation and returns immutable `contents`, `common_prefixes`, and `next_token`.
+
+**Key code**
+
+```python
+return urlsafe_b64encode(payload).decode().rstrip("=")
+```
+
+**Statement understanding**
+
+The token hides the cursor representation. Its payload also contains the query shape, so decoding can reject a cursor that belongs to another prefix or delimiter.
+
+??? note "File diff: src/minis3/store.py"
     ```diff
     diff --git a/src/minis3/store.py b/src/minis3/store.py
     index 23ddd8e..7c82b41 100644
@@ -311,133 +447,6 @@ Derive prefix, delimiter, pagination, and continuation behavior from flat exact 
     -
     ```
 
-    **`tests/test_listing.py`**
-
-    ```diff
-    diff --git a/tests/test_listing.py b/tests/test_listing.py
-    new file mode 100644
-    index 0000000..741dacb
-    --- /dev/null
-    +++ b/tests/test_listing.py
-    @@ -0,0 +1,93 @@
-    +"""Listing tests make the directory illusion and ordering observable."""
-    +
-    +from pathlib import Path
-    +
-    +import pytest
-    +
-    +from minis3 import InvalidContinuationToken, MiniS3
-    +
-    +
-    +def _populated_store(root: Path) -> MiniS3:
-    +    store = MiniS3(root)
-    +    store.create_bucket("b")
-    +    for key in ("a.txt", "photos/2025/a.jpg", "photos/2026/b.jpg", "raw"):
-    +        store.put_object("b", key, key.encode())
-    +    return store
-    +
-    +
-    +def test_delimiter_derives_common_prefixes_from_flat_keys(tmp_path: Path) -> None:
-    +    store = _populated_store(tmp_path)
-    +
-    +    root = store.list_objects("b", delimiter="/")
-    +    photos = store.list_objects("b", prefix="photos/", delimiter="/")
-    +    flat = store.list_objects("b", prefix="photos/")
-    +
-    +    assert [item.key for item in root.contents] == ["a.txt", "raw"]
-    +    assert root.common_prefixes == ("photos/",)
-    +    assert photos.common_prefixes == ("photos/2025/", "photos/2026/")
-    +    assert [item.key for item in flat.contents] == [
-    +        "photos/2025/a.jpg",
-    +        "photos/2026/b.jpg",
-    +    ]
-    +
-    +
-    +def test_pagination_counts_contents_and_prefixes_and_token_is_opaque(
-    +    tmp_path: Path,
-    +) -> None:
-    +    store = _populated_store(tmp_path)
-    +    first = store.list_objects("b", delimiter="/", max_keys=2)
-    +    second = store.list_objects(
-    +        "b", delimiter="/", max_keys=2, continuation_token=first.next_token
-    +    )
-    +
-    +    assert first.key_count == 2
-    +    assert first.next_token is not None
-    +    assert "photos/" not in first.next_token
-    +    assert {
-    +        *(item.key for item in first.contents),
-    +        *first.common_prefixes,
-    +        *(item.key for item in second.contents),
-    +        *second.common_prefixes,
-    +    } == {"a.txt", "photos/", "raw"}
-    +    assert second.next_token is None
-    +
-    +
-    +def test_current_listing_hides_key_behind_delete_marker(tmp_path: Path) -> None:
-    +    store = MiniS3(tmp_path)
-    +    store.create_bucket("b")
-    +    store.set_bucket_versioning("b", "enabled")
-    +    store.put_object("b", "hidden", b"value")
-    +    store.delete_object("b", "hidden")
-    +
-    +    assert store.list_objects("b").contents == ()
-    +
-    +
-    +def test_version_listing_flattens_versions_and_marks_latest(tmp_path: Path) -> None:
-    +    store = MiniS3(tmp_path)
-    +    store.create_bucket("b")
-    +    store.set_bucket_versioning("b", "enabled")
-    +    one = store.put_object("b", "a", b"one")
-    +    two = store.put_object("b", "a", b"two")
-    +    marker = store.delete_object("b", "a")
-    +
-    +    items = store.list_object_versions("b").versions
-    +
-    +    assert [item.version_id for item in items] == [
-    +        marker.version_id,
-    +        two.version_id,
-    +        one.version_id,
-    +    ]
-    +    assert [item.is_latest for item in items] == [True, False, False]
-    +    assert items[0].is_delete_marker is True
-    +
-    +
-    +def test_malformed_or_query_mismatched_tokens_are_rejected(tmp_path: Path) -> None:
-    +    store = _populated_store(tmp_path)
-    +    first = store.list_objects("b", max_keys=1)
-    +
-    +    with pytest.raises(InvalidContinuationToken):
-    +        store.list_objects("b", continuation_token="not-base64!")
-    +    with pytest.raises(InvalidContinuationToken):
-    +        store.list_objects(
-    +            "b", prefix="different", continuation_token=first.next_token
-    +        )
-    ```
-
-
-**Explanation: `src/minis3/listing.py`**
-
-**What it is and why it appears**
-
-The read-side projection now owns current-object listing, delimiter grouping, and pagination tokens alongside version listing.
-
-**Runtime role**
-
-It consumes Bucket records without mutation and returns immutable `contents`, `common_prefixes`, and `next_token`.
-
-**Key code**
-
-```python
-return urlsafe_b64encode(payload).decode().rstrip("=")
-```
-
-**Statement understanding**
-
-The token hides the cursor representation. Its payload also contains the query shape, so decoding can reject a cursor that belongs to another prefix or delimiter.
-
-**Explanation: `src/minis3/store.py`**
-
 **What it is and why it appears**
 
 The service adds the public locked entry for current listing.
@@ -456,31 +465,11 @@ with self._lock:
 
 Even a pure projection needs a stable input snapshot. The lock prevents a concurrent PUT or DELETE from changing keys halfway through pagination construction.
 
-**Explanation: `tests/test_listing.py`**
-
-**What it is and why it appears**
-
-Five contracts cover directory illusion, combined pagination, marker hiding, flattened version history, and invalid tokens.
-
-**Runtime role**
-
-They build state through `MiniS3` and inspect public results, so the examples connect model semantics to the final read view.
-
-**Key code**
-
-```python
-assert root.common_prefixes == ("photos/",)
-```
-
-**Statement understanding**
-
-Several flat keys collapse into one projected prefix at the root. The tuple does not mean a `photos/` object or directory was stored.
-
 #### Public export wiring
 
 Expose listing values while keeping all projection semantics in the core block.
 
-??? note "View block diff (1 file)"
+??? note "Supporting file diffs (1 file)"
     **`src/minis3/__init__.py`**
 
     ```diff

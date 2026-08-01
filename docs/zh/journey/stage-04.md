@@ -18,144 +18,7 @@
 
 重启契约写入两个版本，再打开全新的 `MiniS3` 读取两份 Body，随后继续写入并要求新 ID。它同时暴露两类错误：状态没有真正发布到磁盘，或者恢复后的序列计数器复用了旧身份。
 
-### 基本概念
-
-应用服务负责协调已有所有者，而不是吞掉它们的职责。Bucket 仍决定合法历史，DiskStorage 仍决定发布和恢复，`MiniS3` 拥有公开操作、锁、查找以及两者之间的调用顺序。
-
-实现先深拷贝候选 Bucket，对候选执行变更并持久化，最后才替换内存引用。因此发布失败时，原本可见的内存状态不会被污染。
-
-### 为什么需要这个机制
-
-只锁 Bucket 或只锁磁盘都不够，因为公开变更跨越两者。服务锁串行化“读取—检查—变更—发布”，候选发布则避免暴露未提交内存。
-
-### 运行时心智模型
-
-`put_object` 加锁、解析 Bucket、复制候选、把 PUT 委托给候选、持久化候选、替换 `_buckets`，最后返回 Version。GET/HEAD 在同一把锁下读取；HEAD 复用 GET，因为当前协议无关模型返回相同元数据值。
-
-### 机制板块
-
-#### 对象服务边界
-
-在一个服务门面后协调加锁、Bucket 写时复制、持久化和公开对象操作。
-
-??? note "查看本板块差异（3 个文件）"
-    **`src/minis3/store.py`**
-
-    ```diff
-    diff --git a/src/minis3/store.py b/src/minis3/store.py
-    new file mode 100644
-    index 0000000..5d418b8
-    --- /dev/null
-    +++ b/src/minis3/store.py
-    @@ -0,0 +1,104 @@
-    +"""Public service facade joining buckets, object state, and list projections."""
-    +
-    +from __future__ import annotations
-    +
-    +from collections.abc import Callable
-    +from copy import deepcopy
-    +from pathlib import Path
-    +from threading import RLock
-    +
-    +from .bucket import Bucket, SequenceCounter, VersioningState
-    +from .errors import BucketAlreadyExists, BucketNotEmpty, NoSuchBucket
-    +from .model import ObjectVersion, Version
-    +from .storage import DiskStorage
-    +
-    +
-    +class MiniS3:
-    +    """A deterministic collection of strongly consistent buckets."""
-    +
-    +    def __init__(
-    +        self,
-    +        root: str | Path,
-    +        *,
-    +        counter: Callable[[], int] | None = None,
-    +        crash_injector: Callable[[str], None] | None = None,
-    +    ) -> None:
-    +        self.root = Path(root)
-    +        self._counter = counter or SequenceCounter()
-    +        self._storage = DiskStorage(root, crash_injector=crash_injector)
-    +        self._buckets, maximum_sequence = self._storage.load_buckets()
-    +        ensure = getattr(self._counter, "ensure_at_least", None)
-    +        if ensure is not None:
-    +            ensure(maximum_sequence + 1)
-    +        self._lock = RLock()
-    +
-    +
-    +    def create_bucket(self, name: str) -> None:
-    +        with self._lock:
-    +            if name in self._buckets:
-    +                raise BucketAlreadyExists(name)
-    +            bucket = Bucket(name)
-    +            self._storage.create_bucket(bucket)
-    +            self._buckets[name] = bucket
-    +
-    +
-    +    def delete_bucket(self, name: str) -> None:
-    +        with self._lock:
-    +            bucket = self._bucket(name)
-    +            if bucket.records:
-    +                raise BucketNotEmpty(name)
-    +            self._storage.delete_bucket(name)
-    +            del self._buckets[name]
-    +
-    +
-    +    def set_bucket_versioning(
-    +        self, name: str, state: VersioningState | str
-    +    ) -> None:
-    +        with self._lock:
-    +            candidate = deepcopy(self._bucket(name))
-    +            candidate.set_versioning(state)
-    +            self._storage.persist_bucket(candidate)
-    +            self._buckets[name] = candidate
-    +
-    +
-    +    def put_object(self, bucket: str, key: str, body: bytes) -> Version:
-    +        with self._lock:
-    +            candidate = deepcopy(self._bucket(bucket))
-    +            result = candidate.put(key, body, self._counter)
-    +            self._storage.persist_bucket(candidate)
-    +            self._buckets[bucket] = candidate
-    +            return result
-    +
-    +
-    +    def get_object(
-    +        self, bucket: str, key: str, *, version_id: str | None = None
-    +    ) -> Version:
-    +        with self._lock:
-    +            return self._bucket(bucket).get(key, version_id)
-    +
-    +
-    +    def head_object(
-    +        self, bucket: str, key: str, *, version_id: str | None = None
-    +    ) -> Version:
-    +        """Return object metadata; M1 reuses the immutable Version value."""
-    +
-    +        return self.get_object(bucket, key, version_id=version_id)
-    +
-    +
-    +    def delete_object(
-    +        self, bucket: str, key: str, *, version_id: str | None = None
-    +    ) -> ObjectVersion | None:
-    +        with self._lock:
-    +            candidate = deepcopy(self._bucket(bucket))
-    +            result = candidate.delete(key, self._counter, version_id)
-    +            self._storage.persist_bucket(candidate)
-    +            self._buckets[bucket] = candidate
-    +            return result
-    +
-    +
-    +    def _bucket(self, name: str) -> Bucket:
-    +        try:
-    +            return self._buckets[name]
-    +        except KeyError as exc:
-    +            raise NoSuchBucket(name) from exc
-    +
-    ```
-
-    **`tests/test_storage.py`**
-
+??? note "文件差异：tests/test_storage.py"
     ```diff
     diff --git a/tests/test_storage.py b/tests/test_storage.py
     new file mode 100644
@@ -197,8 +60,25 @@
     +    assert second.version_id != first.version_id
     ```
 
-    **`tests/test_versioning.py`**
+**是什么，为什么现在需要**
 
+这些契约通过公开服务检查持久化，包括重启、崩溃注入、Bucket 删除和序列恢复。
+
+**在运行时做什么**
+
+它们捕获“内存成功但重开失败”的缺口，是编排层与存储层相遇的位置。
+
+**关键代码**
+
+```python
+assert reopened.get_object("b", "k", version_id=first.version_id).body == b"one"
+```
+
+**关键语句理解**
+
+在新实例上按旧版本 ID 读取，证明版本历史和字节都跨发布保存；只检查最新值证据更弱。
+
+??? note "文件差异：tests/test_versioning.py"
     ```diff
     diff --git a/tests/test_versioning.py b/tests/test_versioning.py
     new file mode 100644
@@ -317,8 +197,157 @@
     +        store.delete_bucket("b")
     ```
 
+**是什么，为什么现在需要**
 
-**讲解: `src/minis3/store.py`**
+这里锁定完整公开版本状态机和 DELETE 含义。
+
+**在运行时做什么**
+
+它区分未版本化删除、Marker 创建、指定版本删除、最新 Marker 导致 404，以及具名历史保留。
+
+**关键代码**
+
+```python
+assert bucket.get("k", historical.version_id) == historical
+```
+
+**关键语句理解**
+
+这个防御性场景证明：即使恢复或外部构造中出现具名历史，未版本化删除也不能把它擦掉。
+
+### 基本概念
+
+应用服务负责协调已有所有者，而不是吞掉它们的职责。Bucket 仍决定合法历史，DiskStorage 仍决定发布和恢复，`MiniS3` 拥有公开操作、锁、查找以及两者之间的调用顺序。
+
+实现先深拷贝候选 Bucket，对候选执行变更并持久化，最后才替换内存引用。因此发布失败时，原本可见的内存状态不会被污染。
+
+### 为什么需要这个机制
+
+只锁 Bucket 或只锁磁盘都不够，因为公开变更跨越两者。服务锁串行化“读取—检查—变更—发布”，候选发布则避免暴露未提交内存。
+
+### 运行时心智模型
+
+`put_object` 加锁、解析 Bucket、复制候选、把 PUT 委托给候选、持久化候选、替换 `_buckets`，最后返回 Version。GET/HEAD 在同一把锁下读取；HEAD 复用 GET，因为当前协议无关模型返回相同元数据值。
+
+### 机制板块
+
+#### 对象服务边界
+
+在一个服务门面后协调加锁、Bucket 写时复制、持久化和公开对象操作。
+
+??? note "文件差异：src/minis3/store.py"
+    ```diff
+    diff --git a/src/minis3/store.py b/src/minis3/store.py
+    new file mode 100644
+    index 0000000..5d418b8
+    --- /dev/null
+    +++ b/src/minis3/store.py
+    @@ -0,0 +1,104 @@
+    +"""Public service facade joining buckets, object state, and list projections."""
+    +
+    +from __future__ import annotations
+    +
+    +from collections.abc import Callable
+    +from copy import deepcopy
+    +from pathlib import Path
+    +from threading import RLock
+    +
+    +from .bucket import Bucket, SequenceCounter, VersioningState
+    +from .errors import BucketAlreadyExists, BucketNotEmpty, NoSuchBucket
+    +from .model import ObjectVersion, Version
+    +from .storage import DiskStorage
+    +
+    +
+    +class MiniS3:
+    +    """A deterministic collection of strongly consistent buckets."""
+    +
+    +    def __init__(
+    +        self,
+    +        root: str | Path,
+    +        *,
+    +        counter: Callable[[], int] | None = None,
+    +        crash_injector: Callable[[str], None] | None = None,
+    +    ) -> None:
+    +        self.root = Path(root)
+    +        self._counter = counter or SequenceCounter()
+    +        self._storage = DiskStorage(root, crash_injector=crash_injector)
+    +        self._buckets, maximum_sequence = self._storage.load_buckets()
+    +        ensure = getattr(self._counter, "ensure_at_least", None)
+    +        if ensure is not None:
+    +            ensure(maximum_sequence + 1)
+    +        self._lock = RLock()
+    +
+    +
+    +    def create_bucket(self, name: str) -> None:
+    +        with self._lock:
+    +            if name in self._buckets:
+    +                raise BucketAlreadyExists(name)
+    +            bucket = Bucket(name)
+    +            self._storage.create_bucket(bucket)
+    +            self._buckets[name] = bucket
+    +
+    +
+    +    def delete_bucket(self, name: str) -> None:
+    +        with self._lock:
+    +            bucket = self._bucket(name)
+    +            if bucket.records:
+    +                raise BucketNotEmpty(name)
+    +            self._storage.delete_bucket(name)
+    +            del self._buckets[name]
+    +
+    +
+    +    def set_bucket_versioning(
+    +        self, name: str, state: VersioningState | str
+    +    ) -> None:
+    +        with self._lock:
+    +            candidate = deepcopy(self._bucket(name))
+    +            candidate.set_versioning(state)
+    +            self._storage.persist_bucket(candidate)
+    +            self._buckets[name] = candidate
+    +
+    +
+    +    def put_object(self, bucket: str, key: str, body: bytes) -> Version:
+    +        with self._lock:
+    +            candidate = deepcopy(self._bucket(bucket))
+    +            result = candidate.put(key, body, self._counter)
+    +            self._storage.persist_bucket(candidate)
+    +            self._buckets[bucket] = candidate
+    +            return result
+    +
+    +
+    +    def get_object(
+    +        self, bucket: str, key: str, *, version_id: str | None = None
+    +    ) -> Version:
+    +        with self._lock:
+    +            return self._bucket(bucket).get(key, version_id)
+    +
+    +
+    +    def head_object(
+    +        self, bucket: str, key: str, *, version_id: str | None = None
+    +    ) -> Version:
+    +        """Return object metadata; M1 reuses the immutable Version value."""
+    +
+    +        return self.get_object(bucket, key, version_id=version_id)
+    +
+    +
+    +    def delete_object(
+    +        self, bucket: str, key: str, *, version_id: str | None = None
+    +    ) -> ObjectVersion | None:
+    +        with self._lock:
+    +            candidate = deepcopy(self._bucket(bucket))
+    +            result = candidate.delete(key, self._counter, version_id)
+    +            self._storage.persist_bucket(candidate)
+    +            self._buckets[bucket] = candidate
+    +            return result
+    +
+    +
+    +    def _bucket(self, name: str) -> Bucket:
+    +        try:
+    +            return self._buckets[name]
+    +        except KeyError as exc:
+    +            raise NoSuchBucket(name) from exc
+    +
+    ```
 
 **是什么，为什么现在需要**
 
@@ -339,51 +368,11 @@ self._buckets[bucket] = candidate
 
 候选先发布，之后才成为进程可见 Bucket。反过来会让失败的磁盘写入泄漏成“当前可见但重启消失”的状态。
 
-**讲解: `tests/test_storage.py`**
-
-**是什么，为什么现在需要**
-
-这些契约通过公开服务检查持久化，包括重启、崩溃注入、Bucket 删除和序列恢复。
-
-**在运行时做什么**
-
-它们捕获“内存成功但重开失败”的缺口，是编排层与存储层相遇的位置。
-
-**关键代码**
-
-```python
-assert reopened.get_object("b", "k", version_id=first.version_id).body == b"one"
-```
-
-**关键语句理解**
-
-在新实例上按旧版本 ID 读取，证明版本历史和字节都跨发布保存；只检查最新值证据更弱。
-
-**讲解: `tests/test_versioning.py`**
-
-**是什么，为什么现在需要**
-
-这里锁定完整公开版本状态机和 DELETE 含义。
-
-**在运行时做什么**
-
-它区分未版本化删除、Marker 创建、指定版本删除、最新 Marker 导致 404，以及具名历史保留。
-
-**关键代码**
-
-```python
-assert bucket.get("k", historical.version_id) == historical
-```
-
-**关键语句理解**
-
-这个防御性场景证明：即使恢复或外部构造中出现具名历史，未版本化删除也不能把它擦掉。
-
 #### 公开导出接线
 
 让新服务可导入，但不为常规包接线单独展开概念讲解。
 
-??? note "查看本板块差异（1 个文件）"
+??? note "支撑文件差异（1 个文件）"
     **`src/minis3/__init__.py`**
 
     ```diff

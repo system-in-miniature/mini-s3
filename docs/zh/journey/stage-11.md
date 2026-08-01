@@ -16,78 +16,7 @@ Part 已经持久但刻意不可见。完成操作必须把选中的私有 Part 
 
 主契约上传两个 Part，并在完成前确认 List 为空。完成后要求 Body 为 `abcend`、ETag 是不同于 whole-body ETag 的两 Part 组合 ETag，并且只出现一个可见 Key。提前创建 ObjectRecord 或算错 ETag 都会直接暴露。
 
-### 基本概念
-
-完成是服务边界的一次有序事务：重载 Staging、校验客户端 receipt 列表、拼接选中字节、用组合 ETag 复用 Bucket PUT、发布候选 Bucket，最后删除 Staging。
-
-Part 替换与完成分开。重传 Part 1 会改变当前 receipt；客户端用旧 ETag 完成时必须失败，不能拼装它没有确认的新字节。
-
-### 为什么需要这个机制
-
-逐 Part 发布会破坏 whole-object 可见性；Manifest 提交前删除 Staging 会摧毁重试能力。复用已有 Bucket 与 Manifest 路径，避免 Multipart 建立一套更弱的第二一致性模型。
-
-### 运行时心智模型
-
-`complete_multipart_upload` 持有服务锁，加载 upload 与 parts，调用纯 `validate_completion`，拼接 Body，用组合 ETag/来源修改候选 Bucket，持久化并替换内存，最后才删除上传目录。
-
-### 机制板块
-
-#### Multipart 原子完成
-
-在一次带锁操作中校验回执、组装暂存字节、发布对象版本并移除上传状态。
-
-??? note "查看本板块差异（2 个文件）"
-    **`src/minis3/store.py`**
-
-    ```diff
-    diff --git a/src/minis3/store.py b/src/minis3/store.py
-    index 0d7e596..9b50aa2 100644
-    --- a/src/minis3/store.py
-    +++ b/src/minis3/store.py
-    @@ -177,6 +177,39 @@ class MiniS3:
-                 return part.receipt
-
-
-    +    def complete_multipart_upload(
-    +        self,
-    +        bucket: str,
-    +        key: str,
-    +        upload_id: str,
-    +        parts: list[CompletionEntry] | tuple[CompletionEntry, ...],
-    +    ) -> Version:
-    +        """Validate, assemble, and publish through the bucket manifest rename."""
-    +
-    +        with self._lock:
-    +            self._bucket(bucket)
-    +            _upload, staged = self._storage.load_multipart_upload(
-    +                bucket, key, upload_id
-    +            )
-    +            selected, etag = validate_completion(
-    +                staged, parts, minimum_part_size=self.minimum_part_size
-    +            )
-    +            body = b"".join(part.body for part in selected)
-    +            candidate = deepcopy(self._bucket(bucket))
-    +            result = candidate.put(
-    +                key,
-    +                body,
-    +                self._counter,
-    +                etag=etag,
-    +                now=self._clock(),
-    +                multipart_upload_id=upload_id,
-    +            )
-    +            self._storage.persist_bucket(candidate)
-    +            self._buckets[bucket] = candidate
-    +            self._storage.remove_multipart_upload(bucket, key, upload_id)
-    +            return result
-    +
-    +
-         def abort_multipart_upload(
-             self, bucket: str, key: str, upload_id: str
-         ) -> None:
-    ```
-
-    **`tests/test_multipart.py`**
-
+??? note "文件差异：tests/test_multipart.py"
     ```diff
     diff --git a/tests/test_multipart.py b/tests/test_multipart.py
     index 0b61034..adcb3f7 100644
@@ -205,8 +134,91 @@ Part 替换与完成分开。重传 Part 1 会改变当前 receipt；客户端�
     +
     ```
 
+**是什么，为什么现在需要**
 
-**讲解: `src/minis3/store.py`**
+四个场景覆盖完成前不可见、同编号替换、清单验证、Abort 和未完成上传重启。
+
+**在运行时做什么**
+
+它们运行完整公开生命周期，同时观察可见对象与私有上传行为。
+
+**关键代码**
+
+```python
+assert completed.etag != content_etag(completed.body)
+```
+
+**关键语句理解**
+
+这防止实现偷懒地把组装 Body 当普通 PUT 计算哈希；Multipart 身份来自 Part 摘要。
+
+### 基本概念
+
+完成是服务边界的一次有序事务：重载 Staging、校验客户端 receipt 列表、拼接选中字节、用组合 ETag 复用 Bucket PUT、发布候选 Bucket，最后删除 Staging。
+
+Part 替换与完成分开。重传 Part 1 会改变当前 receipt；客户端用旧 ETag 完成时必须失败，不能拼装它没有确认的新字节。
+
+### 为什么需要这个机制
+
+逐 Part 发布会破坏 whole-object 可见性；Manifest 提交前删除 Staging 会摧毁重试能力。复用已有 Bucket 与 Manifest 路径，避免 Multipart 建立一套更弱的第二一致性模型。
+
+### 运行时心智模型
+
+`complete_multipart_upload` 持有服务锁，加载 upload 与 parts，调用纯 `validate_completion`，拼接 Body，用组合 ETag/来源修改候选 Bucket，持久化并替换内存，最后才删除上传目录。
+
+### 机制板块
+
+#### Multipart 原子完成
+
+在一次带锁操作中校验回执、组装暂存字节、发布对象版本并移除上传状态。
+
+??? note "文件差异：src/minis3/store.py"
+    ```diff
+    diff --git a/src/minis3/store.py b/src/minis3/store.py
+    index 0d7e596..9b50aa2 100644
+    --- a/src/minis3/store.py
+    +++ b/src/minis3/store.py
+    @@ -177,6 +177,39 @@ class MiniS3:
+                 return part.receipt
+
+
+    +    def complete_multipart_upload(
+    +        self,
+    +        bucket: str,
+    +        key: str,
+    +        upload_id: str,
+    +        parts: list[CompletionEntry] | tuple[CompletionEntry, ...],
+    +    ) -> Version:
+    +        """Validate, assemble, and publish through the bucket manifest rename."""
+    +
+    +        with self._lock:
+    +            self._bucket(bucket)
+    +            _upload, staged = self._storage.load_multipart_upload(
+    +                bucket, key, upload_id
+    +            )
+    +            selected, etag = validate_completion(
+    +                staged, parts, minimum_part_size=self.minimum_part_size
+    +            )
+    +            body = b"".join(part.body for part in selected)
+    +            candidate = deepcopy(self._bucket(bucket))
+    +            result = candidate.put(
+    +                key,
+    +                body,
+    +                self._counter,
+    +                etag=etag,
+    +                now=self._clock(),
+    +                multipart_upload_id=upload_id,
+    +            )
+    +            self._storage.persist_bucket(candidate)
+    +            self._buckets[bucket] = candidate
+    +            self._storage.remove_multipart_upload(bucket, key, upload_id)
+    +            return result
+    +
+    +
+         def abort_multipart_upload(
+             self, bucket: str, key: str, upload_id: str
+         ) -> None:
+    ```
 
 **是什么，为什么现在需要**
 
@@ -227,26 +239,6 @@ self._storage.remove_multipart_upload(bucket, key, upload_id)
 **关键语句理解**
 
 清理必须最后执行。发布失败时上传仍可重试；发布成功后再删 Staging，也不会让已提交对象消失。
-
-**讲解: `tests/test_multipart.py`**
-
-**是什么，为什么现在需要**
-
-四个场景覆盖完成前不可见、同编号替换、清单验证、Abort 和未完成上传重启。
-
-**在运行时做什么**
-
-它们运行完整公开生命周期，同时观察可见对象与私有上传行为。
-
-**关键代码**
-
-```python
-assert completed.etag != content_etag(completed.body)
-```
-
-**关键语句理解**
-
-这防止实现偷懒地把组装 Body 当普通 PUT 计算哈希；Multipart 身份来自 Part 摘要。
 
 ### 验证证据
 

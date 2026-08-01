@@ -15,27 +15,7 @@ The crash matrix proves which manifest is visible, but durability also depends o
 
 The parent-chain contract records fsync calls while creating `one/two/three`. It expects calls for the existing root and each newly created directory's parent. If only the final directory is fsynced, one missing ancestor entry can make the whole subtree unreachable after restart.
 
-### Basic concepts
-
-A directory stores name-to-inode mappings. Persisting file contents does not automatically persist creation or rename of that name. Cleanup classifies files by authority: temporary names and unreferenced artifacts may be removed; manifest-referenced artifacts must remain.
-
-### Why this mechanism is necessary
-
-Crash safety is an end-to-end ordering property, not merely a call to `fsync` somewhere. Recording the exact parent chain and exercising cleanup protects the subtle filesystem assumptions that ordinary object assertions cannot see.
-
-### Runtime mental model
-
-Tests replace `fsync_directory` with a recorder, perform real directory/storage creation, and assert the ordered parents. A separate restart case plants a stray temporary file, reopens storage, and requires cleanup while the published object remains readable.
-
-### Mechanism blocks
-
-#### Directory durability and startup cleanup
-
-Lock the parent-directory fsync obligations and prove restart cleanup removes only unpublished temporary artifacts.
-
-??? note "View block diff (1 file)"
-    **`tests/test_storage.py`**
-
+??? note "File diff: tests/test_storage.py"
     ```diff
     diff --git a/tests/test_storage.py b/tests/test_storage.py
     index 5faad97..afc9a8a 100644
@@ -111,9 +91,6 @@ Lock the parent-directory fsync obligations and prove restart cleanup removes on
     +    assert not stray.exists()
     ```
 
-
-**Explanation: `tests/test_storage.py`**
-
 **What it is and why it appears**
 
 The storage suite now inspects durability calls and startup hygiene, not just logical object values.
@@ -131,6 +108,24 @@ assert calls == [tmp_path, tmp_path / "one", tmp_path / "one" / "two"]
 **Statement understanding**
 
 Each new directory entry lives in its parent, so the expected list walks the ancestry rather than repeating the final path. This assertion locks the durability chain.
+
+### Basic concepts
+
+A directory stores name-to-inode mappings. Persisting file contents does not automatically persist creation or rename of that name. Cleanup classifies files by authority: temporary names and unreferenced artifacts may be removed; manifest-referenced artifacts must remain.
+
+### Why this mechanism is necessary
+
+Crash safety is an end-to-end ordering property, not merely a call to `fsync` somewhere. Recording the exact parent chain and exercising cleanup protects the subtle filesystem assumptions that ordinary object assertions cannot see.
+
+### Runtime mental model
+
+Tests replace `fsync_directory` with a recorder, perform real directory/storage creation, and assert the ordered parents. A separate restart case plants a stray temporary file, reopens storage, and requires cleanup while the published object remains readable.
+
+### Mechanism blocks
+
+#### Directory durability and startup cleanup
+
+Lock the parent-directory fsync obligations and prove restart cleanup removes only unpublished temporary artifacts.
 
 ### Verification evidence
 

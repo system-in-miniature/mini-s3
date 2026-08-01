@@ -16,78 +16,7 @@ Parts are durable but intentionally invisible. Completion must turn selected pri
 
 The main contract uploads two parts and confirms List is empty before completion. After completion it requires body `abcend`, a two-part composite ETag different from the whole-body ETag, and exactly one visible key. Any early ObjectRecord or wrong ETag is immediately visible.
 
-### Basic concepts
-
-Completion is one ordered transaction at the service boundary: reload staging, validate the client's receipt list, concatenate selected bytes, reuse Bucket PUT with the composite ETag, publish the candidate Bucket, then remove staging.
-
-Part replacement and completion are separate. Re-uploading part 1 changes the current receipt; a client that completes with the old ETag must fail rather than assemble unexpected bytes.
-
-### Why this mechanism is necessary
-
-Publishing each part would violate whole-object visibility. Removing staging before the manifest commits destroys retryability. Reusing the established Bucket and manifest path keeps multipart from creating a weaker second consistency model.
-
-### Runtime mental model
-
-`complete_multipart_upload` holds the service lock, loads upload plus parts, calls pure `validate_completion`, joins bodies, mutates a candidate Bucket with composite ETag/provenance, persists it, swaps it into memory, and only then removes the upload directory.
-
-### Mechanism blocks
-
-#### Atomic multipart completion
-
-Validate receipts, assemble staged bytes, publish one object version, and remove upload state as one locked operation.
-
-??? note "View block diff (2 files)"
-    **`src/minis3/store.py`**
-
-    ```diff
-    diff --git a/src/minis3/store.py b/src/minis3/store.py
-    index 0d7e596..9b50aa2 100644
-    --- a/src/minis3/store.py
-    +++ b/src/minis3/store.py
-    @@ -177,6 +177,39 @@ class MiniS3:
-                 return part.receipt
-
-
-    +    def complete_multipart_upload(
-    +        self,
-    +        bucket: str,
-    +        key: str,
-    +        upload_id: str,
-    +        parts: list[CompletionEntry] | tuple[CompletionEntry, ...],
-    +    ) -> Version:
-    +        """Validate, assemble, and publish through the bucket manifest rename."""
-    +
-    +        with self._lock:
-    +            self._bucket(bucket)
-    +            _upload, staged = self._storage.load_multipart_upload(
-    +                bucket, key, upload_id
-    +            )
-    +            selected, etag = validate_completion(
-    +                staged, parts, minimum_part_size=self.minimum_part_size
-    +            )
-    +            body = b"".join(part.body for part in selected)
-    +            candidate = deepcopy(self._bucket(bucket))
-    +            result = candidate.put(
-    +                key,
-    +                body,
-    +                self._counter,
-    +                etag=etag,
-    +                now=self._clock(),
-    +                multipart_upload_id=upload_id,
-    +            )
-    +            self._storage.persist_bucket(candidate)
-    +            self._buckets[bucket] = candidate
-    +            self._storage.remove_multipart_upload(bucket, key, upload_id)
-    +            return result
-    +
-    +
-         def abort_multipart_upload(
-             self, bucket: str, key: str, upload_id: str
-         ) -> None:
-    ```
-
-    **`tests/test_multipart.py`**
-
+??? note "File diff: tests/test_multipart.py"
     ```diff
     diff --git a/tests/test_multipart.py b/tests/test_multipart.py
     index 0b61034..adcb3f7 100644
@@ -205,8 +134,91 @@ Validate receipts, assemble staged bytes, publish one object version, and remove
     +
     ```
 
+**What it is and why it appears**
 
-**Explanation: `src/minis3/store.py`**
+Four cases cover invisibility until completion, same-number replacement, manifest validation, abort, and restart of unfinished staging.
+
+**Runtime role**
+
+They exercise the complete public lifecycle and inspect both visible objects and private upload behavior.
+
+**Key code**
+
+```python
+assert completed.etag != content_etag(completed.body)
+```
+
+**Statement understanding**
+
+This prevents an easy but incorrect implementation from hashing assembled bytes as a normal PUT. Multipart identity is derived from part digests.
+
+### Basic concepts
+
+Completion is one ordered transaction at the service boundary: reload staging, validate the client's receipt list, concatenate selected bytes, reuse Bucket PUT with the composite ETag, publish the candidate Bucket, then remove staging.
+
+Part replacement and completion are separate. Re-uploading part 1 changes the current receipt; a client that completes with the old ETag must fail rather than assemble unexpected bytes.
+
+### Why this mechanism is necessary
+
+Publishing each part would violate whole-object visibility. Removing staging before the manifest commits destroys retryability. Reusing the established Bucket and manifest path keeps multipart from creating a weaker second consistency model.
+
+### Runtime mental model
+
+`complete_multipart_upload` holds the service lock, loads upload plus parts, calls pure `validate_completion`, joins bodies, mutates a candidate Bucket with composite ETag/provenance, persists it, swaps it into memory, and only then removes the upload directory.
+
+### Mechanism blocks
+
+#### Atomic multipart completion
+
+Validate receipts, assemble staged bytes, publish one object version, and remove upload state as one locked operation.
+
+??? note "File diff: src/minis3/store.py"
+    ```diff
+    diff --git a/src/minis3/store.py b/src/minis3/store.py
+    index 0d7e596..9b50aa2 100644
+    --- a/src/minis3/store.py
+    +++ b/src/minis3/store.py
+    @@ -177,6 +177,39 @@ class MiniS3:
+                 return part.receipt
+
+
+    +    def complete_multipart_upload(
+    +        self,
+    +        bucket: str,
+    +        key: str,
+    +        upload_id: str,
+    +        parts: list[CompletionEntry] | tuple[CompletionEntry, ...],
+    +    ) -> Version:
+    +        """Validate, assemble, and publish through the bucket manifest rename."""
+    +
+    +        with self._lock:
+    +            self._bucket(bucket)
+    +            _upload, staged = self._storage.load_multipart_upload(
+    +                bucket, key, upload_id
+    +            )
+    +            selected, etag = validate_completion(
+    +                staged, parts, minimum_part_size=self.minimum_part_size
+    +            )
+    +            body = b"".join(part.body for part in selected)
+    +            candidate = deepcopy(self._bucket(bucket))
+    +            result = candidate.put(
+    +                key,
+    +                body,
+    +                self._counter,
+    +                etag=etag,
+    +                now=self._clock(),
+    +                multipart_upload_id=upload_id,
+    +            )
+    +            self._storage.persist_bucket(candidate)
+    +            self._buckets[bucket] = candidate
+    +            self._storage.remove_multipart_upload(bucket, key, upload_id)
+    +            return result
+    +
+    +
+         def abort_multipart_upload(
+             self, bucket: str, key: str, upload_id: str
+         ) -> None:
+    ```
 
 **What it is and why it appears**
 
@@ -227,26 +239,6 @@ self._storage.remove_multipart_upload(bucket, key, upload_id)
 **Statement understanding**
 
 Cleanup is last. If publication fails, the upload remains retryable; once publication succeeds, removing staging cannot make the committed object disappear.
-
-**Explanation: `tests/test_multipart.py`**
-
-**What it is and why it appears**
-
-Four cases cover invisibility until completion, same-number replacement, manifest validation, abort, and restart of unfinished staging.
-
-**Runtime role**
-
-They exercise the complete public lifecycle and inspect both visible objects and private upload behavior.
-
-**Key code**
-
-```python
-assert completed.etag != content_etag(completed.body)
-```
-
-**Statement understanding**
-
-This prevents an easy but incorrect implementation from hashing assembled bytes as a normal PUT. Multipart identity is derived from part digests.
 
 ### Verification evidence
 

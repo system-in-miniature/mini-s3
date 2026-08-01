@@ -20,6 +20,64 @@ Stage 09 validates abstract staged parts, but a real client needs upload IDs and
 
 The first integration contract creates an upload for key `right`, then tries to upload through key `wrong` and through part numbers `0` and `10001`. Each request must fail before writing staging. Otherwise an upload ID can be confused across keys or create invalid part files.
 
+??? note "File diff: tests/test_multipart.py"
+    ```diff
+    diff --git a/tests/test_multipart.py b/tests/test_multipart.py
+    new file mode 100644
+    index 0000000..0b61034
+    --- /dev/null
+    +++ b/tests/test_multipart.py
+    @@ -0,0 +1,30 @@
+    +"""Multipart tests pin invisible staging and S3's composite ETag trap."""
+    +
+    +from hashlib import md5
+    +from pathlib import Path
+    +
+    +import pytest
+    +
+    +from minis3 import (
+    +    EntityTooSmall,
+    +    InvalidPart,
+    +    InvalidPartOrder,
+    +    MiniS3,
+    +    NoSuchKey,
+    +    NoSuchUpload,
+    +    SequenceCounter,
+    +    content_etag,
+    +)
+    +
+    +
+    +def test_upload_identity_and_part_number_are_validated(tmp_path: Path) -> None:
+    +    store = MiniS3(tmp_path)
+    +    store.create_bucket("b")
+    +    upload = store.create_multipart_upload("b", "right")
+    +
+    +    with pytest.raises(NoSuchUpload):
+    +        store.upload_part("b", "wrong", upload.upload_id, 1, b"x")
+    +    with pytest.raises(ValueError):
+    +        store.upload_part("b", "right", upload.upload_id, 0, b"x")
+    +    with pytest.raises(ValueError):
+    +        store.upload_part("b", "right", upload.upload_id, 10_001, b"x")
+    ```
+
+**What it is and why it appears**
+
+The first durable multipart test locks upload identity and legal part-number range.
+
+**Runtime role**
+
+It enters through `MiniS3`, so failures cover service validation plus storage identity lookup.
+
+**Key code**
+
+```python
+store.upload_part("b", "wrong", upload.upload_id, 1, b"x")
+```
+
+**Statement understanding**
+
+An upload ID is not globally interchangeable: the addressed Bucket and Key must match its persisted metadata before any part is written.
+
 ### Basic concepts
 
 Staging is durable private state, not a partially visible object. Each upload has identity `(bucket, key, upload_id)` and its own `parts/` directory. Re-uploading the same part number atomically replaces that staged slot.
@@ -40,9 +98,7 @@ The service allocates a deterministic upload ID and asks DiskStorage to create `
 
 Extend Bucket identity and stored values so multipart uploads can coexist with ordinary object versions.
 
-??? note "View block diff (2 files)"
-    **`src/minis3/bucket.py`**
-
+??? note "File diff: src/minis3/bucket.py"
     ```diff
     diff --git a/src/minis3/bucket.py b/src/minis3/bucket.py
     index b0a46e5..cc695a1 100644
@@ -99,8 +155,25 @@ Extend Bucket identity and stored values so multipart uploads can coexist with o
                  old_versions = tuple(
     ```
 
-    **`src/minis3/model.py`**
+**What it is and why it appears**
 
+Bucket PUT accepts an optional externally calculated ETag, timestamp, and multipart provenance while keeping normal PUT defaults.
+
+**Runtime role**
+
+Completion will reuse the same version transition rather than inventing a second publication path.
+
+**Key code**
+
+```python
+etag=content_etag(body) if etag is None else etag,
+```
+
+**Statement understanding**
+
+Normal PUT still derives a whole-body ETag; multipart completion can supply its validated composite ETag. Recomputing it from assembled bytes would be wrong.
+
+??? note "File diff: src/minis3/model.py"
     ```diff
     diff --git a/src/minis3/model.py b/src/minis3/model.py
     index da662fc..7375afd 100644
@@ -130,29 +203,6 @@ Extend Bucket identity and stored values so multipart uploads can coexist with o
     -
     ```
 
-
-**Explanation: `src/minis3/bucket.py`**
-
-**What it is and why it appears**
-
-Bucket PUT accepts an optional externally calculated ETag, timestamp, and multipart provenance while keeping normal PUT defaults.
-
-**Runtime role**
-
-Completion will reuse the same version transition rather than inventing a second publication path.
-
-**Key code**
-
-```python
-etag=content_etag(body) if etag is None else etag,
-```
-
-**Statement understanding**
-
-Normal PUT still derives a whole-body ETag; multipart completion can supply its validated composite ETag. Recomputing it from assembled bytes would be wrong.
-
-**Explanation: `src/minis3/model.py`**
-
 **What it is and why it appears**
 
 Versions and markers gain timestamps; data versions can record which multipart upload produced them after completion.
@@ -175,9 +225,7 @@ multipart_upload_id: str | None = None
 
 Coordinate service calls and disk layout so each uploaded Part is durably staged but remains invisible as an object.
 
-??? note "View block diff (3 files)"
-    **`src/minis3/storage/disk.py`**
-
+??? note "File diff: src/minis3/storage/disk.py"
     ```diff
     diff --git a/src/minis3/storage/disk.py b/src/minis3/storage/disk.py
     index 8ad143f..95b160f 100644
@@ -399,8 +447,25 @@ Coordinate service calls and disk layout so each uploaded Part is durably staged
     +        return maximum_sequence
     ```
 
-    **`src/minis3/store.py`**
+**What it is and why it appears**
 
+DiskStorage gains the private upload layout, atomic part writes, identity validation, removal, and restart recovery.
+
+**Runtime role**
+
+It owns durable staging just as it owns durable object artifacts, but normal manifest/list code never consults `uploads/`.
+
+**Key code**
+
+```python
+atomic_write(directory / "parts" / f"{part.part_number:05d}.data", part.body)
+```
+
+**Statement understanding**
+
+The part number selects one stable filename and `atomic_write` replaces it completely. A retry cannot leave half old and half new bytes.
+
+??? note "File diff: src/minis3/store.py"
     ```diff
     diff --git a/src/minis3/store.py b/src/minis3/store.py
     index 7c82b41..0d7e596 100644
@@ -592,70 +657,6 @@ Coordinate service calls and disk layout so each uploaded Part is durably staged
     +
     ```
 
-    **`tests/test_multipart.py`**
-
-    ```diff
-    diff --git a/tests/test_multipart.py b/tests/test_multipart.py
-    new file mode 100644
-    index 0000000..0b61034
-    --- /dev/null
-    +++ b/tests/test_multipart.py
-    @@ -0,0 +1,30 @@
-    +"""Multipart tests pin invisible staging and S3's composite ETag trap."""
-    +
-    +from hashlib import md5
-    +from pathlib import Path
-    +
-    +import pytest
-    +
-    +from minis3 import (
-    +    EntityTooSmall,
-    +    InvalidPart,
-    +    InvalidPartOrder,
-    +    MiniS3,
-    +    NoSuchKey,
-    +    NoSuchUpload,
-    +    SequenceCounter,
-    +    content_etag,
-    +)
-    +
-    +
-    +def test_upload_identity_and_part_number_are_validated(tmp_path: Path) -> None:
-    +    store = MiniS3(tmp_path)
-    +    store.create_bucket("b")
-    +    upload = store.create_multipart_upload("b", "right")
-    +
-    +    with pytest.raises(NoSuchUpload):
-    +        store.upload_part("b", "wrong", upload.upload_id, 1, b"x")
-    +    with pytest.raises(ValueError):
-    +        store.upload_part("b", "right", upload.upload_id, 0, b"x")
-    +    with pytest.raises(ValueError):
-    +        store.upload_part("b", "right", upload.upload_id, 10_001, b"x")
-    ```
-
-
-**Explanation: `src/minis3/storage/disk.py`**
-
-**What it is and why it appears**
-
-DiskStorage gains the private upload layout, atomic part writes, identity validation, removal, and restart recovery.
-
-**Runtime role**
-
-It owns durable staging just as it owns durable object artifacts, but normal manifest/list code never consults `uploads/`.
-
-**Key code**
-
-```python
-atomic_write(directory / "parts" / f"{part.part_number:05d}.data", part.body)
-```
-
-**Statement understanding**
-
-The part number selects one stable filename and `atomic_write` replaces it completely. A retry cannot leave half old and half new bytes.
-
-**Explanation: `src/minis3/store.py`**
-
 **What it is and why it appears**
 
 The public service adds initiate, upload-part, and abort orchestration with an injectable clock and minimum part size.
@@ -674,31 +675,11 @@ upload_id=f"u{sequence:08d}",
 
 Upload IDs share the monotonic sequence discipline, making restart recovery and teaching traces deterministic instead of relying on random UUIDs.
 
-**Explanation: `tests/test_multipart.py`**
-
-**What it is and why it appears**
-
-The first durable multipart test locks upload identity and legal part-number range.
-
-**Runtime role**
-
-It enters through `MiniS3`, so failures cover service validation plus storage identity lookup.
-
-**Key code**
-
-```python
-store.upload_part("b", "wrong", upload.upload_id, 1, b"x")
-```
-
-**Statement understanding**
-
-An upload ID is not globally interchangeable: the addressed Bucket and Key must match its persisted metadata before any part is written.
-
 #### Public export wiring
 
 Expose multipart values without duplicating the state and staging explanations above.
 
-??? note "View block diff (1 file)"
+??? note "Supporting file diffs (1 file)"
     **`src/minis3/__init__.py`**
 
     ```diff

@@ -18,6 +18,144 @@ Versions now carry creation times, but nothing expires them. Hiding time reads i
 
 The pure-boundary contract evaluates the same history at time `9.999` and `10.0`. No action is allowed before the threshold; the action appears exactly at it. A hidden wall clock or strict `>` comparison makes this boundary flaky or one tick late.
 
+??? note "File diff: tests/test_lifecycle.py"
+    ```diff
+    diff --git a/tests/test_lifecycle.py b/tests/test_lifecycle.py
+    new file mode 100644
+    index 0000000..c413345
+    --- /dev/null
+    +++ b/tests/test_lifecycle.py
+    @@ -0,0 +1,110 @@
+    +"""Lifecycle rules are pure decisions applied only by an explicit clocked tick."""
+    +
+    +from pathlib import Path
+    +
+    +import pytest
+    +
+    +from minis3 import (
+    +    ExpirationRule,
+    +    LifecycleActionKind,
+    +    MiniS3,
+    +    NoSuchKey,
+    +    NoSuchVersion,
+    +    VersioningState,
+    +    evaluate_expiration,
+    +)
+    +
+    +
+    +class ManualClock:
+    +    def __init__(self, now: float = 0.0) -> None:
+    +        self.now = now
+    +
+    +    def __call__(self) -> float:
+    +        return self.now
+    +
+    +
+    +def test_rule_evaluation_is_pure_prefix_filtered_and_boundary_inclusive(
+    +    tmp_path: Path,
+    +) -> None:
+    +    clock = ManualClock()
+    +    store = MiniS3(tmp_path, clock=clock)
+    +    store.create_bucket("b")
+    +    store.set_bucket_versioning("b", VersioningState.ENABLED)
+    +    store.put_object("b", "logs/old", b"old")
+    +    store.put_object("b", "keep/old", b"old")
+    +    snapshot = store._buckets["b"].records
+    +    rule = ExpirationRule("logs", prefix="logs/", expire_current_after=10)
+    +
+    +    assert evaluate_expiration(snapshot, [rule], now=9.999) == ()
+    +    actions = evaluate_expiration(snapshot, [rule], now=10)
+    +
+    +    assert [(action.key, action.kind) for action in actions] == [
+    +        ("logs/old", LifecycleActionKind.EXPIRE_CURRENT)
+    +    ]
+    +    assert store.get_object("b", "logs/old").body == b"old"
+    +
+    +
+    +def test_tick_expires_current_to_marker_and_noncurrent_physically(
+    +    tmp_path: Path,
+    +) -> None:
+    +    clock = ManualClock()
+    +    store = MiniS3(tmp_path, clock=clock)
+    +    store.create_bucket("b")
+    +    store.set_bucket_versioning("b", "enabled")
+    +    old = store.put_object("b", "k", b"old")
+    +    clock.now = 5
+    +    current = store.put_object("b", "k", b"current")
+    +    rule = ExpirationRule(
+    +        "expire",
+    +        expire_current_after=10,
+    +        expire_noncurrent_after=12,
+    +    )
+    +
+    +    clock.now = 12
+    +    first_actions = store.lifecycle_tick("b", [rule])
+    +    assert [action.kind for action in first_actions] == [
+    +        LifecycleActionKind.EXPIRE_NONCURRENT
+    +    ]
+    +    with pytest.raises(NoSuchVersion):
+    +        store.get_object("b", "k", version_id=old.version_id)
+    +    assert store.get_object("b", "k") == current
+    +
+    +    clock.now = 15
+    +    second_actions = store.lifecycle_tick("b", [rule])
+    +    assert [action.kind for action in second_actions] == [
+    +        LifecycleActionKind.EXPIRE_CURRENT
+    +    ]
+    +    with pytest.raises(NoSuchKey):
+    +        store.get_object("b", "k")
+    +    history = store.list_object_versions("b").versions
+    +    assert history[0].is_delete_marker is True
+    +    assert history[1].version_id == current.version_id
+    +
+    +
+    +def test_tick_uses_injected_time_and_persists_timestamps_across_restart(
+    +    tmp_path: Path,
+    +) -> None:
+    +    clock = ManualClock(100)
+    +    store = MiniS3(tmp_path, clock=clock)
+    +    store.create_bucket("b")
+    +    store.set_bucket_versioning("b", "enabled")
+    +    version = store.put_object("b", "k", b"value")
+    +    assert version.created_at == 100
+    +
+    +    reopened_clock = ManualClock(109)
+    +    reopened = MiniS3(tmp_path, clock=reopened_clock)
+    +    rule = ExpirationRule("ten-seconds", expire_current_after=10)
+    +    assert reopened.lifecycle_tick("b", [rule]) == ()
+    +
+    +    reopened_clock.now = 110
+    +    assert reopened.lifecycle_tick("b", [rule])[0].kind is (
+    +        LifecycleActionKind.EXPIRE_CURRENT
+    +    )
+    +
+    +
+    +def test_expiration_rule_rejects_empty_or_negative_policy() -> None:
+    +    with pytest.raises(ValueError):
+    +        ExpirationRule("empty")
+    +    with pytest.raises(ValueError):
+    +        ExpirationRule("negative", expire_current_after=-1)
+    +
+    ```
+
+**What it is and why it appears**
+
+Four contracts cover pure filtering/boundaries, current versus noncurrent transitions, injected time/restart, and invalid rules.
+
+**Runtime role**
+
+`ManualClock` lets tests advance time deliberately and prove persisted timestamps rather than waiting on wall time.
+
+**Key code**
+
+```python
+assert evaluate_expiration(snapshot, [rule], now=9.999) == ()
+```
+
+**Statement understanding**
+
+This is the just-before boundary. Paired with the `10.0` assertion, it proves inclusion precisely rather than merely testing an obviously old object.
+
 ### Basic concepts
 
 Policy evaluation is a pure calculation from immutable history, rules, and explicit `now`. It emits `LifecycleAction` decisions. `lifecycle_tick` is the separate mutation boundary that applies those decisions under the service lock and persists only when state changes.
@@ -38,9 +176,7 @@ The caller invokes `lifecycle_tick` with rules. The service captures injected ti
 
 Select deterministic expiration actions from histories, ordered rules, and an explicit time without mutating state.
 
-??? note "View block diff (1 file)"
-    **`src/minis3/lifecycle.py`**
-
+??? note "File diff: src/minis3/lifecycle.py"
     ```diff
     diff --git a/src/minis3/lifecycle.py b/src/minis3/lifecycle.py
     new file mode 100644
@@ -153,9 +289,6 @@ Select deterministic expiration actions from histories, ordered rules, and an ex
     +    return tuple(actions)
     ```
 
-
-**Explanation: `src/minis3/lifecycle.py`**
-
 **What it is and why it appears**
 
 This pure policy module defines expiration rules, action values, and decision evaluation.
@@ -178,9 +311,7 @@ return threshold is not None and now - created_at >= threshold
 
 Apply selected actions through existing version semantics under a lock, then persist only the resulting changed Bucket.
 
-??? note "View block diff (2 files)"
-    **`src/minis3/store.py`**
-
+??? note "File diff: src/minis3/store.py"
     ```diff
     diff --git a/src/minis3/store.py b/src/minis3/store.py
     index e47e1ac..c2bdc5b 100644
@@ -390,130 +521,6 @@ Apply selected actions through existing version semantics under a lock, then per
     -
     ```
 
-    **`tests/test_lifecycle.py`**
-
-    ```diff
-    diff --git a/tests/test_lifecycle.py b/tests/test_lifecycle.py
-    new file mode 100644
-    index 0000000..c413345
-    --- /dev/null
-    +++ b/tests/test_lifecycle.py
-    @@ -0,0 +1,110 @@
-    +"""Lifecycle rules are pure decisions applied only by an explicit clocked tick."""
-    +
-    +from pathlib import Path
-    +
-    +import pytest
-    +
-    +from minis3 import (
-    +    ExpirationRule,
-    +    LifecycleActionKind,
-    +    MiniS3,
-    +    NoSuchKey,
-    +    NoSuchVersion,
-    +    VersioningState,
-    +    evaluate_expiration,
-    +)
-    +
-    +
-    +class ManualClock:
-    +    def __init__(self, now: float = 0.0) -> None:
-    +        self.now = now
-    +
-    +    def __call__(self) -> float:
-    +        return self.now
-    +
-    +
-    +def test_rule_evaluation_is_pure_prefix_filtered_and_boundary_inclusive(
-    +    tmp_path: Path,
-    +) -> None:
-    +    clock = ManualClock()
-    +    store = MiniS3(tmp_path, clock=clock)
-    +    store.create_bucket("b")
-    +    store.set_bucket_versioning("b", VersioningState.ENABLED)
-    +    store.put_object("b", "logs/old", b"old")
-    +    store.put_object("b", "keep/old", b"old")
-    +    snapshot = store._buckets["b"].records
-    +    rule = ExpirationRule("logs", prefix="logs/", expire_current_after=10)
-    +
-    +    assert evaluate_expiration(snapshot, [rule], now=9.999) == ()
-    +    actions = evaluate_expiration(snapshot, [rule], now=10)
-    +
-    +    assert [(action.key, action.kind) for action in actions] == [
-    +        ("logs/old", LifecycleActionKind.EXPIRE_CURRENT)
-    +    ]
-    +    assert store.get_object("b", "logs/old").body == b"old"
-    +
-    +
-    +def test_tick_expires_current_to_marker_and_noncurrent_physically(
-    +    tmp_path: Path,
-    +) -> None:
-    +    clock = ManualClock()
-    +    store = MiniS3(tmp_path, clock=clock)
-    +    store.create_bucket("b")
-    +    store.set_bucket_versioning("b", "enabled")
-    +    old = store.put_object("b", "k", b"old")
-    +    clock.now = 5
-    +    current = store.put_object("b", "k", b"current")
-    +    rule = ExpirationRule(
-    +        "expire",
-    +        expire_current_after=10,
-    +        expire_noncurrent_after=12,
-    +    )
-    +
-    +    clock.now = 12
-    +    first_actions = store.lifecycle_tick("b", [rule])
-    +    assert [action.kind for action in first_actions] == [
-    +        LifecycleActionKind.EXPIRE_NONCURRENT
-    +    ]
-    +    with pytest.raises(NoSuchVersion):
-    +        store.get_object("b", "k", version_id=old.version_id)
-    +    assert store.get_object("b", "k") == current
-    +
-    +    clock.now = 15
-    +    second_actions = store.lifecycle_tick("b", [rule])
-    +    assert [action.kind for action in second_actions] == [
-    +        LifecycleActionKind.EXPIRE_CURRENT
-    +    ]
-    +    with pytest.raises(NoSuchKey):
-    +        store.get_object("b", "k")
-    +    history = store.list_object_versions("b").versions
-    +    assert history[0].is_delete_marker is True
-    +    assert history[1].version_id == current.version_id
-    +
-    +
-    +def test_tick_uses_injected_time_and_persists_timestamps_across_restart(
-    +    tmp_path: Path,
-    +) -> None:
-    +    clock = ManualClock(100)
-    +    store = MiniS3(tmp_path, clock=clock)
-    +    store.create_bucket("b")
-    +    store.set_bucket_versioning("b", "enabled")
-    +    version = store.put_object("b", "k", b"value")
-    +    assert version.created_at == 100
-    +
-    +    reopened_clock = ManualClock(109)
-    +    reopened = MiniS3(tmp_path, clock=reopened_clock)
-    +    rule = ExpirationRule("ten-seconds", expire_current_after=10)
-    +    assert reopened.lifecycle_tick("b", [rule]) == ()
-    +
-    +    reopened_clock.now = 110
-    +    assert reopened.lifecycle_tick("b", [rule])[0].kind is (
-    +        LifecycleActionKind.EXPIRE_CURRENT
-    +    )
-    +
-    +
-    +def test_expiration_rule_rejects_empty_or_negative_policy() -> None:
-    +    with pytest.raises(ValueError):
-    +        ExpirationRule("empty")
-    +    with pytest.raises(ValueError):
-    +        ExpirationRule("negative", expire_current_after=-1)
-    +
-    ```
-
-
-**Explanation: `src/minis3/store.py`**
-
 **What it is and why it appears**
 
 The service adds the explicit tick that converts pure actions into durable state transitions.
@@ -532,31 +539,11 @@ self._storage.persist_bucket(candidate)
 
 Policy output alone changes nothing. Persisting the candidate is what makes an applied expiration survive restart; no-action ticks avoid needless publication.
 
-**Explanation: `tests/test_lifecycle.py`**
-
-**What it is and why it appears**
-
-Four contracts cover pure filtering/boundaries, current versus noncurrent transitions, injected time/restart, and invalid rules.
-
-**Runtime role**
-
-`ManualClock` lets tests advance time deliberately and prove persisted timestamps rather than waiting on wall time.
-
-**Key code**
-
-```python
-assert evaluate_expiration(snapshot, [rule], now=9.999) == ()
-```
-
-**Statement understanding**
-
-This is the just-before boundary. Paired with the `10.0` assertion, it proves inclusion precisely rather than merely testing an obviously old object.
-
 #### Public export wiring
 
 Expose lifecycle policy values without duplicating their policy or execution explanation.
 
-??? note "View block diff (1 file)"
+??? note "Supporting file diffs (1 file)"
     **`src/minis3/__init__.py`**
 
     ```diff

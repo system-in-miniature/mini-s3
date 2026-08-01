@@ -18,6 +18,127 @@
 
 Delimiter 契约存入 `a.txt`、`raw` 和多个 `photos/...` Key。根目录用 `/` Listing 时必须返回两个 contents 和唯一的 `photos/` common prefix。如果实现遍历目录或返回所有 photo Key，公开投影就错了。
 
+??? note "文件差异：tests/test_listing.py"
+    ```diff
+    diff --git a/tests/test_listing.py b/tests/test_listing.py
+    new file mode 100644
+    index 0000000..741dacb
+    --- /dev/null
+    +++ b/tests/test_listing.py
+    @@ -0,0 +1,93 @@
+    +"""Listing tests make the directory illusion and ordering observable."""
+    +
+    +from pathlib import Path
+    +
+    +import pytest
+    +
+    +from minis3 import InvalidContinuationToken, MiniS3
+    +
+    +
+    +def _populated_store(root: Path) -> MiniS3:
+    +    store = MiniS3(root)
+    +    store.create_bucket("b")
+    +    for key in ("a.txt", "photos/2025/a.jpg", "photos/2026/b.jpg", "raw"):
+    +        store.put_object("b", key, key.encode())
+    +    return store
+    +
+    +
+    +def test_delimiter_derives_common_prefixes_from_flat_keys(tmp_path: Path) -> None:
+    +    store = _populated_store(tmp_path)
+    +
+    +    root = store.list_objects("b", delimiter="/")
+    +    photos = store.list_objects("b", prefix="photos/", delimiter="/")
+    +    flat = store.list_objects("b", prefix="photos/")
+    +
+    +    assert [item.key for item in root.contents] == ["a.txt", "raw"]
+    +    assert root.common_prefixes == ("photos/",)
+    +    assert photos.common_prefixes == ("photos/2025/", "photos/2026/")
+    +    assert [item.key for item in flat.contents] == [
+    +        "photos/2025/a.jpg",
+    +        "photos/2026/b.jpg",
+    +    ]
+    +
+    +
+    +def test_pagination_counts_contents_and_prefixes_and_token_is_opaque(
+    +    tmp_path: Path,
+    +) -> None:
+    +    store = _populated_store(tmp_path)
+    +    first = store.list_objects("b", delimiter="/", max_keys=2)
+    +    second = store.list_objects(
+    +        "b", delimiter="/", max_keys=2, continuation_token=first.next_token
+    +    )
+    +
+    +    assert first.key_count == 2
+    +    assert first.next_token is not None
+    +    assert "photos/" not in first.next_token
+    +    assert {
+    +        *(item.key for item in first.contents),
+    +        *first.common_prefixes,
+    +        *(item.key for item in second.contents),
+    +        *second.common_prefixes,
+    +    } == {"a.txt", "photos/", "raw"}
+    +    assert second.next_token is None
+    +
+    +
+    +def test_current_listing_hides_key_behind_delete_marker(tmp_path: Path) -> None:
+    +    store = MiniS3(tmp_path)
+    +    store.create_bucket("b")
+    +    store.set_bucket_versioning("b", "enabled")
+    +    store.put_object("b", "hidden", b"value")
+    +    store.delete_object("b", "hidden")
+    +
+    +    assert store.list_objects("b").contents == ()
+    +
+    +
+    +def test_version_listing_flattens_versions_and_marks_latest(tmp_path: Path) -> None:
+    +    store = MiniS3(tmp_path)
+    +    store.create_bucket("b")
+    +    store.set_bucket_versioning("b", "enabled")
+    +    one = store.put_object("b", "a", b"one")
+    +    two = store.put_object("b", "a", b"two")
+    +    marker = store.delete_object("b", "a")
+    +
+    +    items = store.list_object_versions("b").versions
+    +
+    +    assert [item.version_id for item in items] == [
+    +        marker.version_id,
+    +        two.version_id,
+    +        one.version_id,
+    +    ]
+    +    assert [item.is_latest for item in items] == [True, False, False]
+    +    assert items[0].is_delete_marker is True
+    +
+    +
+    +def test_malformed_or_query_mismatched_tokens_are_rejected(tmp_path: Path) -> None:
+    +    store = _populated_store(tmp_path)
+    +    first = store.list_objects("b", max_keys=1)
+    +
+    +    with pytest.raises(InvalidContinuationToken):
+    +        store.list_objects("b", continuation_token="not-base64!")
+    +    with pytest.raises(InvalidContinuationToken):
+    +        store.list_objects(
+    +            "b", prefix="different", continuation_token=first.next_token
+    +        )
+    ```
+
+**是什么，为什么现在需要**
+
+五条契约覆盖目录幻觉、组合分页、Marker 隐藏、版本展开和无效 token。
+
+**在运行时做什么**
+
+它们通过 `MiniS3` 建立状态并观察公开结果，把模型语义连接到最终读取视图。
+
+**关键代码**
+
+```python
+assert root.common_prefixes == ("photos/",)
+```
+
+**关键语句理解**
+
+多个扁平 Key 在根视图中折叠成一个投影前缀；这个 tuple 不表示存储了 `photos/` 对象或目录。
+
 ### 基本概念
 
 `prefix` 按字符串开头过滤。`delimiter` 在剩余后缀第一次出现的位置分组出 `common_prefix`；它是计算视图，不是存储的文件夹。对象和 common prefix 都占结果槽位，所以分页必须共同计数。
@@ -38,9 +159,7 @@ Continuation token 是不透明游标。MiniS3 把 offset 与 prefix、delimiter
 
 从扁平精确 Key 派生 prefix、delimiter、分页与 continuation 行为，而不创建真实目录。
 
-??? note "查看本板块差异（3 个文件）"
-    **`src/minis3/listing.py`**
-
+??? note "文件差异：src/minis3/listing.py"
     ```diff
     diff --git a/src/minis3/listing.py b/src/minis3/listing.py
     index 3c40e0d..c6e95b3 100644
@@ -187,8 +306,25 @@ Continuation token 是不透明游标。MiniS3 把 offset 与 prefix、delimiter
     +
     ```
 
-    **`src/minis3/store.py`**
+**是什么，为什么现在需要**
 
+读取侧现在除版本历史外，还拥有当前对象 Listing、delimiter 分组与分页 token。
+
+**在运行时做什么**
+
+它不修改 Bucket records，返回不可变 `contents`、`common_prefixes` 与 `next_token`。
+
+**关键代码**
+
+```python
+return urlsafe_b64encode(payload).decode().rstrip("=")
+```
+
+**关键语句理解**
+
+编码隐藏游标表示；payload 还带查询形状，因此解码时能拒绝属于其他 prefix 或 delimiter 的游标。
+
+??? note "文件差异：src/minis3/store.py"
     ```diff
     diff --git a/src/minis3/store.py b/src/minis3/store.py
     index 23ddd8e..7c82b41 100644
@@ -311,133 +447,6 @@ Continuation token 是不透明游标。MiniS3 把 offset 与 prefix、delimiter
     -
     ```
 
-    **`tests/test_listing.py`**
-
-    ```diff
-    diff --git a/tests/test_listing.py b/tests/test_listing.py
-    new file mode 100644
-    index 0000000..741dacb
-    --- /dev/null
-    +++ b/tests/test_listing.py
-    @@ -0,0 +1,93 @@
-    +"""Listing tests make the directory illusion and ordering observable."""
-    +
-    +from pathlib import Path
-    +
-    +import pytest
-    +
-    +from minis3 import InvalidContinuationToken, MiniS3
-    +
-    +
-    +def _populated_store(root: Path) -> MiniS3:
-    +    store = MiniS3(root)
-    +    store.create_bucket("b")
-    +    for key in ("a.txt", "photos/2025/a.jpg", "photos/2026/b.jpg", "raw"):
-    +        store.put_object("b", key, key.encode())
-    +    return store
-    +
-    +
-    +def test_delimiter_derives_common_prefixes_from_flat_keys(tmp_path: Path) -> None:
-    +    store = _populated_store(tmp_path)
-    +
-    +    root = store.list_objects("b", delimiter="/")
-    +    photos = store.list_objects("b", prefix="photos/", delimiter="/")
-    +    flat = store.list_objects("b", prefix="photos/")
-    +
-    +    assert [item.key for item in root.contents] == ["a.txt", "raw"]
-    +    assert root.common_prefixes == ("photos/",)
-    +    assert photos.common_prefixes == ("photos/2025/", "photos/2026/")
-    +    assert [item.key for item in flat.contents] == [
-    +        "photos/2025/a.jpg",
-    +        "photos/2026/b.jpg",
-    +    ]
-    +
-    +
-    +def test_pagination_counts_contents_and_prefixes_and_token_is_opaque(
-    +    tmp_path: Path,
-    +) -> None:
-    +    store = _populated_store(tmp_path)
-    +    first = store.list_objects("b", delimiter="/", max_keys=2)
-    +    second = store.list_objects(
-    +        "b", delimiter="/", max_keys=2, continuation_token=first.next_token
-    +    )
-    +
-    +    assert first.key_count == 2
-    +    assert first.next_token is not None
-    +    assert "photos/" not in first.next_token
-    +    assert {
-    +        *(item.key for item in first.contents),
-    +        *first.common_prefixes,
-    +        *(item.key for item in second.contents),
-    +        *second.common_prefixes,
-    +    } == {"a.txt", "photos/", "raw"}
-    +    assert second.next_token is None
-    +
-    +
-    +def test_current_listing_hides_key_behind_delete_marker(tmp_path: Path) -> None:
-    +    store = MiniS3(tmp_path)
-    +    store.create_bucket("b")
-    +    store.set_bucket_versioning("b", "enabled")
-    +    store.put_object("b", "hidden", b"value")
-    +    store.delete_object("b", "hidden")
-    +
-    +    assert store.list_objects("b").contents == ()
-    +
-    +
-    +def test_version_listing_flattens_versions_and_marks_latest(tmp_path: Path) -> None:
-    +    store = MiniS3(tmp_path)
-    +    store.create_bucket("b")
-    +    store.set_bucket_versioning("b", "enabled")
-    +    one = store.put_object("b", "a", b"one")
-    +    two = store.put_object("b", "a", b"two")
-    +    marker = store.delete_object("b", "a")
-    +
-    +    items = store.list_object_versions("b").versions
-    +
-    +    assert [item.version_id for item in items] == [
-    +        marker.version_id,
-    +        two.version_id,
-    +        one.version_id,
-    +    ]
-    +    assert [item.is_latest for item in items] == [True, False, False]
-    +    assert items[0].is_delete_marker is True
-    +
-    +
-    +def test_malformed_or_query_mismatched_tokens_are_rejected(tmp_path: Path) -> None:
-    +    store = _populated_store(tmp_path)
-    +    first = store.list_objects("b", max_keys=1)
-    +
-    +    with pytest.raises(InvalidContinuationToken):
-    +        store.list_objects("b", continuation_token="not-base64!")
-    +    with pytest.raises(InvalidContinuationToken):
-    +        store.list_objects(
-    +            "b", prefix="different", continuation_token=first.next_token
-    +        )
-    ```
-
-
-**讲解: `src/minis3/listing.py`**
-
-**是什么，为什么现在需要**
-
-读取侧现在除版本历史外，还拥有当前对象 Listing、delimiter 分组与分页 token。
-
-**在运行时做什么**
-
-它不修改 Bucket records，返回不可变 `contents`、`common_prefixes` 与 `next_token`。
-
-**关键代码**
-
-```python
-return urlsafe_b64encode(payload).decode().rstrip("=")
-```
-
-**关键语句理解**
-
-编码隐藏游标表示；payload 还带查询形状，因此解码时能拒绝属于其他 prefix 或 delimiter 的游标。
-
-**讲解: `src/minis3/store.py`**
-
 **是什么，为什么现在需要**
 
 服务增加当前 Listing 的公开带锁入口。
@@ -456,31 +465,11 @@ with self._lock:
 
 纯投影也需要稳定输入。锁防止并发 PUT/DELETE 在分页构造中途改变 Key 集合。
 
-**讲解: `tests/test_listing.py`**
-
-**是什么，为什么现在需要**
-
-五条契约覆盖目录幻觉、组合分页、Marker 隐藏、版本展开和无效 token。
-
-**在运行时做什么**
-
-它们通过 `MiniS3` 建立状态并观察公开结果，把模型语义连接到最终读取视图。
-
-**关键代码**
-
-```python
-assert root.common_prefixes == ("photos/",)
-```
-
-**关键语句理解**
-
-多个扁平 Key 在根视图中折叠成一个投影前缀；这个 tuple 不表示存储了 `photos/` 对象或目录。
-
 #### 公开导出接线
 
 导出 Listing 值，同时让投影语义继续集中在核心板块。
 
-??? note "查看本板块差异（1 个文件）"
+??? note "支撑文件差异（1 个文件）"
     **`src/minis3/__init__.py`**
 
     ```diff

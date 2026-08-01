@@ -16,6 +16,56 @@ Stage 01 can describe one value but cannot decide what PUT or DELETE does to an 
 
 The focused contract writes an unversioned value, enables versioning, writes again, suspends versioning, and then attempts to return to `UNVERSIONED`. If that final transition succeeds, named history can be silently reinterpreted as if versioning never existed. The expected `ValueError` locks the state machine before persistence complicates it.
 
+??? note "File diff: tests/test_bucket.py"
+    ```diff
+    diff --git a/tests/test_bucket.py b/tests/test_bucket.py
+    new file mode 100644
+    index 0000000..139fcf0
+    --- /dev/null
+    +++ b/tests/test_bucket.py
+    @@ -0,0 +1,21 @@
+    +"""Focused contracts for the bucket aggregate before service wiring."""
+    +
+    +import pytest
+    +
+    +from minis3.bucket import Bucket, SequenceCounter, VersioningState
+    +
+    +
+    +def test_bucket_owns_versioning_transitions_and_deterministic_ids() -> None:
+    +    bucket = Bucket("b")
+    +    counter = SequenceCounter()
+    +
+    +    null = bucket.put("key", b"before", counter)
+    +    bucket.set_versioning(VersioningState.ENABLED)
+    +    named = bucket.put("key", b"after", counter)
+    +    bucket.set_versioning(VersioningState.SUSPENDED)
+    +
+    +    assert (null.version_id, null.storage_id) == ("null", "e00000001")
+    +    assert (named.version_id, named.storage_id) == ("v00000002", "e00000002")
+    +    assert bucket.get("key").body == b"after"
+    +    with pytest.raises(ValueError):
+    +        bucket.set_versioning(VersioningState.UNVERSIONED)
+    ```
+
+**What it is and why it appears**
+
+This contract exercises the aggregate before service and disk layers can hide the source of an error.
+
+**Runtime role**
+
+It proves the same sequence produces `null/e00000001` and then `v00000002/e00000002`, and it locks the forbidden backward transition.
+
+**Key code**
+
+```python
+with pytest.raises(ValueError):
+    bucket.set_versioning(VersioningState.UNVERSIONED)
+```
+
+**Statement understanding**
+
+The failure is part of domain behavior, not merely validation style: once named versions can exist, “never versioned” is no longer a truthful state.
+
 ### Basic concepts
 
 An aggregate is the owner of a related set of state transitions. Here one `Bucket` owns its versioning state and every per-key `ObjectRecord`. `UNVERSIONED` means versioning has never been enabled; `SUSPENDED` means it was enabled and new writes use the public `null` slot while named history remains.
@@ -36,9 +86,7 @@ A caller supplies a command and `SequenceCounter`. Bucket validates its state, o
 
 Keep versioning state, exact-key histories, and monotonic identities under one aggregate boundary, then prove its transitions directly.
 
-??? note "View block diff (2 files)"
-    **`src/minis3/bucket.py`**
-
+??? note "File diff: src/minis3/bucket.py"
     ```diff
     diff --git a/src/minis3/bucket.py b/src/minis3/bucket.py
     new file mode 100644
@@ -207,41 +255,6 @@ Keep versioning state, exact-key histories, and monotonic identities under one a
     +        return marker
     ```
 
-    **`tests/test_bucket.py`**
-
-    ```diff
-    diff --git a/tests/test_bucket.py b/tests/test_bucket.py
-    new file mode 100644
-    index 0000000..139fcf0
-    --- /dev/null
-    +++ b/tests/test_bucket.py
-    @@ -0,0 +1,21 @@
-    +"""Focused contracts for the bucket aggregate before service wiring."""
-    +
-    +import pytest
-    +
-    +from minis3.bucket import Bucket, SequenceCounter, VersioningState
-    +
-    +
-    +def test_bucket_owns_versioning_transitions_and_deterministic_ids() -> None:
-    +    bucket = Bucket("b")
-    +    counter = SequenceCounter()
-    +
-    +    null = bucket.put("key", b"before", counter)
-    +    bucket.set_versioning(VersioningState.ENABLED)
-    +    named = bucket.put("key", b"after", counter)
-    +    bucket.set_versioning(VersioningState.SUSPENDED)
-    +
-    +    assert (null.version_id, null.storage_id) == ("null", "e00000001")
-    +    assert (named.version_id, named.storage_id) == ("v00000002", "e00000002")
-    +    assert bucket.get("key").body == b"after"
-    +    with pytest.raises(ValueError):
-    +        bucket.set_versioning(VersioningState.UNVERSIONED)
-    ```
-
-
-**Explanation: `src/minis3/bucket.py`**
-
 **What it is and why it appears**
 
 This mutable aggregate is the single owner of legal versioning changes and per-key histories. Persistence remains outside it.
@@ -261,27 +274,6 @@ else:
 **Statement understanding**
 
 Enabled PUT preserves every earlier version by prepending. The `else` branch deliberately replaces the public `null` slot while retaining named history; treating both branches alike would break suspended semantics.
-
-**Explanation: `tests/test_bucket.py`**
-
-**What it is and why it appears**
-
-This contract exercises the aggregate before service and disk layers can hide the source of an error.
-
-**Runtime role**
-
-It proves the same sequence produces `null/e00000001` and then `v00000002/e00000002`, and it locks the forbidden backward transition.
-
-**Key code**
-
-```python
-with pytest.raises(ValueError):
-    bucket.set_versioning(VersioningState.UNVERSIONED)
-```
-
-**Statement understanding**
-
-The failure is part of domain behavior, not merely validation style: once named versions can exist, “never versioned” is no longer a truthful state.
 
 ### Verification evidence
 

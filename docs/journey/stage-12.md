@@ -15,27 +15,7 @@ Normal completion order is correct, but a crash can interrupt after assembly at 
 
 The pre-publication test crashes completion at `before_manifest_publish`, reopens, and completes the same upload successfully. If recovery deletes all staging eagerly, the retry becomes impossible even though no object was committed.
 
-### Basic concepts
-
-Before publication, staging is the only durable owner of the requested completion and must remain. After publication, the object version's `multipart_upload_id` proves that this upload committed, so leftover staging is redundant debris and may be removed.
-
-### Why this mechanism is necessary
-
-Using directory existence alone cannot distinguish an unfinished upload from post-commit cleanup interrupted by a crash. Correlating published provenance with upload ID makes both cases deterministic.
-
-### Runtime mental model
-
-Each test prepares a durable upload and parts, injects one crash point, discards the crashing service, and reopens. The before case retries completion; the after case reads the object and verifies abort now reports `NoSuchUpload` because recovery cleaned staging.
-
-### Mechanism blocks
-
-#### Multipart publication recovery
-
-Prove completion crashes on either side of Manifest publication recover to exactly the old or new visible object state.
-
-??? note "View block diff (1 file)"
-    **`tests/test_storage.py`**
-
+??? note "File diff: tests/test_storage.py"
     ```diff
     diff --git a/tests/test_storage.py b/tests/test_storage.py
     index afc9a8a..96bc973 100644
@@ -115,9 +95,6 @@ Prove completion crashes on either side of Manifest publication recover to exact
     +        reopened.abort_multipart_upload("b", "movie", upload.upload_id)
     ```
 
-
-**Explanation: `tests/test_storage.py`**
-
 **What it is and why it appears**
 
 The storage recovery suite gains the two-sided multipart completion crash contract.
@@ -135,6 +112,24 @@ assert reopened.get_object("b", "movie").body == b"abcx"
 **Statement understanding**
 
 In the after-publish case, the visible complete object is authoritative even if cleanup did not run. Recovery must keep it and remove only the matching upload staging.
+
+### Basic concepts
+
+Before publication, staging is the only durable owner of the requested completion and must remain. After publication, the object version's `multipart_upload_id` proves that this upload committed, so leftover staging is redundant debris and may be removed.
+
+### Why this mechanism is necessary
+
+Using directory existence alone cannot distinguish an unfinished upload from post-commit cleanup interrupted by a crash. Correlating published provenance with upload ID makes both cases deterministic.
+
+### Runtime mental model
+
+Each test prepares a durable upload and parts, injects one crash point, discards the crashing service, and reopens. The before case retries completion; the after case reads the object and verifies abort now reports `NoSuchUpload` because recovery cleaned staging.
+
+### Mechanism blocks
+
+#### Multipart publication recovery
+
+Prove completion crashes on either side of Manifest publication recover to exactly the old or new visible object state.
 
 ### Verification evidence
 

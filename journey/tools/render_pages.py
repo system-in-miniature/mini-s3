@@ -369,7 +369,18 @@ def parse_localized_lesson(
     )
 
 
-def _render_block_diff(
+def _render_file_diff(file_patch: FilePatch, *, chinese: bool) -> str:
+    label = "文件差异：" if chinese else "File diff: "
+    lines = [f'??? note "{label}{file_patch.path}"', "    ```diff"]
+    lines.extend(
+        f"    {clean}" if (clean := line.rstrip()) else ""
+        for line in file_patch.patch.splitlines()
+    )
+    lines.append("    ```")
+    return "\n".join(lines)
+
+
+def _render_supporting_diff(
     block: BlockLayout,
     patch_by_path: dict[str, FilePatch],
     *,
@@ -377,10 +388,10 @@ def _render_block_diff(
 ) -> str:
     count = len(block.files)
     if chinese:
-        label = f"查看本板块差异（{count} 个文件）"
+        label = f"支撑文件差异（{count} 个文件）"
     else:
         noun = "file" if count == 1 else "files"
-        label = f"View block diff ({count} {noun})"
+        label = f"Supporting file diffs ({count} {noun})"
     lines = [f'??? note "{label}"']
     for path in block.files:
         lines.extend([f"    **`{path}`**", "", "    ```diff"])
@@ -404,7 +415,21 @@ def _collapse_deliverables(prelude: str, *, chinese: bool) -> str:
     return prelude[:heading_start] + collapsed + prelude[next_heading + 1:]
 
 
-def _render_core_file_explanation(lesson: FileLesson, *, chinese: bool) -> str:
+def _insert_test_walkthrough(
+    prelude: str,
+    test_sections: list[str],
+    *,
+    chinese: bool,
+) -> str:
+    if not test_sections:
+        return prelude
+    concepts_heading = "### 基本概念" if chinese else "### Basic concepts"
+    position = prelude.index(concepts_heading)
+    tests = "\n\n".join(test_sections)
+    return f"{prelude[:position].rstrip()}\n\n{tests}\n\n{prelude[position:]}"
+
+
+def _render_file_explanation(lesson: FileLesson) -> str:
     _, separator, explanation = lesson.body.partition("\n")
     if not separator:
         raise ValueError(f"{lesson.path}: file lesson has no explanation after its heading")
@@ -414,8 +439,7 @@ def _render_core_file_explanation(lesson: FileLesson, *, chinese: bool) -> str:
         explanation.lstrip(),
         flags=re.MULTILINE,
     )
-    label = "讲解" if chinese else "Explanation"
-    return f"**{label}: `{lesson.path}`**\n\n{explanation}"
+    return explanation
 
 
 def _render_mechanism_block(
@@ -427,16 +451,15 @@ def _render_mechanism_block(
 ) -> str:
     title = block.title_zh if chinese else block.title_en
     summary = block.summary_zh if chinese else block.summary_en
-    parts = [
-        f"#### {title}",
-        summary,
-        _render_block_diff(block, patch_by_path, chinese=chinese),
-    ]
-    if not block.supporting:
-        parts.extend(
-            _render_core_file_explanation(lesson_by_path[path], chinese=chinese)
-            for path in block.files
-        )
+    parts = [f"#### {title}", summary]
+    if block.supporting:
+        parts.append(_render_supporting_diff(block, patch_by_path, chinese=chinese))
+        return "\n\n".join(parts)
+    for path in block.files:
+        if path.startswith("tests/"):
+            continue
+        parts.append(_render_file_diff(patch_by_path[path], chinese=chinese))
+        parts.append(_render_file_explanation(lesson_by_path[path]))
     return "\n\n".join(parts)
 
 
@@ -452,6 +475,21 @@ def render_card(card: Card, *, chinese: bool) -> str:
     )
     patch_by_path = {item.path: item for item in file_patches}
     lesson_by_path = {item.path: item for item in lesson.files}
+    test_sections = [
+        "\n\n".join(
+            (
+                _render_file_diff(patch_by_path[item.path], chinese=chinese),
+                _render_file_explanation(item),
+            )
+        )
+        for item in lesson.files
+        if item.path.startswith("tests/")
+    ]
+    prelude = _insert_test_walkthrough(
+        _collapse_deliverables(lesson.pre_walkthrough, chinese=chinese),
+        test_sections,
+        chinese=chinese,
+    )
     block_sections = [
         _render_mechanism_block(
             block,
@@ -470,7 +508,7 @@ def render_card(card: Card, *, chinese: bool) -> str:
     patch_link = f"{REPO_URL}/blob/main/journey/stages/{card.number:02d}-{card.slug}/stage.patch"
     return (
         f"# Stage {card.number:02d} · {title}\n\n"
-        f"{_collapse_deliverables(lesson.pre_walkthrough, chinese=chinese)}\n\n"
+        f"{prelude}\n\n"
         + "\n\n".join(block_sections)
         + f"\n\n{lesson.post_walkthrough}\n\n"
         f"[{link_label}]({compare_link(card.number)})\n\n"

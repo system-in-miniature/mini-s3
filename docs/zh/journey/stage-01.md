@@ -23,6 +23,69 @@
 
 最直观的契约会创建 `ObjectRecord(key="/a//b/")`，并要求读取时得到完全相同的字符串。如果模型把 Key 当文件系统路径，开头或重复斜杠可能在存储出现以前就被吞掉。这个测试在最小边界上直接暴露数据被改写的问题。
 
+??? note "文件差异：tests/test_model.py"
+    ```diff
+    diff --git a/tests/test_model.py b/tests/test_model.py
+    new file mode 100644
+    index 0000000..01151ba
+    --- /dev/null
+    +++ b/tests/test_model.py
+    @@ -0,0 +1,35 @@
+    +"""Executable contracts for MiniS3's flat object model."""
+    +
+    +from dataclasses import FrozenInstanceError
+    +
+    +import pytest
+    +
+    +from minis3 import DeleteMarker, ObjectRecord, Version, content_etag
+    +
+    +
+    +def test_etag_is_quoted_lowercase_content_md5() -> None:
+    +    assert content_etag(b"hello") == '"5d41402abc4b2a76b9719d911017c592"'
+    +
+    +
+    +def test_keys_are_opaque_even_when_they_contain_slashes() -> None:
+    +    version = Version(
+    +        version_id="null",
+    +        storage_id="e00000001",
+    +        sequence=1,
+    +        body=b"x",
+    +        etag=content_etag(b"x"),
+    +    )
+    +    record = ObjectRecord(key="/a//b/", versions=(version,))
+    +
+    +    assert record.key == "/a//b/"
+    +    assert record.versions == (version,)
+    +    with pytest.raises(FrozenInstanceError):
+    +        version.etag = "changed"  # type: ignore[misc]
+    +
+    +
+    +def test_delete_marker_has_no_object_body() -> None:
+    +    marker = DeleteMarker(
+    +        version_id="v00000002", storage_id="e00000002", sequence=2
+    +    )
+    +    assert marker.is_delete_marker is True
+    +
+    ```
+
+**是什么，为什么现在需要**
+
+三个测试分别固定带引号 ETag、含斜杠的不透明 Key 与不可变性、无 Body 删除标记。
+
+**在运行时做什么**
+
+它们直接调用学习者可见的领域值，只证明值语义；目前还不能证明 Bucket 迁移、磁盘持久化或对象服务。
+
+**关键代码**
+
+```python
+assert record.key == "/a//b/"
+```
+
+**关键语句理解**
+
+故意使用异常形状的 Key 是为了捕获路径规范化。断言通过只证明字符串被原样保存，不代表系统真的存在目录。
+
 ### 基本概念
 
 S3 对象值是一整段字节，不是可局部编辑的文件。本项目里的普通 ETag 是对象字节的带引号小写 MD5；它用于比较内容，不是访问控制密钥。
@@ -43,9 +106,7 @@ Key 是不透明字符串。后面的 Listing 可以利用斜杠展示类似目�
 
 定义后续 Bucket、存储和服务边界共同使用的不可变值与可执行不变量。
 
-??? note "查看本板块差异（3 个文件）"
-    **`src/minis3/errors.py`**
-
+??? note "文件差异：src/minis3/errors.py"
     ```diff
     diff --git a/src/minis3/errors.py b/src/minis3/errors.py
     new file mode 100644
@@ -85,8 +146,25 @@ Key 是不透明字符串。后面的 Listing 可以利用斜杠展示类似目�
     +
     ```
 
-    **`src/minis3/model.py`**
+**是什么，为什么现在需要**
 
+这里定义与 HTTP 无关的领域错误。Bucket 和服务代码可以准确表达失败，而不依赖传输协议。
+
+**在运行时做什么**
+
+调用方可以捕获 `MiniS3Error` 的具体子类，再映射成协议响应。缺 Bucket、缺 Key、缺具体版本必须分开，否则会丢失语义。
+
+**关键代码**
+
+```python
+class NoSuchKey(MiniS3Error):
+```
+
+**关键语句理解**
+
+继承关系表示它属于 MiniS3 的公开失败词汇，同时仍可与 `NoSuchBucket`、`NoSuchVersion` 区分。
+
+??? note "文件差异：src/minis3/model.py"
     ```diff
     diff --git a/src/minis3/model.py b/src/minis3/model.py
     new file mode 100644
@@ -171,75 +249,6 @@ Key 是不透明字符串。后面的 Listing 可以利用斜杠展示类似目�
     +
     ```
 
-    **`tests/test_model.py`**
-
-    ```diff
-    diff --git a/tests/test_model.py b/tests/test_model.py
-    new file mode 100644
-    index 0000000..01151ba
-    --- /dev/null
-    +++ b/tests/test_model.py
-    @@ -0,0 +1,35 @@
-    +"""Executable contracts for MiniS3's flat object model."""
-    +
-    +from dataclasses import FrozenInstanceError
-    +
-    +import pytest
-    +
-    +from minis3 import DeleteMarker, ObjectRecord, Version, content_etag
-    +
-    +
-    +def test_etag_is_quoted_lowercase_content_md5() -> None:
-    +    assert content_etag(b"hello") == '"5d41402abc4b2a76b9719d911017c592"'
-    +
-    +
-    +def test_keys_are_opaque_even_when_they_contain_slashes() -> None:
-    +    version = Version(
-    +        version_id="null",
-    +        storage_id="e00000001",
-    +        sequence=1,
-    +        body=b"x",
-    +        etag=content_etag(b"x"),
-    +    )
-    +    record = ObjectRecord(key="/a//b/", versions=(version,))
-    +
-    +    assert record.key == "/a//b/"
-    +    assert record.versions == (version,)
-    +    with pytest.raises(FrozenInstanceError):
-    +        version.etag = "changed"  # type: ignore[misc]
-    +
-    +
-    +def test_delete_marker_has_no_object_body() -> None:
-    +    marker = DeleteMarker(
-    +        version_id="v00000002", storage_id="e00000002", sequence=2
-    +    )
-    +    assert marker.is_delete_marker is True
-    +
-    ```
-
-
-**讲解: `src/minis3/errors.py`**
-
-**是什么，为什么现在需要**
-
-这里定义与 HTTP 无关的领域错误。Bucket 和服务代码可以准确表达失败，而不依赖传输协议。
-
-**在运行时做什么**
-
-调用方可以捕获 `MiniS3Error` 的具体子类，再映射成协议响应。缺 Bucket、缺 Key、缺具体版本必须分开，否则会丢失语义。
-
-**关键代码**
-
-```python
-class NoSuchKey(MiniS3Error):
-```
-
-**关键语句理解**
-
-继承关系表示它属于 MiniS3 的公开失败词汇，同时仍可与 `NoSuchBucket`、`NoSuchVersion` 区分。
-
-**讲解: `src/minis3/model.py`**
-
 **是什么，为什么现在需要**
 
 这是本阶段的核心领域值文件，定义完整对象版本、无 Body 删除标记、Key 的历史和内容 ETag。
@@ -259,31 +268,11 @@ return f'"{digest}"'
 
 `usedforsecurity=False` 明确 MD5 在这里是 S3 风格指纹，不是安全算法。外层引号属于 ETag 的公开表示，返回裸摘要会造成语义错误。
 
-**讲解: `tests/test_model.py`**
-
-**是什么，为什么现在需要**
-
-三个测试分别固定带引号 ETag、含斜杠的不透明 Key 与不可变性、无 Body 删除标记。
-
-**在运行时做什么**
-
-它们直接调用学习者可见的领域值，只证明值语义；目前还不能证明 Bucket 迁移、磁盘持久化或对象服务。
-
-**关键代码**
-
-```python
-assert record.key == "/a//b/"
-```
-
-**关键语句理解**
-
-故意使用异常形状的 Key 是为了捕获路径规范化。断言通过只证明字符串被原样保存，不代表系统真的存在目录。
-
 #### 包与工具脚手架
 
 接好包、测试环境、学习 README 与可复现依赖，但不把这些工程设置当成对象存储机制讲解。
 
-??? note "查看本板块差异（4 个文件）"
+??? note "支撑文件差异（4 个文件）"
     **`README.md`**
 
     ```diff

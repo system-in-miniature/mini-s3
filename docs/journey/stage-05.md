@@ -18,124 +18,7 @@ GET returns one addressed data version, so it cannot explain the history hidden 
 
 The suspended-delete contract creates named history, writes a `null` value, then deletes without a version ID. The expected history contains a new `null` marker and the older named versions, but not the replaced `null` data. A flat “all values” list would report the wrong state.
 
-### Basic concepts
-
-A projection is a read-only shape derived from owned state. `ListedVersion` does not become a second history owner; it converts each `Version` or `DeleteMarker` into fields useful to callers. `is_latest` depends on position within one key's newest-first tuple, not on the highest ID string globally.
-
-### Why this mechanism is necessary
-
-Returning raw internal objects would couple callers to storage fields and tempt them to mutate history. Returning only current data would erase markers and noncurrent versions. An explicit projection preserves semantics while keeping the aggregate authoritative.
-
-### Runtime mental model
-
-The service locks and passes Bucket records to `list_object_versions`. The pure function filters exact key prefixes, iterates keys deterministically, flattens each newest-first history, marks only index zero as latest, and returns an immutable result.
-
-### Mechanism blocks
-
-#### Version-history projection
-
-Project newest-first Bucket histories into stable public values without losing null versions or delete markers.
-
-??? note "View block diff (3 files)"
-    **`src/minis3/listing.py`**
-
-    ```diff
-    diff --git a/src/minis3/listing.py b/src/minis3/listing.py
-    new file mode 100644
-    index 0000000..3c40e0d
-    --- /dev/null
-    +++ b/src/minis3/listing.py
-    @@ -0,0 +1,55 @@
-    +"""Version-history projection over MiniS3 records."""
-    +
-    +
-    +from __future__ import annotations
-    +
-    +
-    +from dataclasses import dataclass
-    +
-    +
-    +from .model import ObjectRecord, Version
-    +
-    +
-    +@dataclass(frozen=True, slots=True)
-    +class ListedVersion:
-    +    """One data version or delete marker in a flattened history."""
-    +
-    +    key: str
-    +    version_id: str
-    +    is_latest: bool
-    +    is_delete_marker: bool
-    +    etag: str | None
-    +    size: int | None
-    +
-    +
-    +@dataclass(frozen=True, slots=True)
-    +class ListObjectVersionsResult:
-    +    """All retained versions and markers, ordered by key then newest first."""
-    +
-    +    versions: tuple[ListedVersion, ...]
-    +
-    +
-    +def list_object_versions(
-    +    records: dict[str, ObjectRecord],
-    +    *,
-    +    prefix: str = "",
-    +) -> ListObjectVersionsResult:
-    +    """Flatten complete histories without hiding delete markers."""
-    +
-    +    result: list[ListedVersion] = []
-    +    for key in sorted(records):
-    +        if not key.startswith(prefix):
-    +            continue
-    +        for index, item in enumerate(records[key].versions):
-    +            is_data = isinstance(item, Version)
-    +            result.append(
-    +                ListedVersion(
-    +                    key=key,
-    +                    version_id=item.version_id,
-    +                    is_latest=index == 0,
-    +                    is_delete_marker=not is_data,
-    +                    etag=item.etag if is_data else None,
-    +                    size=item.size if is_data else None,
-    +                )
-    +            )
-    +    return ListObjectVersionsResult(tuple(result))
-    ```
-
-    **`src/minis3/store.py`**
-
-    ```diff
-    diff --git a/src/minis3/store.py b/src/minis3/store.py
-    index 5d418b8..23ddd8e 100644
-    --- a/src/minis3/store.py
-    +++ b/src/minis3/store.py
-    @@ -9,6 +9,7 @@ from threading import RLock
-
-     from .bucket import Bucket, SequenceCounter, VersioningState
-     from .errors import BucketAlreadyExists, BucketNotEmpty, NoSuchBucket
-    +from .listing import ListObjectVersionsResult, list_object_versions
-     from .model import ObjectVersion, Version
-     from .storage import DiskStorage
-
-    @@ -96,6 +97,13 @@ class MiniS3:
-                 return result
-
-
-    +    def list_object_versions(
-    +        self, bucket: str, *, prefix: str = ""
-    +    ) -> ListObjectVersionsResult:
-    +        with self._lock:
-    +            return list_object_versions(self._bucket(bucket).records, prefix=prefix)
-    +
-    +
-         def _bucket(self, name: str) -> Bucket:
-             try:
-                 return self._buckets[name]
-    ```
-
-    **`tests/test_versioning.py`**
-
+??? note "File diff: tests/test_versioning.py"
     ```diff
     diff --git a/tests/test_versioning.py b/tests/test_versioning.py
     index 389e45d..3f305c6 100644
@@ -239,8 +122,106 @@ Project newest-first Bucket histories into stable public values without losing n
          store.create_bucket("b")
     ```
 
+**What it is and why it appears**
 
-**Explanation: `src/minis3/listing.py`**
+Three new scenarios lock the projection of unversioned replacement, suspended replacement, and suspended deletion.
+
+**Runtime role**
+
+They observe public histories after real service mutations, so the evidence covers Bucket plus projection rather than a fabricated input alone.
+
+**Key code**
+
+```python
+assert marker is not None and marker.version_id == "null"
+```
+
+**Statement understanding**
+
+Suspension does not mean deletion becomes physical. The new marker occupies the public `null` slot while named history remains addressable.
+
+### Basic concepts
+
+A projection is a read-only shape derived from owned state. `ListedVersion` does not become a second history owner; it converts each `Version` or `DeleteMarker` into fields useful to callers. `is_latest` depends on position within one key's newest-first tuple, not on the highest ID string globally.
+
+### Why this mechanism is necessary
+
+Returning raw internal objects would couple callers to storage fields and tempt them to mutate history. Returning only current data would erase markers and noncurrent versions. An explicit projection preserves semantics while keeping the aggregate authoritative.
+
+### Runtime mental model
+
+The service locks and passes Bucket records to `list_object_versions`. The pure function filters exact key prefixes, iterates keys deterministically, flattens each newest-first history, marks only index zero as latest, and returns an immutable result.
+
+### Mechanism blocks
+
+#### Version-history projection
+
+Project newest-first Bucket histories into stable public values without losing null versions or delete markers.
+
+??? note "File diff: src/minis3/listing.py"
+    ```diff
+    diff --git a/src/minis3/listing.py b/src/minis3/listing.py
+    new file mode 100644
+    index 0000000..3c40e0d
+    --- /dev/null
+    +++ b/src/minis3/listing.py
+    @@ -0,0 +1,55 @@
+    +"""Version-history projection over MiniS3 records."""
+    +
+    +
+    +from __future__ import annotations
+    +
+    +
+    +from dataclasses import dataclass
+    +
+    +
+    +from .model import ObjectRecord, Version
+    +
+    +
+    +@dataclass(frozen=True, slots=True)
+    +class ListedVersion:
+    +    """One data version or delete marker in a flattened history."""
+    +
+    +    key: str
+    +    version_id: str
+    +    is_latest: bool
+    +    is_delete_marker: bool
+    +    etag: str | None
+    +    size: int | None
+    +
+    +
+    +@dataclass(frozen=True, slots=True)
+    +class ListObjectVersionsResult:
+    +    """All retained versions and markers, ordered by key then newest first."""
+    +
+    +    versions: tuple[ListedVersion, ...]
+    +
+    +
+    +def list_object_versions(
+    +    records: dict[str, ObjectRecord],
+    +    *,
+    +    prefix: str = "",
+    +) -> ListObjectVersionsResult:
+    +    """Flatten complete histories without hiding delete markers."""
+    +
+    +    result: list[ListedVersion] = []
+    +    for key in sorted(records):
+    +        if not key.startswith(prefix):
+    +            continue
+    +        for index, item in enumerate(records[key].versions):
+    +            is_data = isinstance(item, Version)
+    +            result.append(
+    +                ListedVersion(
+    +                    key=key,
+    +                    version_id=item.version_id,
+    +                    is_latest=index == 0,
+    +                    is_delete_marker=not is_data,
+    +                    etag=item.etag if is_data else None,
+    +                    size=item.size if is_data else None,
+    +                )
+    +            )
+    +    return ListObjectVersionsResult(tuple(result))
+    ```
 
 **What it is and why it appears**
 
@@ -260,7 +241,35 @@ etag=item.etag if is_data else None,
 
 A marker has no body-derived ETag. Making the field explicitly `None` preserves the distinction instead of inventing an empty-object fingerprint.
 
-**Explanation: `src/minis3/store.py`**
+??? note "File diff: src/minis3/store.py"
+    ```diff
+    diff --git a/src/minis3/store.py b/src/minis3/store.py
+    index 5d418b8..23ddd8e 100644
+    --- a/src/minis3/store.py
+    +++ b/src/minis3/store.py
+    @@ -9,6 +9,7 @@ from threading import RLock
+
+     from .bucket import Bucket, SequenceCounter, VersioningState
+     from .errors import BucketAlreadyExists, BucketNotEmpty, NoSuchBucket
+    +from .listing import ListObjectVersionsResult, list_object_versions
+     from .model import ObjectVersion, Version
+     from .storage import DiskStorage
+
+    @@ -96,6 +97,13 @@ class MiniS3:
+                 return result
+
+
+    +    def list_object_versions(
+    +        self, bucket: str, *, prefix: str = ""
+    +    ) -> ListObjectVersionsResult:
+    +        with self._lock:
+    +            return list_object_versions(self._bucket(bucket).records, prefix=prefix)
+    +
+    +
+         def _bucket(self, name: str) -> Bucket:
+             try:
+                 return self._buckets[name]
+    ```
 
 **What it is and why it appears**
 
@@ -280,31 +289,11 @@ return list_object_versions(self._bucket(bucket).records, prefix=prefix)
 
 The service passes records but does not reproduce projection logic. This keeps ownership clear and makes the pure function independently understandable.
 
-**Explanation: `tests/test_versioning.py`**
-
-**What it is and why it appears**
-
-Three new scenarios lock the projection of unversioned replacement, suspended replacement, and suspended deletion.
-
-**Runtime role**
-
-They observe public histories after real service mutations, so the evidence covers Bucket plus projection rather than a fabricated input alone.
-
-**Key code**
-
-```python
-assert marker is not None and marker.version_id == "null"
-```
-
-**Statement understanding**
-
-Suspension does not mean deletion becomes physical. The new marker occupies the public `null` slot while named history remains addressable.
-
 #### Public export wiring
 
 Expose the projection result types; their behavior is owned by the projection block above.
 
-??? note "View block diff (1 file)"
+??? note "Supporting file diffs (1 file)"
     **`src/minis3/__init__.py`**
 
     ```diff

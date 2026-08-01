@@ -33,9 +33,7 @@ Parity 命令在全新树中重放每个 patch，再与 main 比较字节。即�
 
 把包导出变成有意的兼容契约，并用精确重建证据完成 Journey 收官。
 
-??? note "查看本板块差异（1 个文件）"
-    **`src/minis3/__init__.py`**
-
+??? note "文件差异：src/minis3/__init__.py"
     ```diff
     diff --git a/src/minis3/__init__.py b/src/minis3/__init__.py
     index 36bc1f3..86d6755 100644
@@ -81,9 +79,6 @@ Parity 命令在全新树中重放每个 patch，再与 main 比较字节。即�
     +    "evaluate_expiration",
     +]
     ```
-
-
-**讲解: `src/minis3/__init__.py`**
 
 **是什么，为什么现在需要**
 

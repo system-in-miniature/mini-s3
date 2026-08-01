@@ -23,6 +23,69 @@ This stage creates those values without adding storage or service behavior. Late
 
 The highest-signal contract uses `ObjectRecord(key="/a//b/")` and expects the exact same string back. If model code treats the key as a filesystem path, repeated or leading slashes may disappear before storage even exists. The test makes that corruption visible at the smallest possible boundary.
 
+??? note "File diff: tests/test_model.py"
+    ```diff
+    diff --git a/tests/test_model.py b/tests/test_model.py
+    new file mode 100644
+    index 0000000..01151ba
+    --- /dev/null
+    +++ b/tests/test_model.py
+    @@ -0,0 +1,35 @@
+    +"""Executable contracts for MiniS3's flat object model."""
+    +
+    +from dataclasses import FrozenInstanceError
+    +
+    +import pytest
+    +
+    +from minis3 import DeleteMarker, ObjectRecord, Version, content_etag
+    +
+    +
+    +def test_etag_is_quoted_lowercase_content_md5() -> None:
+    +    assert content_etag(b"hello") == '"5d41402abc4b2a76b9719d911017c592"'
+    +
+    +
+    +def test_keys_are_opaque_even_when_they_contain_slashes() -> None:
+    +    version = Version(
+    +        version_id="null",
+    +        storage_id="e00000001",
+    +        sequence=1,
+    +        body=b"x",
+    +        etag=content_etag(b"x"),
+    +    )
+    +    record = ObjectRecord(key="/a//b/", versions=(version,))
+    +
+    +    assert record.key == "/a//b/"
+    +    assert record.versions == (version,)
+    +    with pytest.raises(FrozenInstanceError):
+    +        version.etag = "changed"  # type: ignore[misc]
+    +
+    +
+    +def test_delete_marker_has_no_object_body() -> None:
+    +    marker = DeleteMarker(
+    +        version_id="v00000002", storage_id="e00000002", sequence=2
+    +    )
+    +    assert marker.is_delete_marker is True
+    +
+    ```
+
+**What it is and why it appears**
+
+These tests record the three model invariants introduced today: quoted ETags, opaque keys with immutable values, and body-less delete markers.
+
+**Runtime role**
+
+They call the learner-visible values directly. They prove value semantics only; they do not yet prove bucket transitions, disk persistence, or a public object service.
+
+**Key code**
+
+```python
+assert record.key == "/a//b/"
+```
+
+**Statement understanding**
+
+The deliberately unusual key catches path normalization. Passing this assertion means the model preserved the exact string, not that directory behavior exists.
+
 ### Basic concepts
 
 An S3 object value is a complete byte string, not an editable file range. A normal ETag in this miniature is the quoted lowercase MD5 of those bytes. It is a content fingerprint used for comparison; it is not an access-control secret.
@@ -43,9 +106,7 @@ At this stage the flow is deliberately short: caller bytes enter `content_etag`,
 
 Define the immutable values and executable invariants that every later Bucket, storage, and service boundary shares.
 
-??? note "View block diff (3 files)"
-    **`src/minis3/errors.py`**
-
+??? note "File diff: src/minis3/errors.py"
     ```diff
     diff --git a/src/minis3/errors.py b/src/minis3/errors.py
     new file mode 100644
@@ -85,8 +146,25 @@ Define the immutable values and executable invariants that every later Bucket, s
     +
     ```
 
-    **`src/minis3/model.py`**
+**What it is and why it appears**
 
+This file defines protocol-independent domain failures. Bucket and service code can raise a precise error without importing HTTP concepts.
+
+**Runtime role**
+
+Callers catch subclasses of `MiniS3Error` and may later translate them to S3-shaped responses. Keeping missing bucket, missing key, and missing version distinct prevents one broad exception from erasing useful semantics.
+
+**Key code**
+
+```python
+class NoSuchKey(MiniS3Error):
+```
+
+**Statement understanding**
+
+Inheritance says this is part of MiniS3's public failure vocabulary while remaining distinguishable from `NoSuchBucket` and `NoSuchVersion`.
+
+??? note "File diff: src/minis3/model.py"
     ```diff
     diff --git a/src/minis3/model.py b/src/minis3/model.py
     new file mode 100644
@@ -171,75 +249,6 @@ Define the immutable values and executable invariants that every later Bucket, s
     +
     ```
 
-    **`tests/test_model.py`**
-
-    ```diff
-    diff --git a/tests/test_model.py b/tests/test_model.py
-    new file mode 100644
-    index 0000000..01151ba
-    --- /dev/null
-    +++ b/tests/test_model.py
-    @@ -0,0 +1,35 @@
-    +"""Executable contracts for MiniS3's flat object model."""
-    +
-    +from dataclasses import FrozenInstanceError
-    +
-    +import pytest
-    +
-    +from minis3 import DeleteMarker, ObjectRecord, Version, content_etag
-    +
-    +
-    +def test_etag_is_quoted_lowercase_content_md5() -> None:
-    +    assert content_etag(b"hello") == '"5d41402abc4b2a76b9719d911017c592"'
-    +
-    +
-    +def test_keys_are_opaque_even_when_they_contain_slashes() -> None:
-    +    version = Version(
-    +        version_id="null",
-    +        storage_id="e00000001",
-    +        sequence=1,
-    +        body=b"x",
-    +        etag=content_etag(b"x"),
-    +    )
-    +    record = ObjectRecord(key="/a//b/", versions=(version,))
-    +
-    +    assert record.key == "/a//b/"
-    +    assert record.versions == (version,)
-    +    with pytest.raises(FrozenInstanceError):
-    +        version.etag = "changed"  # type: ignore[misc]
-    +
-    +
-    +def test_delete_marker_has_no_object_body() -> None:
-    +    marker = DeleteMarker(
-    +        version_id="v00000002", storage_id="e00000002", sequence=2
-    +    )
-    +    assert marker.is_delete_marker is True
-    +
-    ```
-
-
-**Explanation: `src/minis3/errors.py`**
-
-**What it is and why it appears**
-
-This file defines protocol-independent domain failures. Bucket and service code can raise a precise error without importing HTTP concepts.
-
-**Runtime role**
-
-Callers catch subclasses of `MiniS3Error` and may later translate them to S3-shaped responses. Keeping missing bucket, missing key, and missing version distinct prevents one broad exception from erasing useful semantics.
-
-**Key code**
-
-```python
-class NoSuchKey(MiniS3Error):
-```
-
-**Statement understanding**
-
-Inheritance says this is part of MiniS3's public failure vocabulary while remaining distinguishable from `NoSuchBucket` and `NoSuchVersion`.
-
-**Explanation: `src/minis3/model.py`**
-
 **What it is and why it appears**
 
 This is the stage's central domain-value file. It defines whole-object versions, body-less delete markers, per-key history, and content-derived ETags.
@@ -259,31 +268,11 @@ return f'"{digest}"'
 
 `usedforsecurity=False` documents that MD5 is used as the S3-style fingerprint, not as a security primitive. Quoting the hexadecimal digest is part of the externally visible ETag representation, so returning the bare digest would be a semantic bug.
 
-**Explanation: `tests/test_model.py`**
-
-**What it is and why it appears**
-
-These tests record the three model invariants introduced today: quoted ETags, opaque keys with immutable values, and body-less delete markers.
-
-**Runtime role**
-
-They call the learner-visible values directly. They prove value semantics only; they do not yet prove bucket transitions, disk persistence, or a public object service.
-
-**Key code**
-
-```python
-assert record.key == "/a//b/"
-```
-
-**Statement understanding**
-
-The deliberately unusual key catches path normalization. Passing this assertion means the model preserved the exact string, not that directory behavior exists.
-
 #### Package and tooling scaffold
 
 Wire the package, test environment, learner README, and reproducible dependency set without treating that setup as an object-storage mechanism.
 
-??? note "View block diff (4 files)"
+??? note "Supporting file diffs (4 files)"
     **`README.md`**
 
     ```diff

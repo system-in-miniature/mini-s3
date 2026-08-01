@@ -18,6 +18,52 @@ Stage 02 owns correct in-memory histories, but a process exit loses all of them.
 
 The storage contract writes a bucket, creates a new `DiskStorage` over the same directory, and expects the exact body, ETag, version, and maximum sequence back. A missing fsync or publish order may pass an in-process read yet fail this restart observation.
 
+??? note "File diff: tests/test_storage_boundary.py"
+    ```diff
+    diff --git a/tests/test_storage_boundary.py b/tests/test_storage_boundary.py
+    new file mode 100644
+    index 0000000..74c9d9e
+    --- /dev/null
+    +++ b/tests/test_storage_boundary.py
+    @@ -0,0 +1,18 @@
+    +"""Focused contract for manifest publication before service wiring."""
+    +
+    +from minis3.bucket import Bucket, SequenceCounter, VersioningState
+    +from minis3.storage import DiskStorage
+    +
+    +
+    +def test_disk_storage_publishes_and_recovers_one_complete_bucket(tmp_path) -> None:
+    +    storage = DiskStorage(tmp_path)
+    +    bucket = Bucket("b", versioning=VersioningState.ENABLED)
+    +    version = bucket.put("key", b"value", SequenceCounter())
+    +
+    +    storage.create_bucket(Bucket("b"))
+    +    storage.persist_bucket(bucket)
+    +    recovered, maximum_sequence = DiskStorage(tmp_path).load_buckets()
+    +
+    +    assert recovered["b"].get("key") == version
+    +    assert maximum_sequence == version.sequence
+    +    assert not list(tmp_path.rglob("*.tmp-*"))
+    ```
+
+**What it is and why it appears**
+
+This first storage contract proves one complete bucket can cross a process-like restart boundary.
+
+**Runtime role**
+
+It persists state, constructs a fresh adapter, and compares recovered values and sequence metadata. It is broader than a serialization unit test but narrower than the public MiniS3 service.
+
+**Key code**
+
+```python
+recovered, maximum_sequence = DiskStorage(tmp_path).load_buckets()
+```
+
+**Statement understanding**
+
+Using a new adapter is essential: reading the same in-memory Bucket would not prove bytes were published or recoverable. Returning `maximum` also prevents future sequence reuse.
+
 ### Basic concepts
 
 Atomic visibility and durability are separate. `os.replace` makes readers observe either the old complete name or the new complete name. File `fsync` persists file bytes; parent-directory `fsync` persists the name change.
@@ -38,9 +84,7 @@ Updating one large mutable state file makes every object write rewrite shared st
 
 Connect atomic file replacement, immutable artifacts, Manifest visibility, and restart reconstruction as one durability protocol.
 
-??? note "View block diff (3 files)"
-    **`src/minis3/storage/atomic.py`**
-
+??? note "File diff: src/minis3/storage/atomic.py"
     ```diff
     diff --git a/src/minis3/storage/atomic.py b/src/minis3/storage/atomic.py
     new file mode 100644
@@ -107,8 +151,26 @@ Connect atomic file replacement, immutable artifacts, Manifest visibility, and r
     +    fsync_directory(path.parent)
     ```
 
-    **`src/minis3/storage/disk.py`**
+**What it is and why it appears**
 
+This file owns reusable filesystem publication primitives rather than S3 domain decisions.
+
+**Runtime role**
+
+DiskStorage calls it whenever a file or directory entry must survive a crash. It is the lowest layer at which visibility and durability ordering can be inspected.
+
+**Key code**
+
+```python
+os.replace(temporary, path)
+fsync_directory(path.parent)
+```
+
+**Statement understanding**
+
+Replace changes which complete file the final name refers to; the following directory fsync makes that rename durable. Reversing or omitting the second line can leave a rename visible now but absent after power loss.
+
+??? note "File diff: src/minis3/storage/disk.py"
     ```diff
     diff --git a/src/minis3/storage/disk.py b/src/minis3/storage/disk.py
     new file mode 100644
@@ -345,59 +407,6 @@ Connect atomic file replacement, immutable artifacts, Manifest visibility, and r
     +                path.rmdir()
     ```
 
-    **`tests/test_storage_boundary.py`**
-
-    ```diff
-    diff --git a/tests/test_storage_boundary.py b/tests/test_storage_boundary.py
-    new file mode 100644
-    index 0000000..74c9d9e
-    --- /dev/null
-    +++ b/tests/test_storage_boundary.py
-    @@ -0,0 +1,18 @@
-    +"""Focused contract for manifest publication before service wiring."""
-    +
-    +from minis3.bucket import Bucket, SequenceCounter, VersioningState
-    +from minis3.storage import DiskStorage
-    +
-    +
-    +def test_disk_storage_publishes_and_recovers_one_complete_bucket(tmp_path) -> None:
-    +    storage = DiskStorage(tmp_path)
-    +    bucket = Bucket("b", versioning=VersioningState.ENABLED)
-    +    version = bucket.put("key", b"value", SequenceCounter())
-    +
-    +    storage.create_bucket(Bucket("b"))
-    +    storage.persist_bucket(bucket)
-    +    recovered, maximum_sequence = DiskStorage(tmp_path).load_buckets()
-    +
-    +    assert recovered["b"].get("key") == version
-    +    assert maximum_sequence == version.sequence
-    +    assert not list(tmp_path.rglob("*.tmp-*"))
-    ```
-
-
-**Explanation: `src/minis3/storage/atomic.py`**
-
-**What it is and why it appears**
-
-This file owns reusable filesystem publication primitives rather than S3 domain decisions.
-
-**Runtime role**
-
-DiskStorage calls it whenever a file or directory entry must survive a crash. It is the lowest layer at which visibility and durability ordering can be inspected.
-
-**Key code**
-
-```python
-os.replace(temporary, path)
-fsync_directory(path.parent)
-```
-
-**Statement understanding**
-
-Replace changes which complete file the final name refers to; the following directory fsync makes that rename durable. Reversing or omitting the second line can leave a rename visible now but absent after power loss.
-
-**Explanation: `src/minis3/storage/disk.py`**
-
 **What it is and why it appears**
 
 This is the sole owner of disk layout, manifest publication, and restart recovery for buckets.
@@ -418,31 +427,11 @@ self._inject("after_manifest_publish")
 
 The manifest write sits between two named crash points because it is the visibility boundary. Artifacts before it are harmless until referenced; after it, recovery must treat the new state as committed.
 
-**Explanation: `tests/test_storage_boundary.py`**
-
-**What it is and why it appears**
-
-This first storage contract proves one complete bucket can cross a process-like restart boundary.
-
-**Runtime role**
-
-It persists state, constructs a fresh adapter, and compares recovered values and sequence metadata. It is broader than a serialization unit test but narrower than the public MiniS3 service.
-
-**Key code**
-
-```python
-recovered, maximum_sequence = DiskStorage(tmp_path).load_buckets()
-```
-
-**Statement understanding**
-
-Using a new adapter is essential: reading the same in-memory Bucket would not prove bytes were published or recoverable. Returning `maximum` also prevents future sequence reuse.
-
 #### Storage package wiring
 
 Expose the storage boundary to later service code; this Stage adds no separate mechanism at the export layer.
 
-??? note "View block diff (1 file)"
+??? note "Supporting file diffs (1 file)"
     **`src/minis3/storage/__init__.py`**
 
     ```diff

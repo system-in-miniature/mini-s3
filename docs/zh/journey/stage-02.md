@@ -16,6 +16,56 @@ Stage 01 只能描述一份值，还不能决定已有历史上的 PUT 或 DELET
 
 聚合契约先写入未版本化值，再启用版本化、再次写入、暂停版本化，最后尝试回到 `UNVERSIONED`。如果最后一步成功，已存在的具名历史会被误解释为“从未启用版本化”。预期的 `ValueError` 在引入持久化以前就锁定状态机。
 
+??? note "文件差异：tests/test_bucket.py"
+    ```diff
+    diff --git a/tests/test_bucket.py b/tests/test_bucket.py
+    new file mode 100644
+    index 0000000..139fcf0
+    --- /dev/null
+    +++ b/tests/test_bucket.py
+    @@ -0,0 +1,21 @@
+    +"""Focused contracts for the bucket aggregate before service wiring."""
+    +
+    +import pytest
+    +
+    +from minis3.bucket import Bucket, SequenceCounter, VersioningState
+    +
+    +
+    +def test_bucket_owns_versioning_transitions_and_deterministic_ids() -> None:
+    +    bucket = Bucket("b")
+    +    counter = SequenceCounter()
+    +
+    +    null = bucket.put("key", b"before", counter)
+    +    bucket.set_versioning(VersioningState.ENABLED)
+    +    named = bucket.put("key", b"after", counter)
+    +    bucket.set_versioning(VersioningState.SUSPENDED)
+    +
+    +    assert (null.version_id, null.storage_id) == ("null", "e00000001")
+    +    assert (named.version_id, named.storage_id) == ("v00000002", "e00000002")
+    +    assert bucket.get("key").body == b"after"
+    +    with pytest.raises(ValueError):
+    +        bucket.set_versioning(VersioningState.UNVERSIONED)
+    ```
+
+**是什么，为什么现在需要**
+
+这个契约先单测聚合，避免服务层和磁盘层掩盖错误来源。
+
+**在运行时做什么**
+
+它证明相同序列源依次产生 `null/e00000001` 与 `v00000002/e00000002`，并锁定禁止的倒退迁移。
+
+**关键代码**
+
+```python
+with pytest.raises(ValueError):
+    bucket.set_versioning(VersioningState.UNVERSIONED)
+```
+
+**关键语句理解**
+
+这个失败属于领域行为：一旦可能存在具名版本，“从未版本化”就不再是真实状态。
+
 ### 基本概念
 
 聚合是相关状态迁移的所有者。这里一个 `Bucket` 同时拥有版本化状态与每个 Key 的 `ObjectRecord`。`UNVERSIONED` 表示从未启用；`SUSPENDED` 表示曾经启用，之后新写入使用公开 `null` 槽，但具名历史仍保留。
@@ -36,9 +86,7 @@ Stage 01 只能描述一份值，还不能决定已有历史上的 PUT 或 DELET
 
 把版本状态、精确 Key 历史和单调身份收进同一个聚合边界，并直接证明它的状态迁移。
 
-??? note "查看本板块差异（2 个文件）"
-    **`src/minis3/bucket.py`**
-
+??? note "文件差异：src/minis3/bucket.py"
     ```diff
     diff --git a/src/minis3/bucket.py b/src/minis3/bucket.py
     new file mode 100644
@@ -207,41 +255,6 @@ Stage 01 只能描述一份值，还不能决定已有历史上的 PUT 或 DELET
     +        return marker
     ```
 
-    **`tests/test_bucket.py`**
-
-    ```diff
-    diff --git a/tests/test_bucket.py b/tests/test_bucket.py
-    new file mode 100644
-    index 0000000..139fcf0
-    --- /dev/null
-    +++ b/tests/test_bucket.py
-    @@ -0,0 +1,21 @@
-    +"""Focused contracts for the bucket aggregate before service wiring."""
-    +
-    +import pytest
-    +
-    +from minis3.bucket import Bucket, SequenceCounter, VersioningState
-    +
-    +
-    +def test_bucket_owns_versioning_transitions_and_deterministic_ids() -> None:
-    +    bucket = Bucket("b")
-    +    counter = SequenceCounter()
-    +
-    +    null = bucket.put("key", b"before", counter)
-    +    bucket.set_versioning(VersioningState.ENABLED)
-    +    named = bucket.put("key", b"after", counter)
-    +    bucket.set_versioning(VersioningState.SUSPENDED)
-    +
-    +    assert (null.version_id, null.storage_id) == ("null", "e00000001")
-    +    assert (named.version_id, named.storage_id) == ("v00000002", "e00000002")
-    +    assert bucket.get("key").body == b"after"
-    +    with pytest.raises(ValueError):
-    +        bucket.set_versioning(VersioningState.UNVERSIONED)
-    ```
-
-
-**讲解: `src/minis3/bucket.py`**
-
 **是什么，为什么现在需要**
 
 这个可变聚合是合法版本状态与每 Key 历史的唯一所有者，持久化仍留在外部。
@@ -261,27 +274,6 @@ else:
 **关键语句理解**
 
 Enabled PUT 通过前插保留全部旧版本；`else` 则替换公开 `null` 槽并保留具名历史。把两个分支写成一样会破坏暂停语义。
-
-**讲解: `tests/test_bucket.py`**
-
-**是什么，为什么现在需要**
-
-这个契约先单测聚合，避免服务层和磁盘层掩盖错误来源。
-
-**在运行时做什么**
-
-它证明相同序列源依次产生 `null/e00000001` 与 `v00000002/e00000002`，并锁定禁止的倒退迁移。
-
-**关键代码**
-
-```python
-with pytest.raises(ValueError):
-    bucket.set_versioning(VersioningState.UNVERSIONED)
-```
-
-**关键语句理解**
-
-这个失败属于领域行为：一旦可能存在具名版本，“从未版本化”就不再是真实状态。
 
 ### 验证证据
 
