@@ -11,11 +11,11 @@ Prove retryable staging before multipart publication and cleanup after publicati
 
 Normal completion order is correct, but a crash can interrupt after assembly at either side of manifest publication. Recovery must not guess from the presence of staged files; it must correlate published object provenance with upload identity.
 
-### Failure preview
+### Test contract
+
+#### See the failure first
 
 The pre-publication test crashes completion at `before_manifest_publish`, reopens, and completes the same upload successfully. If recovery deletes all staging eagerly, the retry becomes impossible even though no object was committed.
-
-### Test contract
 
 ??? note "File diff: tests/test_storage.py"
     ```diff

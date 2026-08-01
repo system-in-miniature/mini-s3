@@ -19,11 +19,11 @@ The journey starts with no package and no vocabulary for an object. Before imple
 
 This stage creates those values without adding storage or service behavior. Later stages can change histories and persistence while continuing to pass the same immutable objects between boundaries.
 
-### Failure preview
+### Test contract
+
+#### See the failure first
 
 The highest-signal contract uses `ObjectRecord(key="/a//b/")` and expects the exact same string back. If model code treats the key as a filesystem path, repeated or leading slashes may disappear before storage even exists. The test makes that corruption visible at the smallest possible boundary.
-
-### Test contract
 
 ??? note "File diff: tests/test_model.py"
     ```diff

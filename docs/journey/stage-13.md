@@ -15,11 +15,11 @@ Use ETags as cache validators and serialized compare-and-swap preconditions for 
 
 ETags exist but callers cannot make an operation conditional on the value they observed. A stale writer can overwrite a newer value, and a cache cannot ask whether its copy is still current without downloading the body again.
 
-### Failure preview
+### Test contract
+
+#### See the failure first
 
 The concurrency contract starts two writers with the same initial ETag. Exactly one may pass `If-Match`; the second must see the changed current ETag and fail. If the check occurs outside the mutation lock, both can validate stale state and both appear to win.
-
-### Test contract
 
 ??? note "File diff: tests/test_conditional.py"
     ```diff

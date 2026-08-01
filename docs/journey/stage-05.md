@@ -14,11 +14,11 @@ Project complete histories without collapsing null versions, named versions, and
 
 GET returns one addressed data version, so it cannot explain the history hidden behind the latest value or marker. Administrative and recovery views need every retained entry plus enough metadata to distinguish their meanings.
 
-### Failure preview
+### Test contract
+
+#### See the failure first
 
 The suspended-delete contract creates named history, writes a `null` value, then deletes without a version ID. The expected history contains a new `null` marker and the older named versions, but not the replaced `null` data. A flat “all values” list would report the wrong state.
-
-### Test contract
 
 ??? note "File diff: tests/test_versioning.py"
     ```diff

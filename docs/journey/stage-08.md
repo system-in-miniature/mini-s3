@@ -11,11 +11,11 @@ Verify directory-entry durability and recovery cleanup for temporary and unrefer
 
 The crash matrix proves which manifest is visible, but durability also depends on directory entries. Creating nested directories or renaming a file without fsyncing the right parent can make a correct-looking run disappear after power loss. Recovery must also remove debris without deleting referenced artifacts.
 
-### Failure preview
+### Test contract
+
+#### See the failure first
 
 The parent-chain contract records fsync calls while creating `one/two/three`. It expects calls for the existing root and each newly created directory's parent. If only the final directory is fsynced, one missing ancestor entry can make the whole subtree unreachable after restart.
-
-### Test contract
 
 ??? note "File diff: tests/test_storage.py"
     ```diff

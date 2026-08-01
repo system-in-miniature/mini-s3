@@ -14,11 +14,11 @@ Separate pure expiration decisions from an explicit mutation tick driven by an i
 
 Versions now carry creation times, but nothing expires them. Hiding time reads inside policy or background threads would make boundary behavior nondeterministic and combine “what should happen” with “apply it now.”
 
-### Failure preview
+### Test contract
+
+#### See the failure first
 
 The pure-boundary contract evaluates the same history at time `9.999` and `10.0`. No action is allowed before the threshold; the action appears exactly at it. A hidden wall clock or strict `>` comparison makes this boundary flaky or one tick late.
-
-### Test contract
 
 ??? note "File diff: tests/test_lifecycle.py"
     ```diff

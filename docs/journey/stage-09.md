@@ -13,11 +13,11 @@ Model multipart upload identity, staged parts, ordered completion rules, and com
 
 Whole-object PUT cannot represent a client uploading large content in independently retryable parts. Completion also cannot trust a list of part numbers alone: order, ETags, existence, and minimum nonfinal size all affect the final object.
 
-### Failure preview
+### Test contract
+
+#### See the failure first
 
 The domain contract supplies staged parts and a client completion manifest. Swapping two entries must raise `InvalidPartOrder`; naming the right part with the wrong ETag must raise `InvalidPart`. Without these checks, completion can silently assemble bytes the client did not authorize.
-
-### Test contract
 
 ??? note "File diff: tests/test_multipart_domain.py"
     ```diff

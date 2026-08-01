@@ -348,6 +348,8 @@ def parse_localized_lesson(
     walkthrough_heading = "### 机制板块" if chinese else "### Mechanism blocks"
     verification_heading = "### 验证证据" if chinese else "### Verification evidence"
     test_heading = "### 测试契约" if chinese else "### Test contract"
+    failure_heading = "### 先看会坏在哪里" if chinese else "### Failure preview"
+    nested_failure_heading = "#### 先看会坏在哪里" if chinese else "#### See the failure first"
     concepts_heading = "### 基本概念" if chinese else "### Basic concepts"
     walkthrough_start = body.index(walkthrough_heading) + len(walkthrough_heading)
     verification_start = body.index(verification_heading, walkthrough_start)
@@ -363,9 +365,21 @@ def parse_localized_lesson(
         concepts_start = body.index(concepts_heading, test_start)
         if concepts_start > body.index(walkthrough_heading):
             raise ValueError(f"{label}: test contract must precede basic concepts")
+        failure_start = body.index(failure_heading)
+        if failure_start > body.index(test_heading):
+            raise ValueError(f"{label}: failure preview must precede the authored test contract")
+        failure_text = body[
+            failure_start + len(failure_heading):body.index(test_heading)
+        ].strip()
         regions.append(("test contract", body[test_start:concepts_start].strip()))
         pre_walkthrough = (
-            body[:test_start].rstrip()
+            body[:failure_start].rstrip()
+            + "\n\n"
+            + test_heading
+            + "\n\n"
+            + nested_failure_heading
+            + "\n\n"
+            + failure_text
             + "\n\n"
             + body[concepts_start:walkthrough_start].strip()
         )

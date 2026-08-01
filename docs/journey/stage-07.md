@@ -11,11 +11,11 @@ Prove the manifest rename is the single visibility boundary by crashing immediat
 
 Stage 03 described publish-last storage, and clean restarts pass. That is not yet evidence that crashes expose only complete old or complete new states. The claim must be observed at each named crash boundary.
 
-### Failure preview
+### Test contract
+
+#### See the failure first
 
 One test injects `before_manifest_publish` after new artifacts are durable. Reopening must still return the old object and remove the unreferenced new artifact. If artifact existence alone controls visibility, the new value leaks despite the manifest never committing it.
-
-### Test contract
 
 ??? note "File diff: tests/test_storage.py"
     ```diff

@@ -14,11 +14,11 @@ Give Bucket state a durable representation with immutable artifacts and a publis
 
 Stage 02 owns correct in-memory histories, but a process exit loses all of them. Writing one mutable JSON file directly is not enough: a crash can leave half a file or bytes whose directory entry was never made durable.
 
-### Failure preview
+### Test contract
+
+#### See the failure first
 
 The storage contract writes a bucket, creates a new `DiskStorage` over the same directory, and expects the exact body, ETag, version, and maximum sequence back. A missing fsync or publish order may pass an in-process read yet fail this restart observation.
-
-### Test contract
 
 ??? note "File diff: tests/test_storage_boundary.py"
     ```diff

@@ -14,11 +14,11 @@ Join Bucket and DiskStorage behind one locked public service for bucket and obje
 
 The domain can calculate a next Bucket and storage can publish it, but callers still have to coordinate both. Without a service owner, one code path could mutate memory without persistence while another could race halfway through a transition.
 
-### Failure preview
+### Test contract
+
+#### See the failure first
 
 The restart contract writes two versions, opens a fresh `MiniS3`, reads both bodies, then writes again and requires a new ID. It exposes two distinct bugs at once: state not published to disk, or the recovered sequence counter reusing an old identity.
-
-### Test contract
 
 ??? note "File diff: tests/test_storage.py"
     ```diff

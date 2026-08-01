@@ -201,8 +201,8 @@ Book.
         expectations = (
             (
                 False,
-                "### Failure preview",
                 "### Test contract",
+                "#### See the failure first",
                 '??? note "File diff: tests/test_bucket.py"',
                 "This contract exercises the aggregate",
                 "### Basic concepts",
@@ -210,8 +210,8 @@ Book.
             ),
             (
                 True,
-                "### 先看会坏在哪里",
                 "### 测试契约",
+                "#### 先看会坏在哪里",
                 '??? note "文件差异：tests/test_bucket.py"',
                 "这个契约先单测聚合",
                 "### 基本概念",
@@ -219,11 +219,11 @@ Book.
             ),
         )
         stage_two = self.cards[1]
-        for chinese, failure, contract, drawer, explanation, concepts, mechanisms in expectations:
+        for chinese, contract, failure, drawer, explanation, concepts, mechanisms in expectations:
             with self.subTest(chinese=chinese):
                 page = render_pages.render_card(stage_two, chinese=chinese)
-                self.assertLess(page.index(failure), page.index(contract))
                 self.assertLess(page.index(contract), page.index(drawer))
+                self.assertLess(page.index(contract), page.index(failure))
                 self.assertLess(page.index(failure), page.index(drawer))
                 self.assertLess(page.index(drawer), page.index(explanation))
                 self.assertLess(page.index(explanation), page.index(concepts))
@@ -250,7 +250,7 @@ Book.
         expectations = (
             (
                 False,
-                "### Failure preview",
+                "#### See the failure first",
                 "### Basic concepts",
                 (
                     "What this test locks",
@@ -267,7 +267,7 @@ Book.
             ),
             (
                 True,
-                "### 先看会坏在哪里",
+                "#### 先看会坏在哪里",
                 "### 基本概念",
                 ("测试锁定什么", "如何构造反例", "关键测试语句", "失败意味着什么"),
                 ("是什么，为什么现在需要", "在运行时做什么", "关键代码", "关键语句理解"),

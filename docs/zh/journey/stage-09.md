@@ -13,11 +13,11 @@
 
 Whole-object PUT 无法表示客户端把大内容拆成可独立重试的 Part。完成操作也不能只相信 Part 编号列表：顺序、ETag、是否存在和非末 Part 最小尺寸都会改变最终对象。
 
-### 先看会坏在哪里
+### 测试契约
+
+#### 先看会坏在哪里
 
 领域契约提供暂存 Part 与客户端完成清单。调换两个条目必须得到 `InvalidPartOrder`；Part 正确但 ETag 错误必须得到 `InvalidPart`。没有这些检查，完成操作可能静默拼装客户端未授权的字节。
-
-### 测试契约
 
 ??? note "文件差异：tests/test_multipart_domain.py"
     ```diff

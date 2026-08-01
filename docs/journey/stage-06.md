@@ -14,11 +14,11 @@ Derive current contents and common prefixes from flat keys, with query-bound opa
 
 Version listing can expose history, but normal object listing still has no answer for prefix, delimiter, or pagination. Treating slash-containing keys as real directories would contradict Stage 01 and create state that S3 does not store.
 
-### Failure preview
+### Test contract
+
+#### See the failure first
 
 The delimiter contract stores `a.txt`, `raw`, and several `photos/...` keys. Listing the root with delimiter `/` must return two contents plus exactly one `photos/` common prefix. If the implementation walks directories or returns every photo key, the externally visible projection is wrong.
-
-### Test contract
 
 ??? note "File diff: tests/test_listing.py"
     ```diff
