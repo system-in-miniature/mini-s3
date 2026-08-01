@@ -1,4 +1,9 @@
-"""Public service facade joining buckets, object state, and list projections."""
+"""Public service facade joining buckets, object state, and list projections.
+
+This initial service boundary deliberately resembles an SDK rather than an HTTP
+server. A future thin protocol adapter can translate these domain values and
+errors without taking ownership of storage semantics.
+"""
 
 from __future__ import annotations
 
@@ -9,7 +14,12 @@ from threading import RLock
 
 from .bucket import Bucket, SequenceCounter, VersioningState
 from .errors import BucketAlreadyExists, BucketNotEmpty, NoSuchBucket
-from .listing import ListObjectVersionsResult, list_object_versions
+from .listing import (
+    ListObjectsResult,
+    ListObjectVersionsResult,
+    list_object_versions,
+    list_objects,
+)
 from .model import ObjectVersion, Version
 from .storage import DiskStorage
 
@@ -33,7 +43,6 @@ class MiniS3:
             ensure(maximum_sequence + 1)
         self._lock = RLock()
 
-
     def create_bucket(self, name: str) -> None:
         with self._lock:
             if name in self._buckets:
@@ -42,7 +51,6 @@ class MiniS3:
             self._storage.create_bucket(bucket)
             self._buckets[name] = bucket
 
-
     def delete_bucket(self, name: str) -> None:
         with self._lock:
             bucket = self._bucket(name)
@@ -50,7 +58,6 @@ class MiniS3:
                 raise BucketNotEmpty(name)
             self._storage.delete_bucket(name)
             del self._buckets[name]
-
 
     def set_bucket_versioning(
         self, name: str, state: VersioningState | str
@@ -61,7 +68,6 @@ class MiniS3:
             self._storage.persist_bucket(candidate)
             self._buckets[name] = candidate
 
-
     def put_object(self, bucket: str, key: str, body: bytes) -> Version:
         with self._lock:
             candidate = deepcopy(self._bucket(bucket))
@@ -70,13 +76,11 @@ class MiniS3:
             self._buckets[bucket] = candidate
             return result
 
-
     def get_object(
         self, bucket: str, key: str, *, version_id: str | None = None
     ) -> Version:
         with self._lock:
             return self._bucket(bucket).get(key, version_id)
-
 
     def head_object(
         self, bucket: str, key: str, *, version_id: str | None = None
@@ -84,7 +88,6 @@ class MiniS3:
         """Return object metadata; M1 reuses the immutable Version value."""
 
         return self.get_object(bucket, key, version_id=version_id)
-
 
     def delete_object(
         self, bucket: str, key: str, *, version_id: str | None = None
@@ -96,6 +99,23 @@ class MiniS3:
             self._buckets[bucket] = candidate
             return result
 
+    def list_objects(
+        self,
+        bucket: str,
+        *,
+        prefix: str = "",
+        delimiter: str | None = None,
+        max_keys: int = 1000,
+        continuation_token: str | None = None,
+    ) -> ListObjectsResult:
+        with self._lock:
+            return list_objects(
+                self._bucket(bucket).records,
+                prefix=prefix,
+                delimiter=delimiter,
+                max_keys=max_keys,
+                continuation_token=continuation_token,
+            )
 
     def list_object_versions(
         self, bucket: str, *, prefix: str = ""
@@ -103,10 +123,8 @@ class MiniS3:
         with self._lock:
             return list_object_versions(self._bucket(bucket).records, prefix=prefix)
 
-
     def _bucket(self, name: str) -> Bucket:
         try:
             return self._buckets[name]
         except KeyError as exc:
             raise NoSuchBucket(name) from exc
-
