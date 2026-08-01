@@ -28,3 +28,18 @@ class NoSuchVersion(MiniS3Error):
 class InvalidContinuationToken(MiniS3Error):
     """The list continuation token was malformed or belongs to another query."""
 
+
+class NoSuchUpload(MiniS3Error):
+    """The addressed multipart upload does not exist or no longer exists."""
+
+
+class InvalidPart(MiniS3Error):
+    """A completion entry names a missing part or the wrong part ETag."""
+
+
+class InvalidPartOrder(MiniS3Error):
+    """Multipart completion entries were not in strictly ascending order."""
+
+
+class EntityTooSmall(MiniS3Error):
+    """A non-final multipart part is below the configured minimum size."""
