@@ -4,9 +4,7 @@
 
 引入 Bucket 聚合、合法版本化迁移与确定性身份。
 
-### 交付文件
-
-??? note "展开交付文件"
+??? note "交付文件"
     - `src/minis3/bucket.py`
     - `tests/test_bucket.py`
 

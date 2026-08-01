@@ -4,9 +4,7 @@
 
 Join Bucket and DiskStorage behind one locked public service for bucket and object operations.
 
-### Deliverable files
-
-??? note "Show deliverable files"
+??? note "Deliverable files"
     - `src/minis3/__init__.py`
     - `src/minis3/store.py`
     - `tests/test_storage.py`

@@ -4,9 +4,7 @@
 
 Prove retryable staging before multipart publication and cleanup after publication.
 
-### Deliverable files
-
-??? note "Show deliverable files"
+??? note "Deliverable files"
     - `tests/test_storage.py`
 
 ### The problem at this point

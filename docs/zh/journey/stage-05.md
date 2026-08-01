@@ -4,9 +4,7 @@
 
 投影完整历史，同时保持 null 版本、具名版本和删除标记可区分。
 
-### 交付文件
-
-??? note "展开交付文件"
+??? note "交付文件"
     - `src/minis3/__init__.py`
     - `src/minis3/listing.py`
     - `src/minis3/store.py`

@@ -4,9 +4,7 @@
 
 Verify directory-entry durability and recovery cleanup for temporary and unreferenced crash debris.
 
-### Deliverable files
-
-??? note "Show deliverable files"
+??? note "Deliverable files"
     - `tests/test_storage.py`
 
 ### The problem at this point

@@ -4,9 +4,7 @@
 
 用不可变 Artifact 与最后发布的 Manifest 为 Bucket 状态建立持久表示。
 
-### 交付文件
-
-??? note "展开交付文件"
+??? note "交付文件"
     - `src/minis3/storage/__init__.py`
     - `src/minis3/storage/atomic.py`
     - `src/minis3/storage/disk.py`

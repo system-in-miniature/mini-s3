@@ -4,9 +4,7 @@
 
 在一个带锁公开服务后连接 Bucket 与 DiskStorage，提供 Bucket 和对象操作。
 
-### 交付文件
-
-??? note "展开交付文件"
+??? note "交付文件"
     - `src/minis3/__init__.py`
     - `src/minis3/store.py`
     - `tests/test_storage.py`

@@ -4,9 +4,7 @@
 
 Validate an ordered completion manifest, assemble staged bytes, and publish exactly one visible object.
 
-### Deliverable files
-
-??? note "Show deliverable files"
+??? note "Deliverable files"
     - `src/minis3/store.py`
     - `tests/test_multipart.py`
 

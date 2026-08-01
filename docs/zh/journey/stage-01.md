@@ -4,9 +4,7 @@
 
 建立可安装的 Python 包，以及后续所有对象操作都会传递的不可变领域值。
 
-### 交付文件
-
-??? note "展开交付文件"
+??? note "交付文件"
     - `README.md`
     - `pyproject.toml`
     - `src/minis3/__init__.py`

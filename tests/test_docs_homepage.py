@@ -66,12 +66,17 @@ class DocumentationHomepageTest(unittest.TestCase):
         self.assertIn('"tutorial/"', source)
         self.assertIn('"zh/"', source)
 
-    def test_english_journey_uses_an_english_only_deliverables_heading(self) -> None:
+    def test_journey_uses_collapsed_deliverable_labels_without_extra_headings(self) -> None:
         for stage in sorted(Path("docs/journey").glob("stage-*.md")):
             lesson = stage.read_text(encoding="utf-8")
             with self.subTest(stage=stage.name):
-                self.assertIn("### Deliverable files", lesson)
-                self.assertNotIn("### Deliverable files / 交付文件", lesson)
+                self.assertIn('??? note "Deliverable files"', lesson)
+                self.assertNotIn("### Deliverable files", lesson)
+        for stage in sorted(Path("docs/zh/journey").glob("stage-*.md")):
+            lesson = stage.read_text(encoding="utf-8")
+            with self.subTest(stage=stage.name):
+                self.assertIn('??? note "交付文件"', lesson)
+                self.assertNotIn("### 交付文件", lesson)
 
 
 if __name__ == "__main__":

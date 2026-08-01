@@ -193,8 +193,10 @@ Book.
         english = render_pages.render_card(self.stage_one, chinese=False)
         chinese = render_pages.render_card(self.stage_one, chinese=True)
 
-        self.assertIn('### Deliverable files\n\n??? note "Show deliverable files"', english)
-        self.assertIn('### 交付文件\n\n??? note "展开交付文件"', chinese)
+        self.assertIn('??? note "Deliverable files"', english)
+        self.assertIn('??? note "交付文件"', chinese)
+        self.assertNotIn("### Deliverable files", english)
+        self.assertNotIn("### 交付文件", chinese)
         self.assertIn("    - `src/minis3/model.py`", english)
         self.assertIn("    - `src/minis3/model.py`", chinese)
 

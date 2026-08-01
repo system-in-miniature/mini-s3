@@ -4,9 +4,7 @@
 
 在存储编排前建模 Multipart 上传身份、暂存 Part、有序完成规则与组合 ETag。
 
-### 交付文件
-
-??? note "展开交付文件"
+??? note "交付文件"
     - `src/minis3/errors.py`
     - `src/minis3/multipart.py`
     - `tests/test_multipart_domain.py`

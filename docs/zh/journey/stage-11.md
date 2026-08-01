@@ -4,9 +4,7 @@
 
 校验有序完成清单、组装暂存字节，并只发布一个可见对象。
 
-### 交付文件
-
-??? note "展开交付文件"
+??? note "交付文件"
     - `src/minis3/store.py`
     - `tests/test_multipart.py`
 

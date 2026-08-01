@@ -4,9 +4,7 @@
 
 Expose the complete teaching API and prove the stage-built source and Journey tests match main byte for byte.
 
-### Deliverable files
-
-??? note "Show deliverable files"
+??? note "Deliverable files"
     - `src/minis3/__init__.py`
 
 ### The problem at this point

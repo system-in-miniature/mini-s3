@@ -4,9 +4,7 @@
 
 把纯过期决策与由注入时钟驱动的显式变更 tick 分开。
 
-### 交付文件
-
-??? note "展开交付文件"
+??? note "交付文件"
     - `src/minis3/__init__.py`
     - `src/minis3/lifecycle.py`
     - `src/minis3/store.py`

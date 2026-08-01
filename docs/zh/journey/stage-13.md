@@ -4,9 +4,7 @@
 
 把 ETag 用作缓存校验器，以及读取和变更的串行 compare-and-swap 前置条件。
 
-### 交付文件
-
-??? note "展开交付文件"
+??? note "交付文件"
     - `src/minis3/__init__.py`
     - `src/minis3/conditional.py`
     - `src/minis3/errors.py`

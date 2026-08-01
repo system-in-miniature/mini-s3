@@ -4,9 +4,7 @@
 
 证明 Multipart 发布前保留可重试 Staging，发布后完成清理。
 
-### 交付文件
-
-??? note "展开交付文件"
+??? note "交付文件"
     - `tests/test_storage.py`
 
 ### 当前遇到的问题

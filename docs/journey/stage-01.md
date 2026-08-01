@@ -4,9 +4,7 @@
 
 Create an installable package and the immutable values that every later object operation will carry.
 
-### Deliverable files
-
-??? note "Show deliverable files"
+??? note "Deliverable files"
     - `README.md`
     - `pyproject.toml`
     - `src/minis3/__init__.py`

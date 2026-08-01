@@ -4,9 +4,7 @@
 
 从扁平 Key 推导当前 contents 与 common prefixes，并提供绑定查询的 opaque 分页 token。
 
-### 交付文件
-
-??? note "展开交付文件"
+??? note "交付文件"
     - `src/minis3/__init__.py`
     - `src/minis3/listing.py`
     - `src/minis3/store.py`

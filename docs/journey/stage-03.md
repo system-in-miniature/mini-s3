@@ -4,9 +4,7 @@
 
 Give Bucket state a durable representation with immutable artifacts and a publish-last manifest.
 
-### Deliverable files
-
-??? note "Show deliverable files"
+??? note "Deliverable files"
     - `src/minis3/storage/__init__.py`
     - `src/minis3/storage/atomic.py`
     - `src/minis3/storage/disk.py`

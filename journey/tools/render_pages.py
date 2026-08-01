@@ -300,13 +300,13 @@ def _render_diff(file_patch: FilePatch, *, chinese: bool) -> str:
 
 def _collapse_deliverables(prelude: str, *, chinese: bool) -> str:
     heading = "### 交付文件" if chinese else "### Deliverable files"
-    label = "展开交付文件" if chinese else "Show deliverable files"
+    label = "交付文件" if chinese else "Deliverable files"
     heading_start = prelude.index(heading)
     content_start = heading_start + len(heading)
     next_heading = prelude.index("\n### ", content_start)
     items = prelude[content_start:next_heading].strip()
     indented = "\n".join(f"    {line}" if line else "" for line in items.splitlines())
-    collapsed = f'{heading}\n\n??? note "{label}"\n{indented}\n\n'
+    collapsed = f'??? note "{label}"\n{indented}\n\n'
     return prelude[:heading_start] + collapsed + prelude[next_heading + 1:]
 
 

@@ -4,9 +4,7 @@
 
 持久化私有 Multipart 上传并原子替换 Part，同时不发布对象。
 
-### 交付文件
-
-??? note "展开交付文件"
+??? note "交付文件"
     - `src/minis3/__init__.py`
     - `src/minis3/bucket.py`
     - `src/minis3/model.py`

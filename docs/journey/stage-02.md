@@ -4,9 +4,7 @@
 
 Introduce the Bucket aggregate, legal versioning transitions, and deterministic identities.
 
-### Deliverable files
-
-??? note "Show deliverable files"
+??? note "Deliverable files"
     - `src/minis3/bucket.py`
     - `tests/test_bucket.py`
 

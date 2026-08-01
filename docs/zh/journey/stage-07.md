@@ -4,9 +4,7 @@
 
 在 Manifest rename 前后立即崩溃，证明它是唯一可见性边界。
 
-### 交付文件
-
-??? note "展开交付文件"
+??? note "交付文件"
     - `tests/test_storage.py`
 
 ### 当前遇到的问题

@@ -4,9 +4,7 @@
 
 公开完整教学 API，并证明按 Stage 构建的源码与 Journey 测试逐字节等于 main。
 
-### 交付文件
-
-??? note "展开交付文件"
+??? note "交付文件"
     - `src/minis3/__init__.py`
 
 ### 当前遇到的问题

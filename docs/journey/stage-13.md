@@ -4,9 +4,7 @@
 
 Use ETags as cache validators and serialized compare-and-swap preconditions for reads and mutations.
 
-### Deliverable files
-
-??? note "Show deliverable files"
+??? note "Deliverable files"
     - `src/minis3/__init__.py`
     - `src/minis3/conditional.py`
     - `src/minis3/errors.py`

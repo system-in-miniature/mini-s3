@@ -4,9 +4,7 @@
 
 Project complete histories without collapsing null versions, named versions, and delete markers.
 
-### Deliverable files
-
-??? note "Show deliverable files"
+??? note "Deliverable files"
     - `src/minis3/__init__.py`
     - `src/minis3/listing.py`
     - `src/minis3/store.py`
