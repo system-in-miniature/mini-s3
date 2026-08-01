@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Render all 15 Self-Guided Rebuild Stages as conceptual mechanism blocks with per-file diff separators and compact supporting-file treatment.
+**Goal:** Render all 15 Self-Guided Rebuild Stages as conceptual mechanism blocks with per-file core diff separators and compact supporting-file treatment.
 
-**Architecture:** Each Stage owns a `layout.toml` that groups canonical patch files into bilingual core or supporting blocks. The renderer validates complete ownership, emits one diff drawer per file inside its block, suppresses supporting-file prose, and lets the drawer replace the redundant core file-path label.
+**Architecture:** Each Stage owns a `layout.toml` that groups canonical patch files into bilingual core or supporting blocks. The renderer validates complete ownership, emits one diff drawer per core file and one combined drawer per supporting block, suppresses supporting-file prose, and lets each core drawer replace the redundant file-path label.
 
 **Tech Stack:** Python 3.12, `tomllib`, dataclasses, unittest/pytest, MkDocs Material, Markdown
 
@@ -61,7 +61,8 @@
 - Modify: `journey/tools/render_pages.py`
 - Modify: `journey/tools/tests/test_render_pages.py`
 
-- [ ] Render one collapsed diff drawer per file in layout order.
+- [ ] Render one collapsed diff drawer per core file in layout order.
+- [ ] Render one combined diff drawer for every supporting block.
 - [ ] Place each core explanation immediately after its file drawer without a
   repeated path or `Explanation` label.
 - [ ] Render internal explanation labels as bold text instead of Markdown

@@ -11,7 +11,7 @@ The walkthrough section becomes `Mechanism blocks` / `机制板块`. Each block 
 
 1. one conceptual block heading that appears in the page table of contents;
 2. a short explanation of the problem boundary and runtime relationship;
-3. one collapsed diff drawer per file, in authored block order;
+3. one collapsed diff drawer per core file, in authored block order;
 4. the substantive file's explanation immediately after its drawer, without a
    second file-path or `Explanation` label.
 
@@ -41,9 +41,11 @@ A supporting block covers files that are necessary for the repository but do
 not deserve a separate conceptual explanation in that Stage, such as an early
 README, lockfile, packaging configuration, or a routine export update.
 
-Supporting blocks render only their block summary and per-file diff drawers.
-The existing authored per-file prose remains available in the canonical goal
-for Agent tutoring and future editing, but the browser page suppresses it.
+Supporting blocks render only their block summary and one combined diff drawer
+for all files in that block. Their routine files do not consume separate
+collapsed rows. The existing authored per-file prose remains available in the
+canonical goal for Agent tutoring and future editing, but the browser page
+suppresses it.
 
 ## Core Changes
 
@@ -80,7 +82,8 @@ Automated contracts prove:
 - every Stage patch file belongs to exactly one block;
 - supporting files have no browser per-file explanation;
 - core files remain explained and retain their key-code slices;
-- each patch file has one collapsed diff drawer in its owning block;
+- each core patch file has one collapsed diff drawer in its owning block;
+- each supporting block has one combined diff drawer containing all its files;
 - each core explanation immediately follows its file drawer without a repeated
   path label;
 - file names and explanation labels do not become table-of-contents headings;
