@@ -189,6 +189,20 @@ Book.
                 self.assertIn("Complete reference patch / 完整参考补丁", page)
                 self.assertEqual(page.count("diff --git "), self.stage_one.patch.count("diff --git "))
 
+    def test_each_file_diff_follows_its_file_heading(self) -> None:
+        expectations = (
+            (False, "src/minis3/model.py", "File diff: ", "##### What it is and why it appears"),
+            (True, "src/minis3/model.py", "文件差异：", "##### 是什么，为什么现在需要"),
+        )
+        for chinese, path, diff_label, explanation_heading in expectations:
+            page = render_pages.render_card(self.stage_one, chinese=chinese)
+            file_heading = page.index(f"#### `{path}`")
+            diff = page.index(f'{diff_label}{path}', file_heading)
+            explanation = page.index(explanation_heading, file_heading)
+            with self.subTest(chinese=chinese):
+                self.assertLess(file_heading, diff)
+                self.assertLess(diff, explanation)
+
     def test_deliverable_file_lists_are_collapsed_in_browser_pages(self) -> None:
         english = render_pages.render_card(self.stage_one, chinese=False)
         chinese = render_pages.render_card(self.stage_one, chinese=True)

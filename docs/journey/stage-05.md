@@ -34,24 +34,6 @@ The service locks and passes Bucket records to `list_object_versions`. The pure 
 
 #### `src/minis3/listing.py`
 
-##### What it is and why it appears
-
-This read-side module introduces response values and the pure history projection.
-
-##### Runtime role
-
-It consumes records without mutation and emits a stable sequence carrying key, IDs, ETag/size when data exists, marker flag, and latest flag.
-
-##### Key code
-
-```python
-etag=item.etag if is_data else None,
-```
-
-##### Statement understanding
-
-A marker has no body-derived ETag. Making the field explicitly `None` preserves the distinction instead of inventing an empty-object fingerprint.
-
 ??? note "File diff: src/minis3/listing.py"
     ```diff
     diff --git a/src/minis3/listing.py b/src/minis3/listing.py
@@ -117,25 +99,25 @@ A marker has no body-derived ETag. Making the field explicitly `None` preserves 
     +    return ListObjectVersionsResult(tuple(result))
     ```
 
-#### `src/minis3/store.py`
-
 ##### What it is and why it appears
 
-The public service gains a locked read method for the new projection.
+This read-side module introduces response values and the pure history projection.
 
 ##### Runtime role
 
-It resolves the Bucket and delegates to the pure listing function while preventing a concurrent mutation from changing the snapshot mid-read.
+It consumes records without mutation and emits a stable sequence carrying key, IDs, ETag/size when data exists, marker flag, and latest flag.
 
 ##### Key code
 
 ```python
-return list_object_versions(self._bucket(bucket).records, prefix=prefix)
+etag=item.etag if is_data else None,
 ```
 
 ##### Statement understanding
 
-The service passes records but does not reproduce projection logic. This keeps ownership clear and makes the pure function independently understandable.
+A marker has no body-derived ETag. Making the field explicitly `None` preserves the distinction instead of inventing an empty-object fingerprint.
+
+#### `src/minis3/store.py`
 
 ??? note "File diff: src/minis3/store.py"
     ```diff
@@ -167,19 +149,25 @@ The service passes records but does not reproduce projection logic. This keeps o
                  return self._buckets[name]
     ```
 
-#### `src/minis3/__init__.py`
-
 ##### What it is and why it appears
 
-The new result type becomes part of the supported package surface.
+The public service gains a locked read method for the new projection.
 
 ##### Runtime role
 
-It lets callers name the response contract without importing an internal module path.
+It resolves the Bucket and delegates to the pure listing function while preventing a concurrent mutation from changing the snapshot mid-read.
+
+##### Key code
+
+```python
+return list_object_versions(self._bucket(bucket).records, prefix=prefix)
+```
 
 ##### Statement understanding
 
-Exporting a result value is a compatibility decision; the internal flattening helper remains an implementation detail.
+The service passes records but does not reproduce projection logic. This keeps ownership clear and makes the pure function independently understandable.
+
+#### `src/minis3/__init__.py`
 
 ??? note "File diff: src/minis3/__init__.py"
     ```diff
@@ -194,25 +182,19 @@ Exporting a result value is a compatibility decision; the internal flattening he
     +from .listing import ListedVersion, ListObjectVersionsResult
     ```
 
-#### `tests/test_versioning.py`
-
 ##### What it is and why it appears
 
-Three new scenarios lock the projection of unversioned replacement, suspended replacement, and suspended deletion.
+The new result type becomes part of the supported package surface.
 
 ##### Runtime role
 
-They observe public histories after real service mutations, so the evidence covers Bucket plus projection rather than a fabricated input alone.
-
-##### Key code
-
-```python
-assert marker is not None and marker.version_id == "null"
-```
+It lets callers name the response contract without importing an internal module path.
 
 ##### Statement understanding
 
-Suspension does not mean deletion becomes physical. The new marker occupies the public `null` slot while named history remains addressable.
+Exporting a result value is a compatibility decision; the internal flattening helper remains an implementation detail.
+
+#### `tests/test_versioning.py`
 
 ??? note "File diff: tests/test_versioning.py"
     ```diff
@@ -317,6 +299,24 @@ Suspension does not mean deletion becomes physical. The new marker occupies the 
          store = MiniS3(tmp_path)
          store.create_bucket("b")
     ```
+
+##### What it is and why it appears
+
+Three new scenarios lock the projection of unversioned replacement, suspended replacement, and suspended deletion.
+
+##### Runtime role
+
+They observe public histories after real service mutations, so the evidence covers Bucket plus projection rather than a fabricated input alone.
+
+##### Key code
+
+```python
+assert marker is not None and marker.version_id == "null"
+```
+
+##### Statement understanding
+
+Suspension does not mean deletion becomes physical. The new marker occupies the public `null` slot while named history remains addressable.
 
 ### Verification evidence
 

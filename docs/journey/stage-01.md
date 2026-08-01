@@ -41,24 +41,6 @@ At this stage the flow is deliberately short: caller bytes enter `content_etag`,
 
 #### `src/minis3/errors.py`
 
-##### What it is and why it appears
-
-This file defines protocol-independent domain failures. Bucket and service code can raise a precise error without importing HTTP concepts.
-
-##### Runtime role
-
-Callers catch subclasses of `MiniS3Error` and may later translate them to S3-shaped responses. Keeping missing bucket, missing key, and missing version distinct prevents one broad exception from erasing useful semantics.
-
-##### Key code
-
-```python
-class NoSuchKey(MiniS3Error):
-```
-
-##### Statement understanding
-
-Inheritance says this is part of MiniS3's public failure vocabulary while remaining distinguishable from `NoSuchBucket` and `NoSuchVersion`.
-
 ??? note "File diff: src/minis3/errors.py"
     ```diff
     diff --git a/src/minis3/errors.py b/src/minis3/errors.py
@@ -99,26 +81,25 @@ Inheritance says this is part of MiniS3's public failure vocabulary while remain
     +
     ```
 
-#### `src/minis3/model.py`
-
 ##### What it is and why it appears
 
-This is the stage's central domain-value file. It defines whole-object versions, body-less delete markers, per-key history, and content-derived ETags.
+This file defines protocol-independent domain failures. Bucket and service code can raise a precise error without importing HTTP concepts.
 
 ##### Runtime role
 
-Later Bucket code constructs these values, listing code projects them, and disk storage serializes them. The values themselves perform no I/O and own no global state.
+Callers catch subclasses of `MiniS3Error` and may later translate them to S3-shaped responses. Keeping missing bucket, missing key, and missing version distinct prevents one broad exception from erasing useful semantics.
 
 ##### Key code
 
 ```python
-digest = md5(body, usedforsecurity=False).hexdigest()
-return f'"{digest}"'
+class NoSuchKey(MiniS3Error):
 ```
 
 ##### Statement understanding
 
-`usedforsecurity=False` documents that MD5 is used as the S3-style fingerprint, not as a security primitive. Quoting the hexadecimal digest is part of the externally visible ETag representation, so returning the bare digest would be a semantic bug.
+Inheritance says this is part of MiniS3's public failure vocabulary while remaining distinguishable from `NoSuchBucket` and `NoSuchVersion`.
+
+#### `src/minis3/model.py`
 
 ??? note "File diff: src/minis3/model.py"
     ```diff
@@ -205,19 +186,26 @@ return f'"{digest}"'
     +
     ```
 
-#### `src/minis3/__init__.py`
-
 ##### What it is and why it appears
 
-This package boundary exposes the names a learner or later service can import from `minis3` without knowing the internal module layout.
+This is the stage's central domain-value file. It defines whole-object versions, body-less delete markers, per-key history, and content-derived ETags.
 
 ##### Runtime role
 
-It performs wiring only. If a public name is missing here, import fails before any object flow begins; it does not own ETag or version behavior.
+Later Bucket code constructs these values, listing code projects them, and disk storage serializes them. The values themselves perform no I/O and own no global state.
+
+##### Key code
+
+```python
+digest = md5(body, usedforsecurity=False).hexdigest()
+return f'"{digest}"'
+```
 
 ##### Statement understanding
 
-The explicit imports are the first public API contract. Internal helpers stay internal until a later stage deliberately exports them.
+`usedforsecurity=False` documents that MD5 is used as the S3-style fingerprint, not as a security primitive. Quoting the hexadecimal digest is part of the externally visible ETag representation, so returning the bare digest would be a semantic bug.
+
+#### `src/minis3/__init__.py`
 
 ??? note "File diff: src/minis3/__init__.py"
     ```diff
@@ -232,25 +220,19 @@ The explicit imports are the first public API contract. Internal helpers stay in
     +from .model import DeleteMarker, ObjectRecord, Version, content_etag
     ```
 
-#### `tests/test_model.py`
-
 ##### What it is and why it appears
 
-These tests record the three model invariants introduced today: quoted ETags, opaque keys with immutable values, and body-less delete markers.
+This package boundary exposes the names a learner or later service can import from `minis3` without knowing the internal module layout.
 
 ##### Runtime role
 
-They call the learner-visible values directly. They prove value semantics only; they do not yet prove bucket transitions, disk persistence, or a public object service.
-
-##### Key code
-
-```python
-assert record.key == "/a//b/"
-```
+It performs wiring only. If a public name is missing here, import fails before any object flow begins; it does not own ETag or version behavior.
 
 ##### Statement understanding
 
-The deliberately unusual key catches path normalization. Passing this assertion means the model preserved the exact string, not that directory behavior exists.
+The explicit imports are the first public API contract. Internal helpers stay internal until a later stage deliberately exports them.
+
+#### `tests/test_model.py`
 
 ??? note "File diff: tests/test_model.py"
     ```diff
@@ -297,19 +279,25 @@ The deliberately unusual key catches path normalization. Passing this assertion 
     +
     ```
 
-#### `README.md`
-
 ##### What it is and why it appears
 
-This is the small learner-workspace entry point. It states that the repository is rebuilt in verified stages.
+These tests record the three model invariants introduced today: quoted ETags, opaque keys with immutable values, and body-less delete markers.
 
 ##### Runtime role
 
-It has no runtime responsibility; it helps a learner recognize that this checkout is a staged reconstruction rather than the finished repository.
+They call the learner-visible values directly. They prove value semantics only; they do not yet prove bucket transitions, disk persistence, or a public object service.
+
+##### Key code
+
+```python
+assert record.key == "/a//b/"
+```
 
 ##### Statement understanding
 
-The wording “one verified stage at a time” defines the workspace workflow, not an object-storage invariant.
+The deliberately unusual key catches path normalization. Passing this assertion means the model preserved the exact string, not that directory behavior exists.
+
+#### `README.md`
 
 ??? note "File diff: README.md"
     ```diff
@@ -324,19 +312,19 @@ The wording “one verified stage at a time” defines the workspace workflow, n
     +Build the object store one verified stage at a time.
     ```
 
-#### `pyproject.toml`
-
 ##### What it is and why it appears
 
-This file makes `src/minis3` installable and tells pytest where source and tests live.
+This is the small learner-workspace entry point. It states that the repository is rebuilt in verified stages.
 
 ##### Runtime role
 
-Build and test tools read it before Python imports MiniS3. A wrong package path looks like an import failure even when the model code itself is correct.
+It has no runtime responsibility; it helps a learner recognize that this checkout is a staged reconstruction rather than the finished repository.
 
 ##### Statement understanding
 
-`packages = ["src/minis3"]` connects the src-layout directory to the built package; `testpaths = ["tests"]` keeps test discovery bounded.
+The wording “one verified stage at a time” defines the workspace workflow, not an object-storage invariant.
+
+#### `pyproject.toml`
 
 ??? note "File diff: pyproject.toml"
     ```diff
@@ -372,19 +360,19 @@ Build and test tools read it before Python imports MiniS3. A wrong package path 
     +
     ```
 
-#### `uv.lock`
-
 ##### What it is and why it appears
 
-The lockfile records the exact development dependency graph used to run this stage.
+This file makes `src/minis3` installable and tells pytest where source and tests live.
 
 ##### Runtime role
 
-It affects environment reproduction, not object behavior. It should be debugged when dependency resolution differs between machines.
+Build and test tools read it before Python imports MiniS3. A wrong package path looks like an import failure even when the model code itself is correct.
 
 ##### Statement understanding
 
-The editable `minis3` entry connects the local package to the locked environment, while the pytest version is resolved reproducibly.
+`packages = ["src/minis3"]` connects the src-layout directory to the built package; `testpaths = ["tests"]` keeps test discovery bounded.
+
+#### `uv.lock`
 
 ??? note "File diff: uv.lock"
     ```diff
@@ -474,6 +462,18 @@ The editable `minis3` entry connects the local package to the locked environment
     +    { url = "https://files.pythonhosted.org/packages/24/25/1de2678b631f5a49215c6c96fff41ba892b0a34df68d6d80292b1b48aa7f/pytest-9.1.1-py3-none-any.whl", hash = "sha256:37a86b45efb9a47a61a36449063e8e18d0cab3161329fc099eb21783169c4f0c", size = 386536, upload-time = "2026-06-19T10:58:31.347Z" },
     +]
     ```
+
+##### What it is and why it appears
+
+The lockfile records the exact development dependency graph used to run this stage.
+
+##### Runtime role
+
+It affects environment reproduction, not object behavior. It should be debugged when dependency resolution differs between machines.
+
+##### Statement understanding
+
+The editable `minis3` entry connects the local package to the locked environment, while the pytest version is resolved reproducibly.
 
 ### Verification evidence
 

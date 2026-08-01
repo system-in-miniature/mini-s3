@@ -31,24 +31,6 @@ User imports resolve through `src/minis3/__init__.py`. Separately, `build_journe
 
 #### `src/minis3/__init__.py`
 
-##### What it is and why it appears
-
-The package root receives its final explicit export list for values, services, policies, results, and public failures.
-
-##### Runtime role
-
-It is the stable learner-facing import boundary. Internal storage helpers and implementation-only functions remain absent.
-
-##### Key code
-
-```python
-__all__ = [
-```
-
-##### Statement understanding
-
-The list converts an implicit collection of imports into a deliberate contract. Adding an internal helper elsewhere no longer makes it public accidentally.
-
 ??? note "File diff: src/minis3/__init__.py"
     ```diff
     diff --git a/src/minis3/__init__.py b/src/minis3/__init__.py
@@ -95,6 +77,24 @@ The list converts an implicit collection of imports into a deliberate contract. 
     +    "evaluate_expiration",
     +]
     ```
+
+##### What it is and why it appears
+
+The package root receives its final explicit export list for values, services, policies, results, and public failures.
+
+##### Runtime role
+
+It is the stable learner-facing import boundary. Internal storage helpers and implementation-only functions remain absent.
+
+##### Key code
+
+```python
+__all__ = [
+```
+
+##### Statement understanding
+
+The list converts an implicit collection of imports into a deliberate contract. Adding an internal helper elsewhere no longer makes it public accidentally.
 
 ### Verification evidence
 

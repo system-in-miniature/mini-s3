@@ -31,24 +31,6 @@ Tests replace `fsync_directory` with a recorder, perform real directory/storage 
 
 #### `tests/test_storage.py`
 
-##### What it is and why it appears
-
-The storage suite now inspects durability calls and startup hygiene, not just logical object values.
-
-##### Runtime role
-
-Its recorder makes invisible filesystem obligations observable; its restart case verifies cleanup decisions against manifest authority.
-
-##### Key code
-
-```python
-assert calls == [tmp_path, tmp_path / "one", tmp_path / "one" / "two"]
-```
-
-##### Statement understanding
-
-Each new directory entry lives in its parent, so the expected list walks the ancestry rather than repeating the final path. This assertion locks the durability chain.
-
 ??? note "File diff: tests/test_storage.py"
     ```diff
     diff --git a/tests/test_storage.py b/tests/test_storage.py
@@ -124,6 +106,24 @@ Each new directory entry lives in its parent, so the expected list walks the anc
     +
     +    assert not stray.exists()
     ```
+
+##### What it is and why it appears
+
+The storage suite now inspects durability calls and startup hygiene, not just logical object values.
+
+##### Runtime role
+
+Its recorder makes invisible filesystem obligations observable; its restart case verifies cleanup decisions against manifest authority.
+
+##### Key code
+
+```python
+assert calls == [tmp_path, tmp_path / "one", tmp_path / "one" / "two"]
+```
+
+##### Statement understanding
+
+Each new directory entry lives in its parent, so the expected list walks the ancestry rather than repeating the final path. This assertion locks the durability chain.
 
 ### Verification evidence
 

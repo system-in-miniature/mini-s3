@@ -36,24 +36,6 @@ The caller invokes `lifecycle_tick` with rules. The service captures injected ti
 
 #### `src/minis3/lifecycle.py`
 
-##### What it is and why it appears
-
-This pure policy module defines expiration rules, action values, and decision evaluation.
-
-##### Runtime role
-
-It reads histories and returns what should change; it never calls storage or mutates Bucket records.
-
-##### Key code
-
-```python
-return threshold is not None and now - created_at >= threshold
-```
-
-##### Statement understanding
-
-`>=` makes the policy boundary inclusive and deterministic. `None` means that category has no expiration rule, not age zero.
-
 ??? note "File diff: src/minis3/lifecycle.py"
     ```diff
     diff --git a/src/minis3/lifecycle.py b/src/minis3/lifecycle.py
@@ -167,25 +149,25 @@ return threshold is not None and now - created_at >= threshold
     +    return tuple(actions)
     ```
 
-#### `src/minis3/store.py`
-
 ##### What it is and why it appears
 
-The service adds the explicit tick that converts pure actions into durable state transitions.
+This pure policy module defines expiration rules, action values, and decision evaluation.
 
 ##### Runtime role
 
-It supplies one time value and stable snapshot under the lock, then reuses Bucket deletion and candidate publication.
+It reads histories and returns what should change; it never calls storage or mutates Bucket records.
 
 ##### Key code
 
 ```python
-self._storage.persist_bucket(candidate)
+return threshold is not None and now - created_at >= threshold
 ```
 
 ##### Statement understanding
 
-Policy output alone changes nothing. Persisting the candidate is what makes an applied expiration survive restart; no-action ticks avoid needless publication.
+`>=` makes the policy boundary inclusive and deterministic. `None` means that category has no expiration rule, not age zero.
+
+#### `src/minis3/store.py`
 
 ??? note "File diff: src/minis3/store.py"
     ```diff
@@ -397,19 +379,25 @@ Policy output alone changes nothing. Persisting the candidate is what makes an a
     -
     ```
 
-#### `src/minis3/__init__.py`
-
 ##### What it is and why it appears
 
-Rules and action types join the public learning API.
+The service adds the explicit tick that converts pure actions into durable state transitions.
 
 ##### Runtime role
 
-Callers can construct policy and inspect returned decisions without depending on lifecycle internals.
+It supplies one time value and stable snapshot under the lock, then reuses Bucket deletion and candidate publication.
+
+##### Key code
+
+```python
+self._storage.persist_bucket(candidate)
+```
 
 ##### Statement understanding
 
-The package exports declarative values, while actual mutation remains a `MiniS3` operation.
+Policy output alone changes nothing. Persisting the candidate is what makes an applied expiration survive restart; no-action ticks avoid needless publication.
+
+#### `src/minis3/__init__.py`
 
 ??? note "File diff: src/minis3/__init__.py"
     ```diff
@@ -459,25 +447,19 @@ The package exports declarative values, while actual mutation remains a `MiniS3`
     -from .errors import NotModified, PreconditionFailed
     ```
 
-#### `tests/test_lifecycle.py`
-
 ##### What it is and why it appears
 
-Four contracts cover pure filtering/boundaries, current versus noncurrent transitions, injected time/restart, and invalid rules.
+Rules and action types join the public learning API.
 
 ##### Runtime role
 
-`ManualClock` lets tests advance time deliberately and prove persisted timestamps rather than waiting on wall time.
-
-##### Key code
-
-```python
-assert evaluate_expiration(snapshot, [rule], now=9.999) == ()
-```
+Callers can construct policy and inspect returned decisions without depending on lifecycle internals.
 
 ##### Statement understanding
 
-This is the just-before boundary. Paired with the `10.0` assertion, it proves inclusion precisely rather than merely testing an obviously old object.
+The package exports declarative values, while actual mutation remains a `MiniS3` operation.
+
+#### `tests/test_lifecycle.py`
 
 ??? note "File diff: tests/test_lifecycle.py"
     ```diff
@@ -598,6 +580,24 @@ This is the just-before boundary. Paired with the `10.0` assertion, it proves in
     +        ExpirationRule("negative", expire_current_after=-1)
     +
     ```
+
+##### What it is and why it appears
+
+Four contracts cover pure filtering/boundaries, current versus noncurrent transitions, injected time/restart, and invalid rules.
+
+##### Runtime role
+
+`ManualClock` lets tests advance time deliberately and prove persisted timestamps rather than waiting on wall time.
+
+##### Key code
+
+```python
+assert evaluate_expiration(snapshot, [rule], now=9.999) == ()
+```
+
+##### Statement understanding
+
+This is the just-before boundary. Paired with the `10.0` assertion, it proves inclusion precisely rather than merely testing an obviously old object.
 
 ### Verification evidence
 

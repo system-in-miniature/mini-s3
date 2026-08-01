@@ -31,24 +31,6 @@
 
 #### `tests/test_storage.py`
 
-##### 是什么，为什么现在需要
-
-存储套件现在检查持久化调用与启动卫生，而不只检查逻辑对象值。
-
-##### 在运行时做什么
-
-Recorder 让不可见的文件系统义务变得可观察；重启场景按 Manifest 权威验证清理决策。
-
-##### 关键代码
-
-```python
-assert calls == [tmp_path, tmp_path / "one", tmp_path / "one" / "two"]
-```
-
-##### 关键语句理解
-
-每个新目录项存放在其父目录中，因此期望列表沿祖先链前进，而不是重复最终路径。这条断言锁定持久化链。
-
 ??? note "文件差异：tests/test_storage.py"
     ```diff
     diff --git a/tests/test_storage.py b/tests/test_storage.py
@@ -124,6 +106,24 @@ assert calls == [tmp_path, tmp_path / "one", tmp_path / "one" / "two"]
     +
     +    assert not stray.exists()
     ```
+
+##### 是什么，为什么现在需要
+
+存储套件现在检查持久化调用与启动卫生，而不只检查逻辑对象值。
+
+##### 在运行时做什么
+
+Recorder 让不可见的文件系统义务变得可观察；重启场景按 Manifest 权威验证清理决策。
+
+##### 关键代码
+
+```python
+assert calls == [tmp_path, tmp_path / "one", tmp_path / "one" / "two"]
+```
+
+##### 关键语句理解
+
+每个新目录项存放在其父目录中，因此期望列表沿祖先链前进，而不是重复最终路径。这条断言锁定持久化链。
 
 ### 验证证据
 

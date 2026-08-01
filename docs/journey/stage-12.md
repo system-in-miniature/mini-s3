@@ -31,24 +31,6 @@ Each test prepares a durable upload and parts, injects one crash point, discards
 
 #### `tests/test_storage.py`
 
-##### What it is and why it appears
-
-The storage recovery suite gains the two-sided multipart completion crash contract.
-
-##### Runtime role
-
-It uses fresh service instances to make published manifest and recovered staging—not stale memory—the only evidence.
-
-##### Key code
-
-```python
-assert reopened.get_object("b", "movie").body == b"abcx"
-```
-
-##### Statement understanding
-
-In the after-publish case, the visible complete object is authoritative even if cleanup did not run. Recovery must keep it and remove only the matching upload staging.
-
 ??? note "File diff: tests/test_storage.py"
     ```diff
     diff --git a/tests/test_storage.py b/tests/test_storage.py
@@ -128,6 +110,24 @@ In the after-publish case, the visible complete object is authoritative even if 
     +    with pytest.raises(NoSuchUpload):
     +        reopened.abort_multipart_upload("b", "movie", upload.upload_id)
     ```
+
+##### What it is and why it appears
+
+The storage recovery suite gains the two-sided multipart completion crash contract.
+
+##### Runtime role
+
+It uses fresh service instances to make published manifest and recovered staging—not stale memory—the only evidence.
+
+##### Key code
+
+```python
+assert reopened.get_object("b", "movie").body == b"abcx"
+```
+
+##### Statement understanding
+
+In the after-publish case, the visible complete object is authoritative even if cleanup did not run. Recovery must keep it and remove only the matching upload staging.
 
 ### Verification evidence
 

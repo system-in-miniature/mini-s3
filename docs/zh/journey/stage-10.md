@@ -38,24 +38,6 @@ Staging 是持久私有状态，不是部分可见对象。每次上传由 `(buc
 
 #### `src/minis3/model.py`
 
-##### 是什么，为什么现在需要
-
-Version 和 Marker 增加时间戳；数据版本还可记录完成它的 Multipart upload。
-
-##### 在运行时做什么
-
-后续生命周期和恢复会使用这些字段；它们仍是已发布历史上的不可变元数据。
-
-##### 关键代码
-
-```python
-multipart_upload_id: str | None = None
-```
-
-##### 关键语句理解
-
-`None` 表示普通 PUT；Multipart 完成版本可保留来源，但不会让上传过程本身变成可见历史。
-
 ??? note "文件差异：src/minis3/model.py"
     ```diff
     diff --git a/src/minis3/model.py b/src/minis3/model.py
@@ -86,25 +68,25 @@ multipart_upload_id: str | None = None
     -
     ```
 
-#### `src/minis3/bucket.py`
-
 ##### 是什么，为什么现在需要
 
-Bucket PUT 接受可选的外部 ETag、时间戳与 Multipart 来源，同时保留普通 PUT 默认值。
+Version 和 Marker 增加时间戳；数据版本还可记录完成它的 Multipart upload。
 
 ##### 在运行时做什么
 
-完成操作会复用同一版本迁移，而不是发明第二条发布路径。
+后续生命周期和恢复会使用这些字段；它们仍是已发布历史上的不可变元数据。
 
 ##### 关键代码
 
 ```python
-etag=content_etag(body) if etag is None else etag,
+multipart_upload_id: str | None = None
 ```
 
 ##### 关键语句理解
 
-普通 PUT 仍计算 whole-body ETag；Multipart 完成可以传入验证后的组合 ETag。按组装 Body 重算会得到错误语义。
+`None` 表示普通 PUT；Multipart 完成版本可保留来源，但不会让上传过程本身变成可见历史。
+
+#### `src/minis3/bucket.py`
 
 ??? note "文件差异：src/minis3/bucket.py"
     ```diff
@@ -163,25 +145,25 @@ etag=content_etag(body) if etag is None else etag,
                  old_versions = tuple(
     ```
 
-#### `src/minis3/storage/disk.py`
-
 ##### 是什么，为什么现在需要
 
-DiskStorage 增加私有上传布局、原子 Part 写入、身份校验、删除和重启恢复。
+Bucket PUT 接受可选的外部 ETag、时间戳与 Multipart 来源，同时保留普通 PUT 默认值。
 
 ##### 在运行时做什么
 
-它像管理对象 Artifact 一样管理持久 Staging，但普通 Manifest/List 从不读取 `uploads/`。
+完成操作会复用同一版本迁移，而不是发明第二条发布路径。
 
 ##### 关键代码
 
 ```python
-atomic_write(directory / "parts" / f"{part.part_number:05d}.data", part.body)
+etag=content_etag(body) if etag is None else etag,
 ```
 
 ##### 关键语句理解
 
-Part 编号选择稳定文件名，`atomic_write` 完整替换它；重试不会留下半旧半新的字节。
+普通 PUT 仍计算 whole-body ETag；Multipart 完成可以传入验证后的组合 ETag。按组装 Body 重算会得到错误语义。
+
+#### `src/minis3/storage/disk.py`
 
 ??? note "文件差异：src/minis3/storage/disk.py"
     ```diff
@@ -405,25 +387,25 @@ Part 编号选择稳定文件名，`atomic_write` 完整替换它；重试不会
     +        return maximum_sequence
     ```
 
-#### `src/minis3/store.py`
-
 ##### 是什么，为什么现在需要
 
-公开服务增加 initiate、upload-part、abort 编排，以及可注入 clock 和最小 Part 大小。
+DiskStorage 增加私有上传布局、原子 Part 写入、身份校验、删除和重启恢复。
 
 ##### 在运行时做什么
 
-它在同一把锁下校验公开参数、分配确定性上传身份，再把私有字节委托给 DiskStorage。
+它像管理对象 Artifact 一样管理持久 Staging，但普通 Manifest/List 从不读取 `uploads/`。
 
 ##### 关键代码
 
 ```python
-upload_id=f"u{sequence:08d}",
+atomic_write(directory / "parts" / f"{part.part_number:05d}.data", part.body)
 ```
 
 ##### 关键语句理解
 
-Upload ID 延续单调序列纪律，使重启恢复和学习追踪可复现，而不是依赖随机 UUID。
+Part 编号选择稳定文件名，`atomic_write` 完整替换它；重试不会留下半旧半新的字节。
+
+#### `src/minis3/store.py`
 
 ??? note "文件差异：src/minis3/store.py"
     ```diff
@@ -617,19 +599,25 @@ Upload ID 延续单调序列纪律，使重启恢复和学习追踪可复现，�
     +
     ```
 
-#### `src/minis3/__init__.py`
-
 ##### 是什么，为什么现在需要
 
-Multipart 值与失败加入受支持包级 API。
+公开服务增加 initiate、upload-part、abort 编排，以及可注入 clock 和最小 Part 大小。
 
 ##### 在运行时做什么
 
-调用方可以持有 receipt 并捕获 `NoSuchUpload`，无需导入存储内部实现。
+它在同一把锁下校验公开参数、分配确定性上传身份，再把私有字节委托给 DiskStorage。
+
+##### 关键代码
+
+```python
+upload_id=f"u{sequence:08d}",
+```
 
 ##### 关键语句理解
 
-公开的是领域契约，不是私有磁盘布局。
+Upload ID 延续单调序列纪律，使重启恢复和学习追踪可复现，而不是依赖随机 UUID。
+
+#### `src/minis3/__init__.py`
 
 ??? note "文件差异：src/minis3/__init__.py"
     ```diff
@@ -687,25 +675,19 @@ Multipart 值与失败加入受支持包级 API。
     +from .multipart import MIN_PART_SIZE, MultipartPart, MultipartUpload
     ```
 
-#### `tests/test_multipart.py`
-
 ##### 是什么，为什么现在需要
 
-第一条持久 Multipart 测试锁定上传身份和合法 Part 编号范围。
+Multipart 值与失败加入受支持包级 API。
 
 ##### 在运行时做什么
 
-它通过 `MiniS3` 进入，因此失败同时覆盖服务校验与存储身份查找。
-
-##### 关键代码
-
-```python
-store.upload_part("b", "wrong", upload.upload_id, 1, b"x")
-```
+调用方可以持有 receipt 并捕获 `NoSuchUpload`，无需导入存储内部实现。
 
 ##### 关键语句理解
 
-Upload ID 不能全局互换：寻址的 Bucket 与 Key 必须和持久元数据匹配，之后才能写 Part。
+公开的是领域契约，不是私有磁盘布局。
+
+#### `tests/test_multipart.py`
 
 ??? note "文件差异：tests/test_multipart.py"
     ```diff
@@ -746,6 +728,24 @@ Upload ID 不能全局互换：寻址的 Bucket 与 Key 必须和持久元数据
     +    with pytest.raises(ValueError):
     +        store.upload_part("b", "right", upload.upload_id, 10_001, b"x")
     ```
+
+##### 是什么，为什么现在需要
+
+第一条持久 Multipart 测试锁定上传身份和合法 Part 编号范围。
+
+##### 在运行时做什么
+
+它通过 `MiniS3` 进入，因此失败同时覆盖服务校验与存储身份查找。
+
+##### 关键代码
+
+```python
+store.upload_part("b", "wrong", upload.upload_id, 1, b"x")
+```
+
+##### 关键语句理解
+
+Upload ID 不能全局互换：寻址的 Bucket 与 Key 必须和持久元数据匹配，之后才能写 Part。
 
 ### 验证证据
 

@@ -35,24 +35,6 @@ Validation is a domain rule shared by any future storage adapter. Keeping it pur
 
 #### `src/minis3/errors.py`
 
-##### What it is and why it appears
-
-The public failure vocabulary gains missing-upload, invalid-part, invalid-order, and too-small-part meanings.
-
-##### Runtime role
-
-Domain validation and later service/storage code raise the same precise types, allowing callers to distinguish retryable identity errors from invalid completion requests.
-
-##### Key code
-
-```python
-class EntityTooSmall(MiniS3Error):
-```
-
-##### Statement understanding
-
-Part size is not a generic `ValueError`; it is an S3-shaped completion failure with stable meaning at the public boundary.
-
 ??? note "File diff: src/minis3/errors.py"
     ```diff
     diff --git a/src/minis3/errors.py b/src/minis3/errors.py
@@ -80,25 +62,25 @@ Part size is not a generic `ValueError`; it is an S3-shaped completion failure w
     +    """A non-final multipart part is below the configured minimum size."""
     ```
 
-#### `src/minis3/multipart.py`
-
 ##### What it is and why it appears
 
-This file owns multipart values and the pure completion validator.
+The public failure vocabulary gains missing-upload, invalid-part, invalid-order, and too-small-part meanings.
 
 ##### Runtime role
 
-Storage will persist these values and the service will call the validator, but neither needs to reimplement ordering, receipt, or ETag rules.
+Domain validation and later service/storage code raise the same precise types, allowing callers to distinguish retryable identity errors from invalid completion requests.
 
 ##### Key code
 
 ```python
-return tuple(selected), f'"{composite}-{len(selected)}"'
+class EntityTooSmall(MiniS3Error):
 ```
 
 ##### Statement understanding
 
-The return keeps validated order and its derived composite fingerprint together. The `-N` suffix records part count and distinguishes multipart ETags from normal whole-body ETags.
+Part size is not a generic `ValueError`; it is an S3-shaped completion failure with stable meaning at the public boundary.
+
+#### `src/minis3/multipart.py`
 
 ??? note "File diff: src/minis3/multipart.py"
     ```diff
@@ -217,25 +199,25 @@ The return keeps validated order and its derived composite fingerprint together.
     +    return tuple(selected), f'"{composite}-{len(selected)}"'
     ```
 
-#### `tests/test_multipart_domain.py`
-
 ##### What it is and why it appears
 
-This focused contract makes completion rules visible before durable staging is added.
+This file owns multipart values and the pure completion validator.
 
 ##### Runtime role
 
-It supplies explicit staged parts and manifests, proving both accepted order/composite ETag and the major rejection paths.
+Storage will persist these values and the service will call the validator, but neither needs to reimplement ordering, receipt, or ETag rules.
 
 ##### Key code
 
 ```python
-def test_completion_validation_orders_parts_and_hashes_binary_digests() -> None:
+return tuple(selected), f'"{composite}-{len(selected)}"'
 ```
 
 ##### Statement understanding
 
-The test name captures two independent obligations: client order is semantic, and composite hashing uses binary digests rather than concatenated hexadecimal text.
+The return keeps validated order and its derived composite fingerprint together. The `-N` suffix records part count and distinguishes multipart ETags from normal whole-body ETags.
+
+#### `tests/test_multipart_domain.py`
 
 ??? note "File diff: tests/test_multipart_domain.py"
     ```diff
@@ -286,6 +268,24 @@ The test name captures two independent obligations: client order is semantic, an
     +            minimum_part_size=3,
     +        )
     ```
+
+##### What it is and why it appears
+
+This focused contract makes completion rules visible before durable staging is added.
+
+##### Runtime role
+
+It supplies explicit staged parts and manifests, proving both accepted order/composite ETag and the major rejection paths.
+
+##### Key code
+
+```python
+def test_completion_validation_orders_parts_and_hashes_binary_digests() -> None:
+```
+
+##### Statement understanding
+
+The test name captures two independent obligations: client order is semantic, and composite hashing uses binary digests rather than concatenated hexadecimal text.
 
 ### Verification evidence
 

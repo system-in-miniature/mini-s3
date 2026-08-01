@@ -35,24 +35,6 @@ Multipart ETag 不是组装后 Body 的 MD5。MiniS3 把每个带引号 Part MD5
 
 #### `src/minis3/errors.py`
 
-##### 是什么，为什么现在需要
-
-公开失败词汇增加缺上传、无效 Part、顺序无效和 Part 太小。
-
-##### 在运行时做什么
-
-领域验证和后续服务/存储共享这些精确类型，使调用方能区分上传身份错误与无效完成请求。
-
-##### 关键代码
-
-```python
-class EntityTooSmall(MiniS3Error):
-```
-
-##### 关键语句理解
-
-Part 尺寸错误不是普通 `ValueError`，而是公开边界含义稳定的 S3 风格完成失败。
-
 ??? note "文件差异：src/minis3/errors.py"
     ```diff
     diff --git a/src/minis3/errors.py b/src/minis3/errors.py
@@ -80,25 +62,25 @@ Part 尺寸错误不是普通 `ValueError`，而是公开边界含义稳定的 S
     +    """A non-final multipart part is below the configured minimum size."""
     ```
 
-#### `src/minis3/multipart.py`
-
 ##### 是什么，为什么现在需要
 
-这里拥有 Multipart 领域值与纯完成验证器。
+公开失败词汇增加缺上传、无效 Part、顺序无效和 Part 太小。
 
 ##### 在运行时做什么
 
-存储层会持久化这些值，服务层会调用验证器，但两者都不用重复顺序、receipt 或 ETag 规则。
+领域验证和后续服务/存储共享这些精确类型，使调用方能区分上传身份错误与无效完成请求。
 
 ##### 关键代码
 
 ```python
-return tuple(selected), f'"{composite}-{len(selected)}"'
+class EntityTooSmall(MiniS3Error):
 ```
 
 ##### 关键语句理解
 
-返回值把已验证顺序和派生组合指纹绑定在一起；`-N` 记录 Part 数，也让 Multipart ETag 与普通 ETag 可区分。
+Part 尺寸错误不是普通 `ValueError`，而是公开边界含义稳定的 S3 风格完成失败。
+
+#### `src/minis3/multipart.py`
 
 ??? note "文件差异：src/minis3/multipart.py"
     ```diff
@@ -217,25 +199,25 @@ return tuple(selected), f'"{composite}-{len(selected)}"'
     +    return tuple(selected), f'"{composite}-{len(selected)}"'
     ```
 
-#### `tests/test_multipart_domain.py`
-
 ##### 是什么，为什么现在需要
 
-这个聚焦契约在加入持久暂存以前就让完成规则可见。
+这里拥有 Multipart 领域值与纯完成验证器。
 
 ##### 在运行时做什么
 
-它提供显式暂存 Part 与清单，证明可接受顺序/组合 ETag 和主要拒绝路径。
+存储层会持久化这些值，服务层会调用验证器，但两者都不用重复顺序、receipt 或 ETag 规则。
 
 ##### 关键代码
 
 ```python
-def test_completion_validation_orders_parts_and_hashes_binary_digests() -> None:
+return tuple(selected), f'"{composite}-{len(selected)}"'
 ```
 
 ##### 关键语句理解
 
-测试名锁定两个独立义务：客户端顺序有语义，组合哈希使用二进制摘要而不是十六进制文本拼接。
+返回值把已验证顺序和派生组合指纹绑定在一起；`-N` 记录 Part 数，也让 Multipart ETag 与普通 ETag 可区分。
+
+#### `tests/test_multipart_domain.py`
 
 ??? note "文件差异：tests/test_multipart_domain.py"
     ```diff
@@ -286,6 +268,24 @@ def test_completion_validation_orders_parts_and_hashes_binary_digests() -> None:
     +            minimum_part_size=3,
     +        )
     ```
+
+##### 是什么，为什么现在需要
+
+这个聚焦契约在加入持久暂存以前就让完成规则可见。
+
+##### 在运行时做什么
+
+它提供显式暂存 Part 与清单，证明可接受顺序/组合 ETag 和主要拒绝路径。
+
+##### 关键代码
+
+```python
+def test_completion_validation_orders_parts_and_hashes_binary_digests() -> None:
+```
+
+##### 关键语句理解
+
+测试名锁定两个独立义务：客户端顺序有语义，组合哈希使用二进制摘要而不是十六进制文本拼接。
 
 ### 验证证据
 

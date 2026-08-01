@@ -36,25 +36,6 @@
 
 #### `src/minis3/store.py`
 
-##### 是什么，为什么现在需要
-
-这是公开应用边界，协调锁、聚合迁移、持久化与恢复。
-
-##### 在运行时做什么
-
-所有公开 Bucket/对象调用从这里进入。成功变更依次跨过 Bucket 和 DiskStorage；读取解析当前内存聚合。
-
-##### 关键代码
-
-```python
-self._storage.persist_bucket(candidate)
-self._buckets[bucket] = candidate
-```
-
-##### 关键语句理解
-
-候选先发布，之后才成为进程可见 Bucket。反过来会让失败的磁盘写入泄漏成“当前可见但重启消失”的状态。
-
 ??? note "文件差异：src/minis3/store.py"
     ```diff
     diff --git a/src/minis3/store.py b/src/minis3/store.py
@@ -169,19 +150,26 @@ self._buckets[bucket] = candidate
     +
     ```
 
-#### `src/minis3/__init__.py`
-
 ##### 是什么，为什么现在需要
 
-包现在除领域值外，还导出 `MiniS3` 与版本化状态。
+这是公开应用边界，协调锁、聚合迁移、持久化与恢复。
 
 ##### 在运行时做什么
 
-它建立预期入口，调用方不再需要自行拼装 Bucket 与 DiskStorage。
+所有公开 Bucket/对象调用从这里进入。成功变更依次跨过 Bucket 和 DiskStorage；读取解析当前内存聚合。
+
+##### 关键代码
+
+```python
+self._storage.persist_bucket(candidate)
+self._buckets[bucket] = candidate
+```
 
 ##### 关键语句理解
 
-公开导出只是 API 接线，不证明运行时行为；下面的服务测试才提供证据。
+候选先发布，之后才成为进程可见 Bucket。反过来会让失败的磁盘写入泄漏成“当前可见但重启消失”的状态。
+
+#### `src/minis3/__init__.py`
 
 ??? note "文件差异：src/minis3/__init__.py"
     ```diff
@@ -198,25 +186,19 @@ self._buckets[bucket] = candidate
     +from .storage import InjectedCrash
     ```
 
-#### `tests/test_storage.py`
-
 ##### 是什么，为什么现在需要
 
-这些契约通过公开服务检查持久化，包括重启、崩溃注入、Bucket 删除和序列恢复。
+包现在除领域值外，还导出 `MiniS3` 与版本化状态。
 
 ##### 在运行时做什么
 
-它们捕获“内存成功但重开失败”的缺口，是编排层与存储层相遇的位置。
-
-##### 关键代码
-
-```python
-assert reopened.get_object("b", "k", version_id=first.version_id).body == b"one"
-```
+它建立预期入口，调用方不再需要自行拼装 Bucket 与 DiskStorage。
 
 ##### 关键语句理解
 
-在新实例上按旧版本 ID 读取，证明版本历史和字节都跨发布保存；只检查最新值证据更弱。
+公开导出只是 API 接线，不证明运行时行为；下面的服务测试才提供证据。
+
+#### `tests/test_storage.py`
 
 ??? note "文件差异：tests/test_storage.py"
     ```diff
@@ -260,25 +242,25 @@ assert reopened.get_object("b", "k", version_id=first.version_id).body == b"one"
     +    assert second.version_id != first.version_id
     ```
 
-#### `tests/test_versioning.py`
-
 ##### 是什么，为什么现在需要
 
-这里锁定完整公开版本状态机和 DELETE 含义。
+这些契约通过公开服务检查持久化，包括重启、崩溃注入、Bucket 删除和序列恢复。
 
 ##### 在运行时做什么
 
-它区分未版本化删除、Marker 创建、指定版本删除、最新 Marker 导致 404，以及具名历史保留。
+它们捕获“内存成功但重开失败”的缺口，是编排层与存储层相遇的位置。
 
 ##### 关键代码
 
 ```python
-assert bucket.get("k", historical.version_id) == historical
+assert reopened.get_object("b", "k", version_id=first.version_id).body == b"one"
 ```
 
 ##### 关键语句理解
 
-这个防御性场景证明：即使恢复或外部构造中出现具名历史，未版本化删除也不能把它擦掉。
+在新实例上按旧版本 ID 读取，证明版本历史和字节都跨发布保存；只检查最新值证据更弱。
+
+#### `tests/test_versioning.py`
 
 ??? note "文件差异：tests/test_versioning.py"
     ```diff
@@ -398,6 +380,24 @@ assert bucket.get("k", historical.version_id) == historical
     +    with pytest.raises(BucketNotEmpty):
     +        store.delete_bucket("b")
     ```
+
+##### 是什么，为什么现在需要
+
+这里锁定完整公开版本状态机和 DELETE 含义。
+
+##### 在运行时做什么
+
+它区分未版本化删除、Marker 创建、指定版本删除、最新 Marker 导致 404，以及具名历史保留。
+
+##### 关键代码
+
+```python
+assert bucket.get("k", historical.version_id) == historical
+```
+
+##### 关键语句理解
+
+这个防御性场景证明：即使恢复或外部构造中出现具名历史，未版本化删除也不能把它擦掉。
 
 ### 验证证据
 

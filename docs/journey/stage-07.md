@@ -31,24 +31,6 @@ The test prepares old state, installs `CrashOnce`, attempts a mutation, catches 
 
 #### `tests/test_storage.py`
 
-##### What it is and why it appears
-
-The storage integration suite gains a parameterized crash matrix around artifact and manifest publication.
-
-##### Runtime role
-
-It observes the system only after reopening, which discards misleading in-process memory and exercises recovery cleanup.
-
-##### Key code
-
-```python
-crash_injector=CrashOnce("before_manifest_publish"),
-```
-
-##### Statement understanding
-
-The named hook fixes the exact interruption boundary. Assertions after a fresh open can therefore distinguish “artifacts durable” from “state published.”
-
 ??? note "File diff: tests/test_storage.py"
     ```diff
     diff --git a/tests/test_storage.py b/tests/test_storage.py
@@ -126,6 +108,24 @@ The named hook fixes the exact interruption boundary. Assertions after a fresh o
     +    assert visible.body == b"value"
     +    assert visible.etag == '"2063c1608d6e0baf80249c42e2be5804"'
     ```
+
+##### What it is and why it appears
+
+The storage integration suite gains a parameterized crash matrix around artifact and manifest publication.
+
+##### Runtime role
+
+It observes the system only after reopening, which discards misleading in-process memory and exercises recovery cleanup.
+
+##### Key code
+
+```python
+crash_injector=CrashOnce("before_manifest_publish"),
+```
+
+##### Statement understanding
+
+The named hook fixes the exact interruption boundary. Assertions after a fresh open can therefore distinguish “artifacts durable” from “state published.”
 
 ### Verification evidence
 

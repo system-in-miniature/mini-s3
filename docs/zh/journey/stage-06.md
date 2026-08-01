@@ -36,24 +36,6 @@ Continuation token 是不透明游标。MiniS3 把 offset 与 prefix、delimiter
 
 #### `src/minis3/listing.py`
 
-##### 是什么，为什么现在需要
-
-读取侧现在除版本历史外，还拥有当前对象 Listing、delimiter 分组与分页 token。
-
-##### 在运行时做什么
-
-它不修改 Bucket records，返回不可变 `contents`、`common_prefixes` 与 `next_token`。
-
-##### 关键代码
-
-```python
-return urlsafe_b64encode(payload).decode().rstrip("=")
-```
-
-##### 关键语句理解
-
-编码隐藏游标表示；payload 还带查询形状，因此解码时能拒绝属于其他 prefix 或 delimiter 的游标。
-
 ??? note "文件差异：src/minis3/listing.py"
     ```diff
     diff --git a/src/minis3/listing.py b/src/minis3/listing.py
@@ -201,25 +183,25 @@ return urlsafe_b64encode(payload).decode().rstrip("=")
     +
     ```
 
-#### `src/minis3/store.py`
-
 ##### 是什么，为什么现在需要
 
-服务增加当前 Listing 的公开带锁入口。
+读取侧现在除版本历史外，还拥有当前对象 Listing、delimiter 分组与分页 token。
 
 ##### 在运行时做什么
 
-它提供一致 records 快照，并把全部只读投影规则委托给 `listing.py`。
+它不修改 Bucket records，返回不可变 `contents`、`common_prefixes` 与 `next_token`。
 
 ##### 关键代码
 
 ```python
-with self._lock:
+return urlsafe_b64encode(payload).decode().rstrip("=")
 ```
 
 ##### 关键语句理解
 
-纯投影也需要稳定输入。锁防止并发 PUT/DELETE 在分页构造中途改变 Key 集合。
+编码隐藏游标表示；payload 还带查询形状，因此解码时能拒绝属于其他 prefix 或 delimiter 的游标。
+
+#### `src/minis3/store.py`
 
 ??? note "文件差异：src/minis3/store.py"
     ```diff
@@ -344,19 +326,25 @@ with self._lock:
     -
     ```
 
-#### `src/minis3/__init__.py`
-
 ##### 是什么，为什么现在需要
 
-包把当前 Listing 响应类型加入累积公开 API。
+服务增加当前 Listing 的公开带锁入口。
 
 ##### 在运行时做什么
 
-调用方只需依赖一个受支持导入面；它不计算前缀或 token。
+它提供一致 records 快照，并把全部只读投影规则委托给 `listing.py`。
+
+##### 关键代码
+
+```python
+with self._lock:
+```
 
 ##### 关键语句理解
 
-显式 `__all__` 开始记录累积的公开名称，避免意外导出全部内部 helper。
+纯投影也需要稳定输入。锁防止并发 PUT/DELETE 在分页构造中途改变 Key 集合。
+
+#### `src/minis3/__init__.py`
 
 ??? note "文件差异：src/minis3/__init__.py"
     ```diff
@@ -412,25 +400,19 @@ with self._lock:
     +]
     ```
 
-#### `tests/test_listing.py`
-
 ##### 是什么，为什么现在需要
 
-五条契约覆盖目录幻觉、组合分页、Marker 隐藏、版本展开和无效 token。
+包把当前 Listing 响应类型加入累积公开 API。
 
 ##### 在运行时做什么
 
-它们通过 `MiniS3` 建立状态并观察公开结果，把模型语义连接到最终读取视图。
-
-##### 关键代码
-
-```python
-assert root.common_prefixes == ("photos/",)
-```
+调用方只需依赖一个受支持导入面；它不计算前缀或 token。
 
 ##### 关键语句理解
 
-多个扁平 Key 在根视图中折叠成一个投影前缀；这个 tuple 不表示存储了 `photos/` 对象或目录。
+显式 `__all__` 开始记录累积的公开名称，避免意外导出全部内部 helper。
+
+#### `tests/test_listing.py`
 
 ??? note "文件差异：tests/test_listing.py"
     ```diff
@@ -534,6 +516,24 @@ assert root.common_prefixes == ("photos/",)
     +            "b", prefix="different", continuation_token=first.next_token
     +        )
     ```
+
+##### 是什么，为什么现在需要
+
+五条契约覆盖目录幻觉、组合分页、Marker 隐藏、版本展开和无效 token。
+
+##### 在运行时做什么
+
+它们通过 `MiniS3` 建立状态并观察公开结果，把模型语义连接到最终读取视图。
+
+##### 关键代码
+
+```python
+assert root.common_prefixes == ("photos/",)
+```
+
+##### 关键语句理解
+
+多个扁平 Key 在根视图中折叠成一个投影前缀；这个 tuple 不表示存储了 `photos/` 对象或目录。
 
 ### 验证证据
 

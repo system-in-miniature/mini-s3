@@ -34,26 +34,6 @@ Publishing each part would violate whole-object visibility. Removing staging bef
 
 #### `src/minis3/store.py`
 
-##### What it is and why it appears
-
-The service gains the completion orchestration that connects private staging to the existing object publication path.
-
-##### Runtime role
-
-It owns the ordering across storage load, pure validation, Bucket mutation, manifest publication, and staging cleanup.
-
-##### Key code
-
-```python
-self._storage.persist_bucket(candidate)
-self._buckets[bucket] = candidate
-self._storage.remove_multipart_upload(bucket, key, upload_id)
-```
-
-##### Statement understanding
-
-Cleanup is last. If publication fails, the upload remains retryable; once publication succeeds, removing staging cannot make the committed object disappear.
-
 ??? note "File diff: src/minis3/store.py"
     ```diff
     diff --git a/src/minis3/store.py b/src/minis3/store.py
@@ -102,25 +82,27 @@ Cleanup is last. If publication fails, the upload remains retryable; once public
          ) -> None:
     ```
 
-#### `tests/test_multipart.py`
-
 ##### What it is and why it appears
 
-Four cases cover invisibility until completion, same-number replacement, manifest validation, abort, and restart of unfinished staging.
+The service gains the completion orchestration that connects private staging to the existing object publication path.
 
 ##### Runtime role
 
-They exercise the complete public lifecycle and inspect both visible objects and private upload behavior.
+It owns the ordering across storage load, pure validation, Bucket mutation, manifest publication, and staging cleanup.
 
 ##### Key code
 
 ```python
-assert completed.etag != content_etag(completed.body)
+self._storage.persist_bucket(candidate)
+self._buckets[bucket] = candidate
+self._storage.remove_multipart_upload(bucket, key, upload_id)
 ```
 
 ##### Statement understanding
 
-This prevents an easy but incorrect implementation from hashing assembled bytes as a normal PUT. Multipart identity is derived from part digests.
+Cleanup is last. If publication fails, the upload remains retryable; once publication succeeds, removing staging cannot make the committed object disappear.
+
+#### `tests/test_multipart.py`
 
 ??? note "File diff: tests/test_multipart.py"
     ```diff
@@ -239,6 +221,24 @@ This prevents an easy but incorrect implementation from hashing assembled bytes 
              store.upload_part("b", "right", upload.upload_id, 10_001, b"x")
     +
     ```
+
+##### What it is and why it appears
+
+Four cases cover invisibility until completion, same-number replacement, manifest validation, abort, and restart of unfinished staging.
+
+##### Runtime role
+
+They exercise the complete public lifecycle and inspect both visible objects and private upload behavior.
+
+##### Key code
+
+```python
+assert completed.etag != content_etag(completed.body)
+```
+
+##### Statement understanding
+
+This prevents an easy but incorrect implementation from hashing assembled bytes as a normal PUT. Multipart identity is derived from part digests.
 
 ### Verification evidence
 

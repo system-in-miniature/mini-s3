@@ -310,6 +310,22 @@ def _collapse_deliverables(prelude: str, *, chinese: bool) -> str:
     return prelude[:heading_start] + collapsed + prelude[next_heading + 1:]
 
 
+def _render_file_section(
+    lesson: FileLesson,
+    file_patch: FilePatch,
+    *,
+    chinese: bool,
+) -> str:
+    heading, separator, explanation = lesson.body.partition("\n")
+    if not separator:
+        raise ValueError(f"{lesson.path}: file lesson has no explanation after its heading")
+    return (
+        f"{heading}\n\n"
+        f"{_render_diff(file_patch, chinese=chinese)}\n\n"
+        f"{explanation.lstrip()}"
+    )
+
+
 def render_card(card: Card, *, chinese: bool) -> str:
     title = card.chinese_title if chinese else card.english_title
     body = card.chinese if chinese else card.english
@@ -322,7 +338,11 @@ def render_card(card: Card, *, chinese: bool) -> str:
     )
     patch_by_path = {item.path: item for item in file_patches}
     file_sections = [
-        f"{item.body}\n\n{_render_diff(patch_by_path[item.path], chinese=chinese)}"
+        _render_file_section(
+            item,
+            patch_by_path[item.path],
+            chinese=chinese,
+        )
         for item in lesson.files
     ]
     link_label = "在 GitHub 查看阶段差异" if chinese else "Compare this stage on GitHub"

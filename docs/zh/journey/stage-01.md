@@ -41,24 +41,6 @@ Key 是不透明字符串。后面的 Listing 可以利用斜杠展示类似目�
 
 #### `src/minis3/errors.py`
 
-##### 是什么，为什么现在需要
-
-这里定义与 HTTP 无关的领域错误。Bucket 和服务代码可以准确表达失败，而不依赖传输协议。
-
-##### 在运行时做什么
-
-调用方可以捕获 `MiniS3Error` 的具体子类，再映射成协议响应。缺 Bucket、缺 Key、缺具体版本必须分开，否则会丢失语义。
-
-##### 关键代码
-
-```python
-class NoSuchKey(MiniS3Error):
-```
-
-##### 关键语句理解
-
-继承关系表示它属于 MiniS3 的公开失败词汇，同时仍可与 `NoSuchBucket`、`NoSuchVersion` 区分。
-
 ??? note "文件差异：src/minis3/errors.py"
     ```diff
     diff --git a/src/minis3/errors.py b/src/minis3/errors.py
@@ -99,26 +81,25 @@ class NoSuchKey(MiniS3Error):
     +
     ```
 
-#### `src/minis3/model.py`
-
 ##### 是什么，为什么现在需要
 
-这是本阶段的核心领域值文件，定义完整对象版本、无 Body 删除标记、Key 的历史和内容 ETag。
+这里定义与 HTTP 无关的领域错误。Bucket 和服务代码可以准确表达失败，而不依赖传输协议。
 
 ##### 在运行时做什么
 
-后续 Bucket 构造这些值，Listing 投影它们，磁盘层序列化它们；这些值自身不执行 I/O，也不拥有全局状态。
+调用方可以捕获 `MiniS3Error` 的具体子类，再映射成协议响应。缺 Bucket、缺 Key、缺具体版本必须分开，否则会丢失语义。
 
 ##### 关键代码
 
 ```python
-digest = md5(body, usedforsecurity=False).hexdigest()
-return f'"{digest}"'
+class NoSuchKey(MiniS3Error):
 ```
 
 ##### 关键语句理解
 
-`usedforsecurity=False` 明确 MD5 在这里是 S3 风格指纹，不是安全算法。外层引号属于 ETag 的公开表示，返回裸摘要会造成语义错误。
+继承关系表示它属于 MiniS3 的公开失败词汇，同时仍可与 `NoSuchBucket`、`NoSuchVersion` 区分。
+
+#### `src/minis3/model.py`
 
 ??? note "文件差异：src/minis3/model.py"
     ```diff
@@ -205,19 +186,26 @@ return f'"{digest}"'
     +
     ```
 
-#### `src/minis3/__init__.py`
-
 ##### 是什么，为什么现在需要
 
-这是包级公开边界，让学习者和后续服务可以从 `minis3` 导入稳定名称，而不必知道内部模块布局。
+这是本阶段的核心领域值文件，定义完整对象版本、无 Body 删除标记、Key 的历史和内容 ETag。
 
 ##### 在运行时做什么
 
-它只负责接线。名称漏导出会在对象流程开始前表现为 import 失败，但它不拥有 ETag 或版本行为。
+后续 Bucket 构造这些值，Listing 投影它们，磁盘层序列化它们；这些值自身不执行 I/O，也不拥有全局状态。
+
+##### 关键代码
+
+```python
+digest = md5(body, usedforsecurity=False).hexdigest()
+return f'"{digest}"'
+```
 
 ##### 关键语句理解
 
-显式导入组成第一版公开 API；内部辅助函数只有在后续阶段明确加入时才成为公开能力。
+`usedforsecurity=False` 明确 MD5 在这里是 S3 风格指纹，不是安全算法。外层引号属于 ETag 的公开表示，返回裸摘要会造成语义错误。
+
+#### `src/minis3/__init__.py`
 
 ??? note "文件差异：src/minis3/__init__.py"
     ```diff
@@ -232,25 +220,19 @@ return f'"{digest}"'
     +from .model import DeleteMarker, ObjectRecord, Version, content_etag
     ```
 
-#### `tests/test_model.py`
-
 ##### 是什么，为什么现在需要
 
-三个测试分别固定带引号 ETag、含斜杠的不透明 Key 与不可变性、无 Body 删除标记。
+这是包级公开边界，让学习者和后续服务可以从 `minis3` 导入稳定名称，而不必知道内部模块布局。
 
 ##### 在运行时做什么
 
-它们直接调用学习者可见的领域值，只证明值语义；目前还不能证明 Bucket 迁移、磁盘持久化或对象服务。
-
-##### 关键代码
-
-```python
-assert record.key == "/a//b/"
-```
+它只负责接线。名称漏导出会在对象流程开始前表现为 import 失败，但它不拥有 ETag 或版本行为。
 
 ##### 关键语句理解
 
-故意使用异常形状的 Key 是为了捕获路径规范化。断言通过只证明字符串被原样保存，不代表系统真的存在目录。
+显式导入组成第一版公开 API；内部辅助函数只有在后续阶段明确加入时才成为公开能力。
+
+#### `tests/test_model.py`
 
 ??? note "文件差异：tests/test_model.py"
     ```diff
@@ -297,19 +279,25 @@ assert record.key == "/a//b/"
     +
     ```
 
-#### `README.md`
-
 ##### 是什么，为什么现在需要
 
-这是学习工作区的短入口，说明仓库会按可验证 Stage 重建。
+三个测试分别固定带引号 ETag、含斜杠的不透明 Key 与不可变性、无 Body 删除标记。
 
 ##### 在运行时做什么
 
-它不参与运行时，只帮助学习者识别这是阶段式重建工作区，而不是完成品源码。
+它们直接调用学习者可见的领域值，只证明值语义；目前还不能证明 Bucket 迁移、磁盘持久化或对象服务。
+
+##### 关键代码
+
+```python
+assert record.key == "/a//b/"
+```
 
 ##### 关键语句理解
 
-“one verified stage at a time” 描述学习流程，不是对象存储不变量。
+故意使用异常形状的 Key 是为了捕获路径规范化。断言通过只证明字符串被原样保存，不代表系统真的存在目录。
+
+#### `README.md`
 
 ??? note "文件差异：README.md"
     ```diff
@@ -324,19 +312,19 @@ assert record.key == "/a//b/"
     +Build the object store one verified stage at a time.
     ```
 
-#### `pyproject.toml`
-
 ##### 是什么，为什么现在需要
 
-它让 `src/minis3` 可安装，并告诉 pytest 源码与测试的位置。
+这是学习工作区的短入口，说明仓库会按可验证 Stage 重建。
 
 ##### 在运行时做什么
 
-构建与测试工具先读取它，再导入 MiniS3。包路径配置错误时，即使模型代码正确也会表现为 import 失败。
+它不参与运行时，只帮助学习者识别这是阶段式重建工作区，而不是完成品源码。
 
 ##### 关键语句理解
 
-`packages = ["src/minis3"]` 把 src-layout 目录接到构建产物；`testpaths = ["tests"]` 限定测试发现范围。
+“one verified stage at a time” 描述学习流程，不是对象存储不变量。
+
+#### `pyproject.toml`
 
 ??? note "文件差异：pyproject.toml"
     ```diff
@@ -372,19 +360,19 @@ assert record.key == "/a//b/"
     +
     ```
 
-#### `uv.lock`
-
 ##### 是什么，为什么现在需要
 
-锁文件记录运行本阶段时的精确开发依赖图。
+它让 `src/minis3` 可安装，并告诉 pytest 源码与测试的位置。
 
 ##### 在运行时做什么
 
-它影响环境复现，不影响对象语义；不同机器解析出不同依赖时再从这里排查。
+构建与测试工具先读取它，再导入 MiniS3。包路径配置错误时，即使模型代码正确也会表现为 import 失败。
 
 ##### 关键语句理解
 
-editable 的 `minis3` 条目把本地包接入锁定环境，pytest 版本也因此可复现。
+`packages = ["src/minis3"]` 把 src-layout 目录接到构建产物；`testpaths = ["tests"]` 限定测试发现范围。
+
+#### `uv.lock`
 
 ??? note "文件差异：uv.lock"
     ```diff
@@ -474,6 +462,18 @@ editable 的 `minis3` 条目把本地包接入锁定环境，pytest 版本也因
     +    { url = "https://files.pythonhosted.org/packages/24/25/1de2678b631f5a49215c6c96fff41ba892b0a34df68d6d80292b1b48aa7f/pytest-9.1.1-py3-none-any.whl", hash = "sha256:37a86b45efb9a47a61a36449063e8e18d0cab3161329fc099eb21783169c4f0c", size = 386536, upload-time = "2026-06-19T10:58:31.347Z" },
     +]
     ```
+
+##### 是什么，为什么现在需要
+
+锁文件记录运行本阶段时的精确开发依赖图。
+
+##### 在运行时做什么
+
+它影响环境复现，不影响对象语义；不同机器解析出不同依赖时再从这里排查。
+
+##### 关键语句理解
+
+editable 的 `minis3` 条目把本地包接入锁定环境，pytest 版本也因此可复现。
 
 ### 验证证据
 

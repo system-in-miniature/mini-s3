@@ -36,24 +36,6 @@ Version 已有创建时间，但没有任何机制让它们过期。把时间读
 
 #### `src/minis3/lifecycle.py`
 
-##### 是什么，为什么现在需要
-
-这个纯策略模块定义过期规则、action 值和决策求值。
-
-##### 在运行时做什么
-
-它读取历史并返回应该改变什么，从不调用存储或修改 Bucket records。
-
-##### 关键代码
-
-```python
-return threshold is not None and now - created_at >= threshold
-```
-
-##### 关键语句理解
-
-`>=` 让策略边界包含阈值且确定；`None` 表示该类别没有过期规则，不是年龄零。
-
 ??? note "文件差异：src/minis3/lifecycle.py"
     ```diff
     diff --git a/src/minis3/lifecycle.py b/src/minis3/lifecycle.py
@@ -167,25 +149,25 @@ return threshold is not None and now - created_at >= threshold
     +    return tuple(actions)
     ```
 
-#### `src/minis3/store.py`
-
 ##### 是什么，为什么现在需要
 
-服务增加把纯 action 转成持久状态迁移的显式 tick。
+这个纯策略模块定义过期规则、action 值和决策求值。
 
 ##### 在运行时做什么
 
-它在锁内提供一个时间值与稳定快照，再复用 Bucket 删除和候选发布。
+它读取历史并返回应该改变什么，从不调用存储或修改 Bucket records。
 
 ##### 关键代码
 
 ```python
-self._storage.persist_bucket(candidate)
+return threshold is not None and now - created_at >= threshold
 ```
 
 ##### 关键语句理解
 
-策略输出本身不改变任何状态。持久化候选才让过期跨重启保存；无 action tick 不必发布。
+`>=` 让策略边界包含阈值且确定；`None` 表示该类别没有过期规则，不是年龄零。
+
+#### `src/minis3/store.py`
 
 ??? note "文件差异：src/minis3/store.py"
     ```diff
@@ -397,19 +379,25 @@ self._storage.persist_bucket(candidate)
     -
     ```
 
-#### `src/minis3/__init__.py`
-
 ##### 是什么，为什么现在需要
 
-规则与 action 类型加入公开学习 API。
+服务增加把纯 action 转成持久状态迁移的显式 tick。
 
 ##### 在运行时做什么
 
-调用方可构造策略、检查返回决策，而不依赖生命周期内部实现。
+它在锁内提供一个时间值与稳定快照，再复用 Bucket 删除和候选发布。
+
+##### 关键代码
+
+```python
+self._storage.persist_bucket(candidate)
+```
 
 ##### 关键语句理解
 
-包导出声明式值，实际变更仍是 `MiniS3` 操作。
+策略输出本身不改变任何状态。持久化候选才让过期跨重启保存；无 action tick 不必发布。
+
+#### `src/minis3/__init__.py`
 
 ??? note "文件差异：src/minis3/__init__.py"
     ```diff
@@ -459,25 +447,19 @@ self._storage.persist_bucket(candidate)
     -from .errors import NotModified, PreconditionFailed
     ```
 
-#### `tests/test_lifecycle.py`
-
 ##### 是什么，为什么现在需要
 
-四条契约覆盖纯过滤/边界、当前与非当前迁移、注入时间/重启和非法规则。
+规则与 action 类型加入公开学习 API。
 
 ##### 在运行时做什么
 
-`ManualClock` 让测试主动推进时间，证明持久时间戳，而不是等待 wall time。
-
-##### 关键代码
-
-```python
-assert evaluate_expiration(snapshot, [rule], now=9.999) == ()
-```
+调用方可构造策略、检查返回决策，而不依赖生命周期内部实现。
 
 ##### 关键语句理解
 
-这是刚到阈值前的边界；与 `10.0` 断言成对后，精确证明 inclusive，而不是只测明显过期对象。
+包导出声明式值，实际变更仍是 `MiniS3` 操作。
+
+#### `tests/test_lifecycle.py`
 
 ??? note "文件差异：tests/test_lifecycle.py"
     ```diff
@@ -598,6 +580,24 @@ assert evaluate_expiration(snapshot, [rule], now=9.999) == ()
     +        ExpirationRule("negative", expire_current_after=-1)
     +
     ```
+
+##### 是什么，为什么现在需要
+
+四条契约覆盖纯过滤/边界、当前与非当前迁移、注入时间/重启和非法规则。
+
+##### 在运行时做什么
+
+`ManualClock` 让测试主动推进时间，证明持久时间戳，而不是等待 wall time。
+
+##### 关键代码
+
+```python
+assert evaluate_expiration(snapshot, [rule], now=9.999) == ()
+```
+
+##### 关键语句理解
+
+这是刚到阈值前的边界；与 `10.0` 断言成对后，精确证明 inclusive，而不是只测明显过期对象。
 
 ### 验证证据
 

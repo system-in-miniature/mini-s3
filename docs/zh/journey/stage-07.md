@@ -31,24 +31,6 @@ Stage 03 描述了最后发布的存储，正常重启也通过了，但这还�
 
 #### `tests/test_storage.py`
 
-##### 是什么，为什么现在需要
-
-存储集成套件加入围绕 Artifact 与 Manifest 发布的参数化崩溃矩阵。
-
-##### 在运行时做什么
-
-它只在重开后观察系统，丢弃可能误导人的进程内内存，并实际运行恢复清理。
-
-##### 关键代码
-
-```python
-crash_injector=CrashOnce("before_manifest_publish"),
-```
-
-##### 关键语句理解
-
-命名 hook 固定精确中断边界；全新实例上的断言因而能区分“Artifact 已持久化”和“状态已发布”。
-
 ??? note "文件差异：tests/test_storage.py"
     ```diff
     diff --git a/tests/test_storage.py b/tests/test_storage.py
@@ -126,6 +108,24 @@ crash_injector=CrashOnce("before_manifest_publish"),
     +    assert visible.body == b"value"
     +    assert visible.etag == '"2063c1608d6e0baf80249c42e2be5804"'
     ```
+
+##### 是什么，为什么现在需要
+
+存储集成套件加入围绕 Artifact 与 Manifest 发布的参数化崩溃矩阵。
+
+##### 在运行时做什么
+
+它只在重开后观察系统，丢弃可能误导人的进程内内存，并实际运行恢复清理。
+
+##### 关键代码
+
+```python
+crash_injector=CrashOnce("before_manifest_publish"),
+```
+
+##### 关键语句理解
+
+命名 hook 固定精确中断边界；全新实例上的断言因而能区分“Artifact 已持久化”和“状态已发布”。
 
 ### 验证证据
 

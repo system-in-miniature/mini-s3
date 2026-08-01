@@ -31,24 +31,6 @@
 
 #### `tests/test_storage.py`
 
-##### 是什么，为什么现在需要
-
-存储恢复套件增加 Multipart 完成的双侧崩溃契约。
-
-##### 在运行时做什么
-
-它使用全新服务实例，让已发布 Manifest 与恢复后的 Staging 成为唯一证据，而不是旧内存。
-
-##### 关键代码
-
-```python
-assert reopened.get_object("b", "movie").body == b"abcx"
-```
-
-##### 关键语句理解
-
-在发布后场景，即使清理尚未运行，可见完整对象仍是权威。恢复必须保留它，只删除匹配的 upload Staging。
-
 ??? note "文件差异：tests/test_storage.py"
     ```diff
     diff --git a/tests/test_storage.py b/tests/test_storage.py
@@ -128,6 +110,24 @@ assert reopened.get_object("b", "movie").body == b"abcx"
     +    with pytest.raises(NoSuchUpload):
     +        reopened.abort_multipart_upload("b", "movie", upload.upload_id)
     ```
+
+##### 是什么，为什么现在需要
+
+存储恢复套件增加 Multipart 完成的双侧崩溃契约。
+
+##### 在运行时做什么
+
+它使用全新服务实例，让已发布 Manifest 与恢复后的 Staging 成为唯一证据，而不是旧内存。
+
+##### 关键代码
+
+```python
+assert reopened.get_object("b", "movie").body == b"abcx"
+```
+
+##### 关键语句理解
+
+在发布后场景，即使清理尚未运行，可见完整对象仍是权威。恢复必须保留它，只删除匹配的 upload Staging。
 
 ### 验证证据
 

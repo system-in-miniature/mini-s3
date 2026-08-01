@@ -37,25 +37,6 @@ The service acquires its lock, resolves the current or addressed ETag, applies `
 
 #### `src/minis3/conditional.py`
 
-##### What it is and why it appears
-
-This pure policy module parses ETag conditions and raises the correct semantic failure.
-
-##### Runtime role
-
-Store supplies the current ETag; the helpers decide match, precondition failure, or not-modified without owning locks or state.
-
-##### Key code
-
-```python
-if condition is not None and not etag_matches(condition, current_etag):
-    raise PreconditionFailed(condition)
-```
-
-##### Statement understanding
-
-Absent condition means no guard. A present nonmatch must stop the operation before mutation; returning `False` for the caller to ignore would weaken the contract.
-
 ??? note "File diff: src/minis3/conditional.py"
     ```diff
     diff --git a/src/minis3/conditional.py b/src/minis3/conditional.py
@@ -101,25 +82,26 @@ Absent condition means no guard. A present nonmatch must stop the operation befo
     +        raise NotModified(condition)
     ```
 
-#### `src/minis3/errors.py`
-
 ##### What it is and why it appears
 
-The failure vocabulary gains distinct precondition-failed and not-modified outcomes.
+This pure policy module parses ETag conditions and raises the correct semantic failure.
 
 ##### Runtime role
 
-Protocol adapters can later map them to 412 and 304 without embedding HTTP in the domain service.
+Store supplies the current ETag; the helpers decide match, precondition failure, or not-modified without owning locks or state.
 
 ##### Key code
 
 ```python
-class NotModified(MiniS3Error):
+if condition is not None and not etag_matches(condition, current_etag):
+    raise PreconditionFailed(condition)
 ```
 
 ##### Statement understanding
 
-Not-modified is control-flow evidence for a validator, not the same error as a mutation rejected against stale state.
+Absent condition means no guard. A present nonmatch must stop the operation before mutation; returning `False` for the caller to ignore would weaken the contract.
+
+#### `src/minis3/errors.py`
 
 ??? note "File diff: src/minis3/errors.py"
     ```diff
@@ -141,25 +123,25 @@ Not-modified is control-flow evidence for a validator, not the same error as a m
     +    """An If-None-Match condition matched (the HTTP 304 control outcome)."""
     ```
 
-#### `src/minis3/store.py`
-
 ##### What it is and why it appears
 
-Public GET, PUT, and DELETE accept conditional parameters and evaluate them inside existing locks.
+The failure vocabulary gains distinct precondition-failed and not-modified outcomes.
 
 ##### Runtime role
 
-It owns atomicity between current-ETag lookup, precondition decision, and any subsequent Bucket mutation/publication.
+Protocol adapters can later map them to 412 and 304 without embedding HTTP in the domain service.
 
 ##### Key code
 
 ```python
-require_if_match(self._current_etag(candidate, key), if_match)
+class NotModified(MiniS3Error):
 ```
 
 ##### Statement understanding
 
-The check reads from the candidate snapshot while the service lock is held. No other writer can change the current visible ETag between this line and mutation.
+Not-modified is control-flow evidence for a validator, not the same error as a mutation rejected against stale state.
+
+#### `src/minis3/store.py`
 
 ??? note "File diff: src/minis3/store.py"
     ```diff
@@ -273,19 +255,25 @@ The check reads from the candidate snapshot while the service lock is held. No o
                  return self._buckets[name]
     ```
 
-#### `src/minis3/__init__.py`
-
 ##### What it is and why it appears
 
-Conditional failures become part of the supported API.
+Public GET, PUT, and DELETE accept conditional parameters and evaluate them inside existing locks.
 
 ##### Runtime role
 
-Callers catch semantic outcomes from the package root; match helpers remain internal policy.
+It owns atomicity between current-ETag lookup, precondition decision, and any subsequent Bucket mutation/publication.
+
+##### Key code
+
+```python
+require_if_match(self._current_etag(candidate, key), if_match)
+```
 
 ##### Statement understanding
 
-Exposing outcome types but not parsing internals keeps the public surface small.
+The check reads from the candidate snapshot while the service lock is held. No other writer can change the current visible ETag between this line and mutation.
+
+#### `src/minis3/__init__.py`
 
 ??? note "File diff: src/minis3/__init__.py"
     ```diff
@@ -300,25 +288,19 @@ Exposing outcome types but not parsing internals keeps the public surface small.
     +from .errors import NotModified, PreconditionFailed
     ```
 
-#### `tests/test_conditional.py`
-
 ##### What it is and why it appears
 
-Four contracts cover GET validators, mutation guards, wildcard behavior, and the two-writer CAS race.
+Conditional failures become part of the supported API.
 
 ##### Runtime role
 
-The threaded test proves serialization behavior that a sequential helper unit test cannot establish.
-
-##### Key code
-
-```python
-assert sorted(outcomes) == ["412", "stored"]
-```
+Callers catch semantic outcomes from the package root; match helpers remain internal policy.
 
 ##### Statement understanding
 
-One `stored` and one `412` is the externally visible CAS guarantee. Two stored outcomes would prove the check and mutation were not atomic.
+Exposing outcome types but not parsing internals keeps the public surface small.
+
+#### `tests/test_conditional.py`
 
 ??? note "File diff: tests/test_conditional.py"
     ```diff
@@ -410,6 +392,24 @@ One `stored` and one `412` is the externally visible CAS guarantee. Two stored o
     +    assert store.get_object("b", "counter").body in {b"writer-a", b"writer-b"}
     +
     ```
+
+##### What it is and why it appears
+
+Four contracts cover GET validators, mutation guards, wildcard behavior, and the two-writer CAS race.
+
+##### Runtime role
+
+The threaded test proves serialization behavior that a sequential helper unit test cannot establish.
+
+##### Key code
+
+```python
+assert sorted(outcomes) == ["412", "stored"]
+```
+
+##### Statement understanding
+
+One `stored` and one `412` is the externally visible CAS guarantee. Two stored outcomes would prove the check and mutation were not atomic.
 
 ### Verification evidence
 

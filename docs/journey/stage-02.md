@@ -34,26 +34,6 @@ A caller supplies a command and `SequenceCounter`. Bucket validates its state, o
 
 #### `src/minis3/bucket.py`
 
-##### What it is and why it appears
-
-This mutable aggregate is the single owner of legal versioning changes and per-key histories. Persistence remains outside it.
-
-##### Runtime role
-
-Service code will call `set_versioning`, `put`, `get`, and `delete`. Each method turns one current Bucket state into the next state or raises before mutation.
-
-##### Key code
-
-```python
-if self.versioning is VersioningState.ENABLED:
-    versions = (version, *old.versions)
-else:
-```
-
-##### Statement understanding
-
-Enabled PUT preserves every earlier version by prepending. The `else` branch deliberately replaces the public `null` slot while retaining named history; treating both branches alike would break suspended semantics.
-
 ??? note "File diff: src/minis3/bucket.py"
     ```diff
     diff --git a/src/minis3/bucket.py b/src/minis3/bucket.py
@@ -223,26 +203,27 @@ Enabled PUT preserves every earlier version by prepending. The `else` branch del
     +        return marker
     ```
 
-#### `tests/test_bucket.py`
-
 ##### What it is and why it appears
 
-This contract exercises the aggregate before service and disk layers can hide the source of an error.
+This mutable aggregate is the single owner of legal versioning changes and per-key histories. Persistence remains outside it.
 
 ##### Runtime role
 
-It proves the same sequence produces `null/e00000001` and then `v00000002/e00000002`, and it locks the forbidden backward transition.
+Service code will call `set_versioning`, `put`, `get`, and `delete`. Each method turns one current Bucket state into the next state or raises before mutation.
 
 ##### Key code
 
 ```python
-with pytest.raises(ValueError):
-    bucket.set_versioning(VersioningState.UNVERSIONED)
+if self.versioning is VersioningState.ENABLED:
+    versions = (version, *old.versions)
+else:
 ```
 
 ##### Statement understanding
 
-The failure is part of domain behavior, not merely validation style: once named versions can exist, “never versioned” is no longer a truthful state.
+Enabled PUT preserves every earlier version by prepending. The `else` branch deliberately replaces the public `null` slot while retaining named history; treating both branches alike would break suspended semantics.
+
+#### `tests/test_bucket.py`
 
 ??? note "File diff: tests/test_bucket.py"
     ```diff
@@ -274,6 +255,25 @@ The failure is part of domain behavior, not merely validation style: once named 
     +    with pytest.raises(ValueError):
     +        bucket.set_versioning(VersioningState.UNVERSIONED)
     ```
+
+##### What it is and why it appears
+
+This contract exercises the aggregate before service and disk layers can hide the source of an error.
+
+##### Runtime role
+
+It proves the same sequence produces `null/e00000001` and then `v00000002/e00000002`, and it locks the forbidden backward transition.
+
+##### Key code
+
+```python
+with pytest.raises(ValueError):
+    bucket.set_versioning(VersioningState.UNVERSIONED)
+```
+
+##### Statement understanding
+
+The failure is part of domain behavior, not merely validation style: once named versions can exist, “never versioned” is no longer a truthful state.
 
 ### Verification evidence
 

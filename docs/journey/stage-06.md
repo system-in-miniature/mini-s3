@@ -36,24 +36,6 @@ The service locks a Bucket snapshot and calls `list_objects`. The function selec
 
 #### `src/minis3/listing.py`
 
-##### What it is and why it appears
-
-The read-side projection now owns current-object listing, delimiter grouping, and pagination tokens alongside version listing.
-
-##### Runtime role
-
-It consumes Bucket records without mutation and returns immutable `contents`, `common_prefixes`, and `next_token`.
-
-##### Key code
-
-```python
-return urlsafe_b64encode(payload).decode().rstrip("=")
-```
-
-##### Statement understanding
-
-The token hides the cursor representation. Its payload also contains the query shape, so decoding can reject a cursor that belongs to another prefix or delimiter.
-
 ??? note "File diff: src/minis3/listing.py"
     ```diff
     diff --git a/src/minis3/listing.py b/src/minis3/listing.py
@@ -201,25 +183,25 @@ The token hides the cursor representation. Its payload also contains the query s
     +
     ```
 
-#### `src/minis3/store.py`
-
 ##### What it is and why it appears
 
-The service adds the public locked entry for current listing.
+The read-side projection now owns current-object listing, delimiter grouping, and pagination tokens alongside version listing.
 
 ##### Runtime role
 
-It supplies one consistent records snapshot and delegates all read-only projection rules to `listing.py`.
+It consumes Bucket records without mutation and returns immutable `contents`, `common_prefixes`, and `next_token`.
 
 ##### Key code
 
 ```python
-with self._lock:
+return urlsafe_b64encode(payload).decode().rstrip("=")
 ```
 
 ##### Statement understanding
 
-Even a pure projection needs a stable input snapshot. The lock prevents a concurrent PUT or DELETE from changing keys halfway through pagination construction.
+The token hides the cursor representation. Its payload also contains the query shape, so decoding can reject a cursor that belongs to another prefix or delimiter.
+
+#### `src/minis3/store.py`
 
 ??? note "File diff: src/minis3/store.py"
     ```diff
@@ -344,19 +326,25 @@ Even a pure projection needs a stable input snapshot. The lock prevents a concur
     -
     ```
 
-#### `src/minis3/__init__.py`
-
 ##### What it is and why it appears
 
-The package exports current-list response types together with the accumulated public API.
+The service adds the public locked entry for current listing.
 
 ##### Runtime role
 
-It keeps callers on one supported import surface; it does not calculate prefixes or tokens.
+It supplies one consistent records snapshot and delegates all read-only projection rules to `listing.py`.
+
+##### Key code
+
+```python
+with self._lock:
+```
 
 ##### Statement understanding
 
-The explicit `__all__` begins documenting which accumulated names are public rather than exporting every imported helper accidentally.
+Even a pure projection needs a stable input snapshot. The lock prevents a concurrent PUT or DELETE from changing keys halfway through pagination construction.
+
+#### `src/minis3/__init__.py`
 
 ??? note "File diff: src/minis3/__init__.py"
     ```diff
@@ -412,25 +400,19 @@ The explicit `__all__` begins documenting which accumulated names are public rat
     +]
     ```
 
-#### `tests/test_listing.py`
-
 ##### What it is and why it appears
 
-Five contracts cover directory illusion, combined pagination, marker hiding, flattened version history, and invalid tokens.
+The package exports current-list response types together with the accumulated public API.
 
 ##### Runtime role
 
-They build state through `MiniS3` and inspect public results, so the examples connect model semantics to the final read view.
-
-##### Key code
-
-```python
-assert root.common_prefixes == ("photos/",)
-```
+It keeps callers on one supported import surface; it does not calculate prefixes or tokens.
 
 ##### Statement understanding
 
-Several flat keys collapse into one projected prefix at the root. The tuple does not mean a `photos/` object or directory was stored.
+The explicit `__all__` begins documenting which accumulated names are public rather than exporting every imported helper accidentally.
+
+#### `tests/test_listing.py`
 
 ??? note "File diff: tests/test_listing.py"
     ```diff
@@ -534,6 +516,24 @@ Several flat keys collapse into one projected prefix at the root. The tuple does
     +            "b", prefix="different", continuation_token=first.next_token
     +        )
     ```
+
+##### What it is and why it appears
+
+Five contracts cover directory illusion, combined pagination, marker hiding, flattened version history, and invalid tokens.
+
+##### Runtime role
+
+They build state through `MiniS3` and inspect public results, so the examples connect model semantics to the final read view.
+
+##### Key code
+
+```python
+assert root.common_prefixes == ("photos/",)
+```
+
+##### Statement understanding
+
+Several flat keys collapse into one projected prefix at the root. The tuple does not mean a `photos/` object or directory was stored.
 
 ### Verification evidence
 

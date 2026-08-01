@@ -36,25 +36,6 @@ Locking only Bucket or only disk is insufficient because a public mutation spans
 
 #### `src/minis3/store.py`
 
-##### What it is and why it appears
-
-This is the public application boundary that coordinates locking, aggregate transitions, persistence, and recovery.
-
-##### Runtime role
-
-Every public bucket/object call enters here. Successful mutations cross Bucket then DiskStorage; reads resolve the current in-memory aggregate.
-
-##### Key code
-
-```python
-self._storage.persist_bucket(candidate)
-self._buckets[bucket] = candidate
-```
-
-##### Statement understanding
-
-Publication occurs before the candidate becomes the process-visible Bucket. Reversing these lines would let a failed disk write leak state that disappears after restart.
-
 ??? note "File diff: src/minis3/store.py"
     ```diff
     diff --git a/src/minis3/store.py b/src/minis3/store.py
@@ -169,19 +150,26 @@ Publication occurs before the candidate becomes the process-visible Bucket. Reve
     +
     ```
 
-#### `src/minis3/__init__.py`
-
 ##### What it is and why it appears
 
-The package now exports `MiniS3` and versioning state in addition to the value model.
+This is the public application boundary that coordinates locking, aggregate transitions, persistence, and recovery.
 
 ##### Runtime role
 
-It establishes the intended entry point; callers no longer need to assemble Bucket and DiskStorage themselves.
+Every public bucket/object call enters here. Successful mutations cross Bucket then DiskStorage; reads resolve the current in-memory aggregate.
+
+##### Key code
+
+```python
+self._storage.persist_bucket(candidate)
+self._buckets[bucket] = candidate
+```
 
 ##### Statement understanding
 
-Public export is API wiring, not proof of runtime behavior. The service tests below provide that evidence.
+Publication occurs before the candidate becomes the process-visible Bucket. Reversing these lines would let a failed disk write leak state that disappears after restart.
+
+#### `src/minis3/__init__.py`
 
 ??? note "File diff: src/minis3/__init__.py"
     ```diff
@@ -198,25 +186,19 @@ Public export is API wiring, not proof of runtime behavior. The service tests be
     +from .storage import InjectedCrash
     ```
 
-#### `tests/test_storage.py`
-
 ##### What it is and why it appears
 
-These contracts exercise persistence through the public service, including restart, crash injection, bucket deletion, and sequence recovery.
+The package now exports `MiniS3` and versioning state in addition to the value model.
 
 ##### Runtime role
 
-They detect gaps between in-memory success and reopened state. This is where orchestration and storage meet.
-
-##### Key code
-
-```python
-assert reopened.get_object("b", "k", version_id=first.version_id).body == b"one"
-```
+It establishes the intended entry point; callers no longer need to assemble Bucket and DiskStorage themselves.
 
 ##### Statement understanding
 
-Addressing the old version after constructing `reopened` proves both the version history and its bytes survived publication; checking only the latest value would be weaker.
+Public export is API wiring, not proof of runtime behavior. The service tests below provide that evidence.
+
+#### `tests/test_storage.py`
 
 ??? note "File diff: tests/test_storage.py"
     ```diff
@@ -260,25 +242,25 @@ Addressing the old version after constructing `reopened` proves both the version
     +    assert second.version_id != first.version_id
     ```
 
-#### `tests/test_versioning.py`
-
 ##### What it is and why it appears
 
-This file locks the full public versioning state machine and DELETE meanings.
+These contracts exercise persistence through the public service, including restart, crash injection, bucket deletion, and sequence recovery.
 
 ##### Runtime role
 
-It distinguishes unversioned deletion, marker creation, specific-version deletion, latest-marker 404 behavior, and retained named history.
+They detect gaps between in-memory success and reopened state. This is where orchestration and storage meet.
 
 ##### Key code
 
 ```python
-assert bucket.get("k", historical.version_id) == historical
+assert reopened.get_object("b", "k", version_id=first.version_id).body == b"one"
 ```
 
 ##### Statement understanding
 
-The defensive case proves an unversioned delete cannot erase a named version already present in recovered or externally constructed history.
+Addressing the old version after constructing `reopened` proves both the version history and its bytes survived publication; checking only the latest value would be weaker.
+
+#### `tests/test_versioning.py`
 
 ??? note "File diff: tests/test_versioning.py"
     ```diff
@@ -398,6 +380,24 @@ The defensive case proves an unversioned delete cannot erase a named version alr
     +    with pytest.raises(BucketNotEmpty):
     +        store.delete_bucket("b")
     ```
+
+##### What it is and why it appears
+
+This file locks the full public versioning state machine and DELETE meanings.
+
+##### Runtime role
+
+It distinguishes unversioned deletion, marker creation, specific-version deletion, latest-marker 404 behavior, and retained named history.
+
+##### Key code
+
+```python
+assert bucket.get("k", historical.version_id) == historical
+```
+
+##### Statement understanding
+
+The defensive case proves an unversioned delete cannot erase a named version already present in recovered or externally constructed history.
 
 ### Verification evidence
 

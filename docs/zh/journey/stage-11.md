@@ -34,26 +34,6 @@ Part 替换与完成分开。重传 Part 1 会改变当前 receipt；客户端�
 
 #### `src/minis3/store.py`
 
-##### 是什么，为什么现在需要
-
-服务增加完成编排，把私有 Staging 接到已有对象发布路径。
-
-##### 在运行时做什么
-
-它拥有存储加载、纯验证、Bucket 变更、Manifest 发布与 Staging 清理之间的顺序。
-
-##### 关键代码
-
-```python
-self._storage.persist_bucket(candidate)
-self._buckets[bucket] = candidate
-self._storage.remove_multipart_upload(bucket, key, upload_id)
-```
-
-##### 关键语句理解
-
-清理必须最后执行。发布失败时上传仍可重试；发布成功后再删 Staging，也不会让已提交对象消失。
-
 ??? note "文件差异：src/minis3/store.py"
     ```diff
     diff --git a/src/minis3/store.py b/src/minis3/store.py
@@ -102,25 +82,27 @@ self._storage.remove_multipart_upload(bucket, key, upload_id)
          ) -> None:
     ```
 
-#### `tests/test_multipart.py`
-
 ##### 是什么，为什么现在需要
 
-四个场景覆盖完成前不可见、同编号替换、清单验证、Abort 和未完成上传重启。
+服务增加完成编排，把私有 Staging 接到已有对象发布路径。
 
 ##### 在运行时做什么
 
-它们运行完整公开生命周期，同时观察可见对象与私有上传行为。
+它拥有存储加载、纯验证、Bucket 变更、Manifest 发布与 Staging 清理之间的顺序。
 
 ##### 关键代码
 
 ```python
-assert completed.etag != content_etag(completed.body)
+self._storage.persist_bucket(candidate)
+self._buckets[bucket] = candidate
+self._storage.remove_multipart_upload(bucket, key, upload_id)
 ```
 
 ##### 关键语句理解
 
-这防止实现偷懒地把组装 Body 当普通 PUT 计算哈希；Multipart 身份来自 Part 摘要。
+清理必须最后执行。发布失败时上传仍可重试；发布成功后再删 Staging，也不会让已提交对象消失。
+
+#### `tests/test_multipart.py`
 
 ??? note "文件差异：tests/test_multipart.py"
     ```diff
@@ -239,6 +221,24 @@ assert completed.etag != content_etag(completed.body)
              store.upload_part("b", "right", upload.upload_id, 10_001, b"x")
     +
     ```
+
+##### 是什么，为什么现在需要
+
+四个场景覆盖完成前不可见、同编号替换、清单验证、Abort 和未完成上传重启。
+
+##### 在运行时做什么
+
+它们运行完整公开生命周期，同时观察可见对象与私有上传行为。
+
+##### 关键代码
+
+```python
+assert completed.etag != content_etag(completed.body)
+```
+
+##### 关键语句理解
+
+这防止实现偷懒地把组装 Body 当普通 PUT 计算哈希；Multipart 身份来自 Part 摘要。
 
 ### 验证证据
 

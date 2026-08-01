@@ -36,25 +36,6 @@ MiniS3 保存不可变数据/元数据 Artifact 与较小的可变 `manifest.jso
 
 #### `src/minis3/storage/atomic.py`
 
-##### 是什么，为什么现在需要
-
-这个文件拥有可复用的文件系统发布原语，不负责 S3 领域决策。
-
-##### 在运行时做什么
-
-当文件或目录项必须跨崩溃保存时，DiskStorage 调用它；这里是检查可见性与持久化顺序的最底层边界。
-
-##### 关键代码
-
-```python
-os.replace(temporary, path)
-fsync_directory(path.parent)
-```
-
-##### 关键语句理解
-
-replace 改变最终名称指向哪份完整文件，随后的目录 fsync 才持久化这次 rename。省略第二行可能出现“现在看得到，掉电后却消失”。
-
 ??? note "文件差异：src/minis3/storage/atomic.py"
     ```diff
     diff --git a/src/minis3/storage/atomic.py b/src/minis3/storage/atomic.py
@@ -122,27 +103,26 @@ replace 改变最终名称指向哪份完整文件，随后的目录 fsync 才�
     +    fsync_directory(path.parent)
     ```
 
-#### `src/minis3/storage/disk.py`
-
 ##### 是什么，为什么现在需要
 
-这是 Bucket 磁盘布局、Manifest 发布和启动恢复的唯一所有者。
+这个文件拥有可复用的文件系统发布原语，不负责 S3 领域决策。
 
 ##### 在运行时做什么
 
-它把 Bucket 历史变成不可变 `.data`/`.json` Artifact 和 Manifest 引用，并在启动时重建 Bucket。
+当文件或目录项必须跨崩溃保存时，DiskStorage 调用它；这里是检查可见性与持久化顺序的最底层边界。
 
 ##### 关键代码
 
 ```python
-self._inject("before_manifest_publish")
-atomic_write(directory / "manifest.json", self._manifest_bytes(bucket))
-self._inject("after_manifest_publish")
+os.replace(temporary, path)
+fsync_directory(path.parent)
 ```
 
 ##### 关键语句理解
 
-Manifest 写入被两个命名崩溃点夹住，因为它正是可见性边界。此前的 Artifact 尚未被引用；此后恢复必须把新状态视为已提交。
+replace 改变最终名称指向哪份完整文件，随后的目录 fsync 才持久化这次 rename。省略第二行可能出现“现在看得到，掉电后却消失”。
+
+#### `src/minis3/storage/disk.py`
 
 ??? note "文件差异：src/minis3/storage/disk.py"
     ```diff
@@ -381,19 +361,27 @@ Manifest 写入被两个命名崩溃点夹住，因为它正是可见性边界�
     +                path.rmdir()
     ```
 
-#### `src/minis3/storage/__init__.py`
-
 ##### 是什么，为什么现在需要
 
-这个包边界导出持久适配器，以及后续崩溃实验使用的故意崩溃类型。
+这是 Bucket 磁盘布局、Manifest 发布和启动恢复的唯一所有者。
 
 ##### 在运行时做什么
 
-它提供稳定导入，同时保持布局辅助函数为内部细节。
+它把 Bucket 历史变成不可变 `.data`/`.json` Artifact 和 Manifest 引用，并在启动时重建 Bucket。
+
+##### 关键代码
+
+```python
+self._inject("before_manifest_publish")
+atomic_write(directory / "manifest.json", self._manifest_bytes(bucket))
+self._inject("after_manifest_publish")
+```
 
 ##### 关键语句理解
 
-导出 `DiskStorage` 明确存储所有者；导出 `InjectedCrash` 让崩溃边界可测试，而不必公开全部 helper。
+Manifest 写入被两个命名崩溃点夹住，因为它正是可见性边界。此前的 Artifact 尚未被引用；此后恢复必须把新状态视为已提交。
+
+#### `src/minis3/storage/__init__.py`
 
 ??? note "文件差异：src/minis3/storage/__init__.py"
     ```diff
@@ -412,25 +400,19 @@ Manifest 写入被两个命名崩溃点夹住，因为它正是可见性边界�
     +
     ```
 
-#### `tests/test_storage_boundary.py`
-
 ##### 是什么，为什么现在需要
 
-这是第一条存储契约，证明一个完整 Bucket 能跨越类似进程重启的边界。
+这个包边界导出持久适配器，以及后续崩溃实验使用的故意崩溃类型。
 
 ##### 在运行时做什么
 
-它持久化状态、创建新适配器，再比较恢复后的值与序列元数据。它比序列化单测更广，但还没到公开 MiniS3 服务。
-
-##### 关键代码
-
-```python
-recovered, maximum_sequence = DiskStorage(tmp_path).load_buckets()
-```
+它提供稳定导入，同时保持布局辅助函数为内部细节。
 
 ##### 关键语句理解
 
-必须使用新适配器；读取原内存 Bucket 无法证明字节已发布并可恢复。返回 `maximum` 还能避免未来复用序列。
+导出 `DiskStorage` 明确存储所有者；导出 `InjectedCrash` 让崩溃边界可测试，而不必公开全部 helper。
+
+#### `tests/test_storage_boundary.py`
 
 ??? note "文件差异：tests/test_storage_boundary.py"
     ```diff
@@ -459,6 +441,24 @@ recovered, maximum_sequence = DiskStorage(tmp_path).load_buckets()
     +    assert maximum_sequence == version.sequence
     +    assert not list(tmp_path.rglob("*.tmp-*"))
     ```
+
+##### 是什么，为什么现在需要
+
+这是第一条存储契约，证明一个完整 Bucket 能跨越类似进程重启的边界。
+
+##### 在运行时做什么
+
+它持久化状态、创建新适配器，再比较恢复后的值与序列元数据。它比序列化单测更广，但还没到公开 MiniS3 服务。
+
+##### 关键代码
+
+```python
+recovered, maximum_sequence = DiskStorage(tmp_path).load_buckets()
+```
+
+##### 关键语句理解
+
+必须使用新适配器；读取原内存 Bucket 无法证明字节已发布并可恢复。返回 `maximum` 还能避免未来复用序列。
 
 ### 验证证据
 

@@ -37,25 +37,6 @@ Compare-and-swap 表示“只有当前身份仍等于我观察到的身份才修
 
 #### `src/minis3/conditional.py`
 
-##### 是什么，为什么现在需要
-
-这个纯策略模块解析 ETag 条件并抛出正确语义失败。
-
-##### 在运行时做什么
-
-Store 提供当前 ETag；helper 决定匹配、前置条件失败或未修改，不拥有锁和状态。
-
-##### 关键代码
-
-```python
-if condition is not None and not etag_matches(condition, current_etag):
-    raise PreconditionFailed(condition)
-```
-
-##### 关键语句理解
-
-条件缺失表示不加 guard；条件存在但不匹配必须在变更前停止。只返回可能被调用方忽略的 `False` 会削弱契约。
-
 ??? note "文件差异：src/minis3/conditional.py"
     ```diff
     diff --git a/src/minis3/conditional.py b/src/minis3/conditional.py
@@ -101,25 +82,26 @@ if condition is not None and not etag_matches(condition, current_etag):
     +        raise NotModified(condition)
     ```
 
-#### `src/minis3/errors.py`
-
 ##### 是什么，为什么现在需要
 
-失败词汇增加前置条件失败与未修改两个不同结果。
+这个纯策略模块解析 ETag 条件并抛出正确语义失败。
 
 ##### 在运行时做什么
 
-协议适配器以后可分别映射 412 与 304，而领域服务无需嵌入 HTTP。
+Store 提供当前 ETag；helper 决定匹配、前置条件失败或未修改，不拥有锁和状态。
 
 ##### 关键代码
 
 ```python
-class NotModified(MiniS3Error):
+if condition is not None and not etag_matches(condition, current_etag):
+    raise PreconditionFailed(condition)
 ```
 
 ##### 关键语句理解
 
-Not-modified 是校验器的控制流证据，不能和针对旧状态的变更拒绝混成同一错误。
+条件缺失表示不加 guard；条件存在但不匹配必须在变更前停止。只返回可能被调用方忽略的 `False` 会削弱契约。
+
+#### `src/minis3/errors.py`
 
 ??? note "文件差异：src/minis3/errors.py"
     ```diff
@@ -141,25 +123,25 @@ Not-modified 是校验器的控制流证据，不能和针对旧状态的变更�
     +    """An If-None-Match condition matched (the HTTP 304 control outcome)."""
     ```
 
-#### `src/minis3/store.py`
-
 ##### 是什么，为什么现在需要
 
-公开 GET、PUT、DELETE 接受条件参数，并在已有锁内计算。
+失败词汇增加前置条件失败与未修改两个不同结果。
 
 ##### 在运行时做什么
 
-它拥有当前 ETag 查找、前置条件决定与后续 Bucket 变更/发布之间的原子性。
+协议适配器以后可分别映射 412 与 304，而领域服务无需嵌入 HTTP。
 
 ##### 关键代码
 
 ```python
-require_if_match(self._current_etag(candidate, key), if_match)
+class NotModified(MiniS3Error):
 ```
 
 ##### 关键语句理解
 
-检查在服务锁内读取候选快照；从这行到变更之间，不会有其他写入者改变当前可见 ETag。
+Not-modified 是校验器的控制流证据，不能和针对旧状态的变更拒绝混成同一错误。
+
+#### `src/minis3/store.py`
 
 ??? note "文件差异：src/minis3/store.py"
     ```diff
@@ -273,19 +255,25 @@ require_if_match(self._current_etag(candidate, key), if_match)
                  return self._buckets[name]
     ```
 
-#### `src/minis3/__init__.py`
-
 ##### 是什么，为什么现在需要
 
-条件请求失败成为受支持 API。
+公开 GET、PUT、DELETE 接受条件参数，并在已有锁内计算。
 
 ##### 在运行时做什么
 
-调用方从包根捕获语义结果，匹配 helper 继续作为内部策略。
+它拥有当前 ETag 查找、前置条件决定与后续 Bucket 变更/发布之间的原子性。
+
+##### 关键代码
+
+```python
+require_if_match(self._current_etag(candidate, key), if_match)
+```
 
 ##### 关键语句理解
 
-公开结果类型但不公开解析内部细节，可以保持 API 较小。
+检查在服务锁内读取候选快照；从这行到变更之间，不会有其他写入者改变当前可见 ETag。
+
+#### `src/minis3/__init__.py`
 
 ??? note "文件差异：src/minis3/__init__.py"
     ```diff
@@ -300,25 +288,19 @@ require_if_match(self._current_etag(candidate, key), if_match)
     +from .errors import NotModified, PreconditionFailed
     ```
 
-#### `tests/test_conditional.py`
-
 ##### 是什么，为什么现在需要
 
-四条契约覆盖 GET 校验、变更 guard、wildcard 和双写者 CAS 竞争。
+条件请求失败成为受支持 API。
 
 ##### 在运行时做什么
 
-线程测试证明顺序 helper 单测无法证明的串行化行为。
-
-##### 关键代码
-
-```python
-assert sorted(outcomes) == ["412", "stored"]
-```
+调用方从包根捕获语义结果，匹配 helper 继续作为内部策略。
 
 ##### 关键语句理解
 
-一个 `stored` 与一个 `412` 是外部可见 CAS 保证；两个 stored 会证明检查与变更并不原子。
+公开结果类型但不公开解析内部细节，可以保持 API 较小。
+
+#### `tests/test_conditional.py`
 
 ??? note "文件差异：tests/test_conditional.py"
     ```diff
@@ -410,6 +392,24 @@ assert sorted(outcomes) == ["412", "stored"]
     +    assert store.get_object("b", "counter").body in {b"writer-a", b"writer-b"}
     +
     ```
+
+##### 是什么，为什么现在需要
+
+四条契约覆盖 GET 校验、变更 guard、wildcard 和双写者 CAS 竞争。
+
+##### 在运行时做什么
+
+线程测试证明顺序 helper 单测无法证明的串行化行为。
+
+##### 关键代码
+
+```python
+assert sorted(outcomes) == ["412", "stored"]
+```
+
+##### 关键语句理解
+
+一个 `stored` 与一个 `412` 是外部可见 CAS 保证；两个 stored 会证明检查与变更并不原子。
 
 ### 验证证据
 
