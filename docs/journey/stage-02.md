@@ -14,7 +14,9 @@ Stage 01 can describe one value but cannot decide what PUT or DELETE does to an 
 
 ### Failure preview
 
-The focused contract writes an unversioned value, enables versioning, writes again, suspends versioning, and then attempts to return to `UNVERSIONED`. If that final transition succeeds, named history can be silently reinterpreted as if versioning never existed. The expected `ValueError` locks the state machine before persistence complicates it.
+Once a bucket has produced named history, returning to `UNVERSIONED` makes the model claim that versioning never existed. Later code could then replace or discard that history under the wrong rules, and persistence would make the corruption durable.
+
+### Test contract
 
 ??? note "File diff: tests/test_bucket.py"
     ```diff
@@ -53,7 +55,7 @@ This contract exercises the aggregate before service and disk layers can hide th
 
 **How it constructs the counterexample**
 
-It proves the same sequence produces `null/e00000001` and then `v00000002/e00000002`, and it locks the forbidden backward transition.
+It writes an unversioned value, enables versioning, writes again, suspends versioning, and then attempts the forbidden return to `UNVERSIONED`. The same sequence also proves deterministic `null/e00000001` and `v00000002/e00000002` identities.
 
 **Key test statement**
 

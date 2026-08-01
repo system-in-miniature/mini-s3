@@ -18,6 +18,8 @@ Versions now carry creation times, but nothing expires them. Hiding time reads i
 
 The pure-boundary contract evaluates the same history at time `9.999` and `10.0`. No action is allowed before the threshold; the action appears exactly at it. A hidden wall clock or strict `>` comparison makes this boundary flaky or one tick late.
 
+### Test contract
+
 ??? note "File diff: tests/test_lifecycle.py"
     ```diff
     diff --git a/tests/test_lifecycle.py b/tests/test_lifecycle.py

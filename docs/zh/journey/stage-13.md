@@ -19,6 +19,8 @@
 
 并发契约让两个写入者携带相同初始 ETag。只能有一个通过 `If-Match`；第二个必须看到变化后的当前 ETag 并失败。如果检查在变更锁外，两者都可能校验旧状态并同时获胜。
 
+### 测试契约
+
 ??? note "文件差异：tests/test_conditional.py"
     ```diff
     diff --git a/tests/test_conditional.py b/tests/test_conditional.py

@@ -347,33 +347,64 @@ def parse_localized_lesson(
 
     walkthrough_heading = "### 机制板块" if chinese else "### Mechanism blocks"
     verification_heading = "### 验证证据" if chinese else "### Verification evidence"
+    test_heading = "### 测试契约" if chinese else "### Test contract"
+    concepts_heading = "### 基本概念" if chinese else "### Basic concepts"
     walkthrough_start = body.index(walkthrough_heading) + len(walkthrough_heading)
     verification_start = body.index(verification_heading, walkthrough_start)
     walkthrough = body[walkthrough_start:verification_start].strip()
-    markers = list(FILE_MARKER.finditer(walkthrough))
-    if not markers:
+    expected_test_paths = {
+        item.path for item in file_patches if item.path.startswith("tests/")
+    }
+    regions: list[tuple[str, str]] = []
+    if expected_test_paths:
+        if test_heading not in body:
+            raise ValueError(f"{label}: missing {test_heading}")
+        test_start = body.index(test_heading) + len(test_heading)
+        concepts_start = body.index(concepts_heading, test_start)
+        if concepts_start > body.index(walkthrough_heading):
+            raise ValueError(f"{label}: test contract must precede basic concepts")
+        regions.append(("test contract", body[test_start:concepts_start].strip()))
+        pre_walkthrough = (
+            body[:test_start].rstrip()
+            + "\n\n"
+            + body[concepts_start:walkthrough_start].strip()
+        )
+    else:
+        if test_heading in body:
+            raise ValueError(f"{label}: empty test contract is not allowed")
+        pre_walkthrough = body[:walkthrough_start].rstrip()
+    regions.append(("mechanism blocks", walkthrough))
+
+    if not any(FILE_MARKER.search(region) for _, region in regions):
         raise ValueError(f"{label}: no journey-file sections")
 
     patch_by_path = {item.path: item for item in file_patches}
     files: list[FileLesson] = []
-    for index, marker in enumerate(markers):
-        path = marker.group(1).strip()
-        end = markers[index + 1].start() if index + 1 < len(markers) else len(walkthrough)
-        file_body = walkthrough[marker.end():end].strip()
-        expected_heading = f"#### `{path}`"
-        if not file_body.startswith(expected_heading):
-            raise ValueError(f"{label} {path}: marker must be followed by {expected_heading}")
-        if path not in patch_by_path:
-            raise ValueError(f"{label} {path}: file is absent from stage.patch")
+    for region_name, region in regions:
+        markers = list(FILE_MARKER.finditer(region))
+        for index, marker in enumerate(markers):
+            path = marker.group(1).strip()
+            end = markers[index + 1].start() if index + 1 < len(markers) else len(region)
+            file_body = region[marker.end():end].strip()
+            expected_heading = f"#### `{path}`"
+            if not file_body.startswith(expected_heading):
+                raise ValueError(f"{label} {path}: marker must be followed by {expected_heading}")
+            if path not in patch_by_path:
+                raise ValueError(f"{label} {path}: file is absent from stage.patch")
+            if (path.startswith("tests/")) != (region_name == "test contract"):
+                raise ValueError(
+                    f"{label} {path}: tests belong in the test contract and production files "
+                    "belong in mechanism blocks"
+                )
 
-        slices = tuple(_normalize_slice(match) for match in CODE_FENCE.findall(file_body))
-        after_text = _post_patch_text(patch_by_path[path])
-        for code in slices:
-            if len([line for line in code.splitlines() if line.strip()]) > 15:
-                raise ValueError(f"{label} {path}: key code must contain at most 15 nonblank lines")
-            if code and not _slice_in_patch(code, after_text):
-                raise ValueError(f"{label} {path}: key code does not match stage.patch")
-        files.append(FileLesson(path=path, body=file_body, code_slices=slices))
+            slices = tuple(_normalize_slice(match) for match in CODE_FENCE.findall(file_body))
+            after_text = _post_patch_text(patch_by_path[path])
+            for code in slices:
+                if len([line for line in code.splitlines() if line.strip()]) > 15:
+                    raise ValueError(f"{label} {path}: key code must contain at most 15 nonblank lines")
+                if code and not _slice_in_patch(code, after_text):
+                    raise ValueError(f"{label} {path}: key code does not match stage.patch")
+            files.append(FileLesson(path=path, body=file_body, code_slices=slices))
 
     paths = [item.path for item in files]
     if len(paths) != len(set(paths)):
@@ -386,7 +417,7 @@ def parse_localized_lesson(
         raise ValueError(f"{label}: walkthrough coverage mismatch; missing={missing}, extra={extra}")
 
     return LocalizedLesson(
-        pre_walkthrough=body[:walkthrough_start].rstrip(),
+        pre_walkthrough=pre_walkthrough,
         files=tuple(files),
         post_walkthrough=body[verification_start:].strip(),
     )

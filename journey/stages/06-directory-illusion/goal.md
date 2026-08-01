@@ -23,6 +23,29 @@ Version listing can expose history, but normal object listing still has no answe
 
 The delimiter contract stores `a.txt`, `raw`, and several `photos/...` keys. Listing the root with delimiter `/` must return two contents plus exactly one `photos/` common prefix. If the implementation walks directories or returns every photo key, the externally visible projection is wrong.
 
+### Test contract
+
+<!-- journey-file: tests/test_listing.py -->
+#### `tests/test_listing.py`
+
+##### What it is and why it appears
+
+Five contracts cover directory illusion, combined pagination, marker hiding, flattened version history, and invalid tokens.
+
+##### Runtime role
+
+They build state through `MiniS3` and inspect public results, so the examples connect model semantics to the final read view.
+
+##### Key code
+
+```python
+assert root.common_prefixes == ("photos/",)
+```
+
+##### Statement understanding
+
+Several flat keys collapse into one projected prefix at the root. The tuple does not mean a `photos/` object or directory was stored.
+
 ### Basic concepts
 
 `prefix` filters keys by exact string start. `delimiter` groups the remaining suffix at its first delimiter into a `common_prefix`; this is a computed view, not a stored folder. A page counts both returned objects and common prefixes because both consume result slots.
@@ -96,27 +119,6 @@ It keeps callers on one supported import surface; it does not calculate prefixes
 
 The explicit `__all__` begins documenting which accumulated names are public rather than exporting every imported helper accidentally.
 
-<!-- journey-file: tests/test_listing.py -->
-#### `tests/test_listing.py`
-
-##### What it is and why it appears
-
-Five contracts cover directory illusion, combined pagination, marker hiding, flattened version history, and invalid tokens.
-
-##### Runtime role
-
-They build state through `MiniS3` and inspect public results, so the examples connect model semantics to the final read view.
-
-##### Key code
-
-```python
-assert root.common_prefixes == ("photos/",)
-```
-
-##### Statement understanding
-
-Several flat keys collapse into one projected prefix at the root. The tuple does not mean a `photos/` object or directory was stored.
-
 ### Verification evidence
 
 Run `uv run pytest -q $(cat journey/stages/06-directory-illusion/tests.txt)`. The five new cases prove projection and token behavior while all earlier history tests remain cumulative.
@@ -153,6 +155,29 @@ MiniS3 produces directory-like listing by grouping flat strings at a delimiter. 
 ### 先看会坏在哪里
 
 Delimiter 契约存入 `a.txt`、`raw` 和多个 `photos/...` Key。根目录用 `/` Listing 时必须返回两个 contents 和唯一的 `photos/` common prefix。如果实现遍历目录或返回所有 photo Key，公开投影就错了。
+
+### 测试契约
+
+<!-- journey-file: tests/test_listing.py -->
+#### `tests/test_listing.py`
+
+##### 是什么，为什么现在需要
+
+五条契约覆盖目录幻觉、组合分页、Marker 隐藏、版本展开和无效 token。
+
+##### 在运行时做什么
+
+它们通过 `MiniS3` 建立状态并观察公开结果，把模型语义连接到最终读取视图。
+
+##### 关键代码
+
+```python
+assert root.common_prefixes == ("photos/",)
+```
+
+##### 关键语句理解
+
+多个扁平 Key 在根视图中折叠成一个投影前缀；这个 tuple 不表示存储了 `photos/` 对象或目录。
 
 ### 基本概念
 
@@ -226,27 +251,6 @@ with self._lock:
 ##### 关键语句理解
 
 显式 `__all__` 开始记录累积的公开名称，避免意外导出全部内部 helper。
-
-<!-- journey-file: tests/test_listing.py -->
-#### `tests/test_listing.py`
-
-##### 是什么，为什么现在需要
-
-五条契约覆盖目录幻觉、组合分页、Marker 隐藏、版本展开和无效 token。
-
-##### 在运行时做什么
-
-它们通过 `MiniS3` 建立状态并观察公开结果，把模型语义连接到最终读取视图。
-
-##### 关键代码
-
-```python
-assert root.common_prefixes == ("photos/",)
-```
-
-##### 关键语句理解
-
-多个扁平 Key 在根视图中折叠成一个投影前缀；这个 tuple 不表示存储了 `photos/` 对象或目录。
 
 ### 验证证据
 

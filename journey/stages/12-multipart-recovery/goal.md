@@ -20,19 +20,7 @@ Normal completion order is correct, but a crash can interrupt after assembly at 
 
 The pre-publication test crashes completion at `before_manifest_publish`, reopens, and completes the same upload successfully. If recovery deletes all staging eagerly, the retry becomes impossible even though no object was committed.
 
-### Basic concepts
-
-Before publication, staging is the only durable owner of the requested completion and must remain. After publication, the object version's `multipart_upload_id` proves that this upload committed, so leftover staging is redundant debris and may be removed.
-
-### Why this mechanism is necessary
-
-Using directory existence alone cannot distinguish an unfinished upload from post-commit cleanup interrupted by a crash. Correlating published provenance with upload ID makes both cases deterministic.
-
-### Runtime mental model
-
-Each test prepares a durable upload and parts, injects one crash point, discards the crashing service, and reopens. The before case retries completion; the after case reads the object and verifies abort now reports `NoSuchUpload` because recovery cleaned staging.
-
-### Mechanism blocks
+### Test contract
 
 <!-- journey-file: tests/test_storage.py -->
 #### `tests/test_storage.py`
@@ -54,6 +42,20 @@ assert reopened.get_object("b", "movie").body == b"abcx"
 ##### Statement understanding
 
 In the after-publish case, the visible complete object is authoritative even if cleanup did not run. Recovery must keep it and remove only the matching upload staging.
+
+### Basic concepts
+
+Before publication, staging is the only durable owner of the requested completion and must remain. After publication, the object version's `multipart_upload_id` proves that this upload committed, so leftover staging is redundant debris and may be removed.
+
+### Why this mechanism is necessary
+
+Using directory existence alone cannot distinguish an unfinished upload from post-commit cleanup interrupted by a crash. Correlating published provenance with upload ID makes both cases deterministic.
+
+### Runtime mental model
+
+Each test prepares a durable upload and parts, injects one crash point, discards the crashing service, and reopens. The before case retries completion; the after case reads the object and verifies abort now reports `NoSuchUpload` because recovery cleaned staging.
+
+### Mechanism blocks
 
 ### Verification evidence
 
@@ -89,19 +91,7 @@ Multipart recovery follows the same manifest commit point as normal objects, but
 
 发布前测试在 `before_manifest_publish` 崩溃，重开后使用同一个 upload 成功完成。如果恢复一律删除 Staging，即使对象从未提交也无法重试。
 
-### 基本概念
-
-发布前，Staging 是完成请求唯一持久所有者，必须保留。发布后，对象版本的 `multipart_upload_id` 证明该 upload 已提交，残留 Staging 就是可删除冗余。
-
-### 为什么需要这个机制
-
-只看目录存在无法区分“未完成上传”和“提交后清理被崩溃打断”。用已发布来源关联 upload ID，两个场景都有确定答案。
-
-### 运行时心智模型
-
-每条测试准备持久 upload 与 parts，注入一个崩溃点，丢弃崩溃服务再重开。Before 场景重试完成；After 场景读取对象，并确认 Abort 得到 `NoSuchUpload`，因为恢复已清理 Staging。
-
-### 机制板块
+### 测试契约
 
 <!-- journey-file: tests/test_storage.py -->
 #### `tests/test_storage.py`
@@ -123,6 +113,20 @@ assert reopened.get_object("b", "movie").body == b"abcx"
 ##### 关键语句理解
 
 在发布后场景，即使清理尚未运行，可见完整对象仍是权威。恢复必须保留它，只删除匹配的 upload Staging。
+
+### 基本概念
+
+发布前，Staging 是完成请求唯一持久所有者，必须保留。发布后，对象版本的 `multipart_upload_id` 证明该 upload 已提交，残留 Staging 就是可删除冗余。
+
+### 为什么需要这个机制
+
+只看目录存在无法区分“未完成上传”和“提交后清理被崩溃打断”。用已发布来源关联 upload ID，两个场景都有确定答案。
+
+### 运行时心智模型
+
+每条测试准备持久 upload 与 parts，注入一个崩溃点，丢弃崩溃服务再重开。Before 场景重试完成；After 场景读取对象，并确认 Abort 得到 `NoSuchUpload`，因为恢复已清理 Staging。
+
+### 机制板块
 
 ### 验证证据
 

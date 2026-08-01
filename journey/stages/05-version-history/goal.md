@@ -23,6 +23,29 @@ GET returns one addressed data version, so it cannot explain the history hidden 
 
 The suspended-delete contract creates named history, writes a `null` value, then deletes without a version ID. The expected history contains a new `null` marker and the older named versions, but not the replaced `null` data. A flat “all values” list would report the wrong state.
 
+### Test contract
+
+<!-- journey-file: tests/test_versioning.py -->
+#### `tests/test_versioning.py`
+
+##### What it is and why it appears
+
+Three new scenarios lock the projection of unversioned replacement, suspended replacement, and suspended deletion.
+
+##### Runtime role
+
+They observe public histories after real service mutations, so the evidence covers Bucket plus projection rather than a fabricated input alone.
+
+##### Key code
+
+```python
+assert marker is not None and marker.version_id == "null"
+```
+
+##### Statement understanding
+
+Suspension does not mean deletion becomes physical. The new marker occupies the public `null` slot while named history remains addressable.
+
 ### Basic concepts
 
 A projection is a read-only shape derived from owned state. `ListedVersion` does not become a second history owner; it converts each `Version` or `DeleteMarker` into fields useful to callers. `is_latest` depends on position within one key's newest-first tuple, not on the highest ID string globally.
@@ -94,27 +117,6 @@ It lets callers name the response contract without importing an internal module 
 
 Exporting a result value is a compatibility decision; the internal flattening helper remains an implementation detail.
 
-<!-- journey-file: tests/test_versioning.py -->
-#### `tests/test_versioning.py`
-
-##### What it is and why it appears
-
-Three new scenarios lock the projection of unversioned replacement, suspended replacement, and suspended deletion.
-
-##### Runtime role
-
-They observe public histories after real service mutations, so the evidence covers Bucket plus projection rather than a fabricated input alone.
-
-##### Key code
-
-```python
-assert marker is not None and marker.version_id == "null"
-```
-
-##### Statement understanding
-
-Suspension does not mean deletion becomes physical. The new marker occupies the public `null` slot while named history remains addressable.
-
 ### Verification evidence
 
 Run `uv run pytest -q $(cat journey/stages/05-version-history/tests.txt)`. The cumulative suite proves projection semantics across versioning states; current-object pagination belongs to Stage 06.
@@ -151,6 +153,29 @@ GET 只返回一份被寻址的数据版本，无法解释最新值或 Marker �
 ### 先看会坏在哪里
 
 暂停删除契约先创建具名历史，再写 `null` 值，最后不带版本 ID 删除。预期历史包含新的 `null` Marker 和旧具名版本，但不再包含被替换的 `null` 数据。简单“列出全部值”会报告错误状态。
+
+### 测试契约
+
+<!-- journey-file: tests/test_versioning.py -->
+#### `tests/test_versioning.py`
+
+##### 是什么，为什么现在需要
+
+三个新场景锁定未版本化替换、暂停替换和暂停删除后的投影。
+
+##### 在运行时做什么
+
+它们观察真实服务变更后的公开历史，因此证据同时覆盖 Bucket 与投影，而不是只测虚构输入。
+
+##### 关键代码
+
+```python
+assert marker is not None and marker.version_id == "null"
+```
+
+##### 关键语句理解
+
+暂停不表示删除变成物理删除。新 Marker 占据公开 `null` 槽，具名历史仍可寻址。
 
 ### 基本概念
 
@@ -222,27 +247,6 @@ return list_object_versions(self._bucket(bucket).records, prefix=prefix)
 ##### 关键语句理解
 
 导出结果值是兼容性决策；内部展开 helper 仍是实现细节。
-
-<!-- journey-file: tests/test_versioning.py -->
-#### `tests/test_versioning.py`
-
-##### 是什么，为什么现在需要
-
-三个新场景锁定未版本化替换、暂停替换和暂停删除后的投影。
-
-##### 在运行时做什么
-
-它们观察真实服务变更后的公开历史，因此证据同时覆盖 Bucket 与投影，而不是只测虚构输入。
-
-##### 关键代码
-
-```python
-assert marker is not None and marker.version_id == "null"
-```
-
-##### 关键语句理解
-
-暂停不表示删除变成物理删除。新 Marker 占据公开 `null` 槽，具名历史仍可寻址。
 
 ### 验证证据
 

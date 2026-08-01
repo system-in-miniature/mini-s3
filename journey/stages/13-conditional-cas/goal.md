@@ -24,6 +24,29 @@ ETags exist but callers cannot make an operation conditional on the value they o
 
 The concurrency contract starts two writers with the same initial ETag. Exactly one may pass `If-Match`; the second must see the changed current ETag and fail. If the check occurs outside the mutation lock, both can validate stale state and both appear to win.
 
+### Test contract
+
+<!-- journey-file: tests/test_conditional.py -->
+#### `tests/test_conditional.py`
+
+##### What it is and why it appears
+
+Four contracts cover GET validators, mutation guards, wildcard behavior, and the two-writer CAS race.
+
+##### Runtime role
+
+The threaded test proves serialization behavior that a sequential helper unit test cannot establish.
+
+##### Key code
+
+```python
+assert sorted(outcomes) == ["412", "stored"]
+```
+
+##### Statement understanding
+
+One `stored` and one `412` is the externally visible CAS guarantee. Two stored outcomes would prove the check and mutation were not atomic.
+
 ### Basic concepts
 
 `If-None-Match` on GET is a cache validator: a match means the representation is not modified (304-shaped). `If-Match` is a precondition: mismatch means the requested operation cannot be applied to the addressed current state (412-shaped).
@@ -119,27 +142,6 @@ Callers catch semantic outcomes from the package root; match helpers remain inte
 
 Exposing outcome types but not parsing internals keeps the public surface small.
 
-<!-- journey-file: tests/test_conditional.py -->
-#### `tests/test_conditional.py`
-
-##### What it is and why it appears
-
-Four contracts cover GET validators, mutation guards, wildcard behavior, and the two-writer CAS race.
-
-##### Runtime role
-
-The threaded test proves serialization behavior that a sequential helper unit test cannot establish.
-
-##### Key code
-
-```python
-assert sorted(outcomes) == ["412", "stored"]
-```
-
-##### Statement understanding
-
-One `stored` and one `412` is the externally visible CAS guarantee. Two stored outcomes would prove the check and mutation were not atomic.
-
 ### Verification evidence
 
 Run `uv run pytest -q $(cat journey/stages/13-conditional-cas/tests.txt)`. The cases prove matching forms, failure meanings, mutation guards, and one-winner concurrency.
@@ -177,6 +179,29 @@ Conditional requests let a caller act on the exact value it observed. MiniS3 eva
 ### 先看会坏在哪里
 
 并发契约让两个写入者携带相同初始 ETag。只能有一个通过 `If-Match`；第二个必须看到变化后的当前 ETag 并失败。如果检查在变更锁外，两者都可能校验旧状态并同时获胜。
+
+### 测试契约
+
+<!-- journey-file: tests/test_conditional.py -->
+#### `tests/test_conditional.py`
+
+##### 是什么，为什么现在需要
+
+四条契约覆盖 GET 校验、变更 guard、wildcard 和双写者 CAS 竞争。
+
+##### 在运行时做什么
+
+线程测试证明顺序 helper 单测无法证明的串行化行为。
+
+##### 关键代码
+
+```python
+assert sorted(outcomes) == ["412", "stored"]
+```
+
+##### 关键语句理解
+
+一个 `stored` 与一个 `412` 是外部可见 CAS 保证；两个 stored 会证明检查与变更并不原子。
 
 ### 基本概念
 
@@ -272,27 +297,6 @@ require_if_match(self._current_etag(candidate, key), if_match)
 ##### 关键语句理解
 
 公开结果类型但不公开解析内部细节，可以保持 API 较小。
-
-<!-- journey-file: tests/test_conditional.py -->
-#### `tests/test_conditional.py`
-
-##### 是什么，为什么现在需要
-
-四条契约覆盖 GET 校验、变更 guard、wildcard 和双写者 CAS 竞争。
-
-##### 在运行时做什么
-
-线程测试证明顺序 helper 单测无法证明的串行化行为。
-
-##### 关键代码
-
-```python
-assert sorted(outcomes) == ["412", "stored"]
-```
-
-##### 关键语句理解
-
-一个 `stored` 与一个 `412` 是外部可见 CAS 保证；两个 stored 会证明检查与变更并不原子。
 
 ### 验证证据
 

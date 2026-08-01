@@ -16,6 +16,8 @@ Parts are durable but intentionally invisible. Completion must turn selected pri
 
 The main contract uploads two parts and confirms List is empty before completion. After completion it requires body `abcend`, a two-part composite ETag different from the whole-body ETag, and exactly one visible key. Any early ObjectRecord or wrong ETag is immediately visible.
 
+### Test contract
+
 ??? note "File diff: tests/test_multipart.py"
     ```diff
     diff --git a/tests/test_multipart.py b/tests/test_multipart.py

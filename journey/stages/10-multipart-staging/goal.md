@@ -25,6 +25,29 @@ Stage 09 validates abstract staged parts, but a real client needs upload IDs and
 
 The first integration contract creates an upload for key `right`, then tries to upload through key `wrong` and through part numbers `0` and `10001`. Each request must fail before writing staging. Otherwise an upload ID can be confused across keys or create invalid part files.
 
+### Test contract
+
+<!-- journey-file: tests/test_multipart.py -->
+#### `tests/test_multipart.py`
+
+##### What it is and why it appears
+
+The first durable multipart test locks upload identity and legal part-number range.
+
+##### Runtime role
+
+It enters through `MiniS3`, so failures cover service validation plus storage identity lookup.
+
+##### Key code
+
+```python
+store.upload_part("b", "wrong", upload.upload_id, 1, b"x")
+```
+
+##### Statement understanding
+
+An upload ID is not globally interchangeable: the addressed Bucket and Key must match its persisted metadata before any part is written.
+
 ### Basic concepts
 
 Staging is durable private state, not a partially visible object. Each upload has identity `(bucket, key, upload_id)` and its own `parts/` directory. Re-uploading the same part number atomically replaces that staged slot.
@@ -140,27 +163,6 @@ Callers can hold upload receipts and catch `NoSuchUpload` without importing stor
 
 The exports expose domain contracts, not the private disk layout.
 
-<!-- journey-file: tests/test_multipart.py -->
-#### `tests/test_multipart.py`
-
-##### What it is and why it appears
-
-The first durable multipart test locks upload identity and legal part-number range.
-
-##### Runtime role
-
-It enters through `MiniS3`, so failures cover service validation plus storage identity lookup.
-
-##### Key code
-
-```python
-store.upload_part("b", "wrong", upload.upload_id, 1, b"x")
-```
-
-##### Statement understanding
-
-An upload ID is not globally interchangeable: the addressed Bucket and Key must match its persisted metadata before any part is written.
-
 ### Verification evidence
 
 Run `uv run pytest -q $(cat journey/stages/10-multipart-staging/tests.txt)`. It proves identity and range rejection while cumulative tests protect earlier object behavior. Completion visibility is deliberately deferred.
@@ -199,6 +201,29 @@ Stage 09 只能验证抽象暂存 Part；真实客户端需要 upload ID 和 Par
 ### 先看会坏在哪里
 
 第一条集成契约为 Key `right` 创建上传，再尝试用 Key `wrong` 和 Part 编号 `0`、`10001` 上传。每次都必须在写暂存前失败，否则 upload ID 会跨 Key 混用或产生非法 Part 文件。
+
+### 测试契约
+
+<!-- journey-file: tests/test_multipart.py -->
+#### `tests/test_multipart.py`
+
+##### 是什么，为什么现在需要
+
+第一条持久 Multipart 测试锁定上传身份和合法 Part 编号范围。
+
+##### 在运行时做什么
+
+它通过 `MiniS3` 进入，因此失败同时覆盖服务校验与存储身份查找。
+
+##### 关键代码
+
+```python
+store.upload_part("b", "wrong", upload.upload_id, 1, b"x")
+```
+
+##### 关键语句理解
+
+Upload ID 不能全局互换：寻址的 Bucket 与 Key 必须和持久元数据匹配，之后才能写 Part。
 
 ### 基本概念
 
@@ -314,27 +339,6 @@ Multipart 值与失败加入受支持包级 API。
 ##### 关键语句理解
 
 公开的是领域契约，不是私有磁盘布局。
-
-<!-- journey-file: tests/test_multipart.py -->
-#### `tests/test_multipart.py`
-
-##### 是什么，为什么现在需要
-
-第一条持久 Multipart 测试锁定上传身份和合法 Part 编号范围。
-
-##### 在运行时做什么
-
-它通过 `MiniS3` 进入，因此失败同时覆盖服务校验与存储身份查找。
-
-##### 关键代码
-
-```python
-store.upload_part("b", "wrong", upload.upload_id, 1, b"x")
-```
-
-##### 关键语句理解
-
-Upload ID 不能全局互换：寻址的 Bucket 与 Key 必须和持久元数据匹配，之后才能写 Part。
 
 ### 验证证据
 

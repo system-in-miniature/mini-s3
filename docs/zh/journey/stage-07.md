@@ -15,6 +15,8 @@ Stage 03 描述了最后发布的存储，正常重启也通过了，但这还�
 
 一条测试在新 Artifact 已持久化后注入 `before_manifest_publish`。重开后必须仍返回旧对象并删除未引用的新 Artifact。如果 Artifact 只要存在就算可见，新值会在 Manifest 从未提交时泄漏。
 
+### 测试契约
+
 ??? note "文件差异：tests/test_storage.py"
     ```diff
     diff --git a/tests/test_storage.py b/tests/test_storage.py

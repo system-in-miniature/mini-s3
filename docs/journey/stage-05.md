@@ -18,6 +18,8 @@ GET returns one addressed data version, so it cannot explain the history hidden 
 
 The suspended-delete contract creates named history, writes a `null` value, then deletes without a version ID. The expected history contains a new `null` marker and the older named versions, but not the replaced `null` data. A flat “all values” list would report the wrong state.
 
+### Test contract
+
 ??? note "File diff: tests/test_versioning.py"
     ```diff
     diff --git a/tests/test_versioning.py b/tests/test_versioning.py

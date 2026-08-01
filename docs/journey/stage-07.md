@@ -15,6 +15,8 @@ Stage 03 described publish-last storage, and clean restarts pass. That is not ye
 
 One test injects `before_manifest_publish` after new artifacts are durable. Reopening must still return the old object and remove the unreferenced new artifact. If artifact existence alone controls visibility, the new value leaks despite the manifest never committing it.
 
+### Test contract
+
 ??? note "File diff: tests/test_storage.py"
     ```diff
     diff --git a/tests/test_storage.py b/tests/test_storage.py

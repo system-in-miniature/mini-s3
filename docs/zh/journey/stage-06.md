@@ -18,6 +18,8 @@
 
 Delimiter 契约存入 `a.txt`、`raw` 和多个 `photos/...` Key。根目录用 `/` Listing 时必须返回两个 contents 和唯一的 `photos/` common prefix。如果实现遍历目录或返回所有 photo Key，公开投影就错了。
 
+### 测试契约
+
 ??? note "文件差异：tests/test_listing.py"
     ```diff
     diff --git a/tests/test_listing.py b/tests/test_listing.py

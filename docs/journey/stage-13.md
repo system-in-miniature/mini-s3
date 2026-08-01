@@ -19,6 +19,8 @@ ETags exist but callers cannot make an operation conditional on the value they o
 
 The concurrency contract starts two writers with the same initial ETag. Exactly one may pass `If-Match`; the second must see the changed current ETag and fail. If the check occurs outside the mutation lock, both can validate stale state and both appear to win.
 
+### Test contract
+
 ??? note "File diff: tests/test_conditional.py"
     ```diff
     diff --git a/tests/test_conditional.py b/tests/test_conditional.py

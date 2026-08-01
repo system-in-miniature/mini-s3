@@ -20,6 +20,8 @@ Stage 09 validates abstract staged parts, but a real client needs upload IDs and
 
 The first integration contract creates an upload for key `right`, then tries to upload through key `wrong` and through part numbers `0` and `10001`. Each request must fail before writing staging. Otherwise an upload ID can be confused across keys or create invalid part files.
 
+### Test contract
+
 ??? note "File diff: tests/test_multipart.py"
     ```diff
     diff --git a/tests/test_multipart.py b/tests/test_multipart.py

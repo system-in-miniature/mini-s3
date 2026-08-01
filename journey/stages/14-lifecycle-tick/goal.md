@@ -23,6 +23,29 @@ Versions now carry creation times, but nothing expires them. Hiding time reads i
 
 The pure-boundary contract evaluates the same history at time `9.999` and `10.0`. No action is allowed before the threshold; the action appears exactly at it. A hidden wall clock or strict `>` comparison makes this boundary flaky or one tick late.
 
+### Test contract
+
+<!-- journey-file: tests/test_lifecycle.py -->
+#### `tests/test_lifecycle.py`
+
+##### What it is and why it appears
+
+Four contracts cover pure filtering/boundaries, current versus noncurrent transitions, injected time/restart, and invalid rules.
+
+##### Runtime role
+
+`ManualClock` lets tests advance time deliberately and prove persisted timestamps rather than waiting on wall time.
+
+##### Key code
+
+```python
+assert evaluate_expiration(snapshot, [rule], now=9.999) == ()
+```
+
+##### Statement understanding
+
+This is the just-before boundary. Paired with the `10.0` assertion, it proves inclusion precisely rather than merely testing an obviously old object.
+
 ### Basic concepts
 
 Policy evaluation is a pure calculation from immutable history, rules, and explicit `now`. It emits `LifecycleAction` decisions. `lifecycle_tick` is the separate mutation boundary that applies those decisions under the service lock and persists only when state changes.
@@ -96,27 +119,6 @@ Callers can construct policy and inspect returned decisions without depending on
 
 The package exports declarative values, while actual mutation remains a `MiniS3` operation.
 
-<!-- journey-file: tests/test_lifecycle.py -->
-#### `tests/test_lifecycle.py`
-
-##### What it is and why it appears
-
-Four contracts cover pure filtering/boundaries, current versus noncurrent transitions, injected time/restart, and invalid rules.
-
-##### Runtime role
-
-`ManualClock` lets tests advance time deliberately and prove persisted timestamps rather than waiting on wall time.
-
-##### Key code
-
-```python
-assert evaluate_expiration(snapshot, [rule], now=9.999) == ()
-```
-
-##### Statement understanding
-
-This is the just-before boundary. Paired with the `10.0` assertion, it proves inclusion precisely rather than merely testing an obviously old object.
-
 ### Verification evidence
 
 Run `uv run pytest -q $(cat journey/stages/14-lifecycle-tick/tests.txt)`. The cases prove pure policy, explicit mutation, time injection, restart persistence, and rule validation.
@@ -153,6 +155,29 @@ Version 已有创建时间，但没有任何机制让它们过期。把时间读
 ### 先看会坏在哪里
 
 纯边界契约在时间 `9.999` 与 `10.0` 对同一历史求值。阈值前不能有 action，到达时必须出现。隐藏 wall clock 或使用严格 `>` 会让边界 flaky 或晚一个 tick。
+
+### 测试契约
+
+<!-- journey-file: tests/test_lifecycle.py -->
+#### `tests/test_lifecycle.py`
+
+##### 是什么，为什么现在需要
+
+四条契约覆盖纯过滤/边界、当前与非当前迁移、注入时间/重启和非法规则。
+
+##### 在运行时做什么
+
+`ManualClock` 让测试主动推进时间，证明持久时间戳，而不是等待 wall time。
+
+##### 关键代码
+
+```python
+assert evaluate_expiration(snapshot, [rule], now=9.999) == ()
+```
+
+##### 关键语句理解
+
+这是刚到阈值前的边界；与 `10.0` 断言成对后，精确证明 inclusive，而不是只测明显过期对象。
 
 ### 基本概念
 
@@ -226,27 +251,6 @@ self._storage.persist_bucket(candidate)
 ##### 关键语句理解
 
 包导出声明式值，实际变更仍是 `MiniS3` 操作。
-
-<!-- journey-file: tests/test_lifecycle.py -->
-#### `tests/test_lifecycle.py`
-
-##### 是什么，为什么现在需要
-
-四条契约覆盖纯过滤/边界、当前与非当前迁移、注入时间/重启和非法规则。
-
-##### 在运行时做什么
-
-`ManualClock` 让测试主动推进时间，证明持久时间戳，而不是等待 wall time。
-
-##### 关键代码
-
-```python
-assert evaluate_expiration(snapshot, [rule], now=9.999) == ()
-```
-
-##### 关键语句理解
-
-这是刚到阈值前的边界；与 `10.0` 断言成对后，精确证明 inclusive，而不是只测明显过期对象。
 
 ### 验证证据
 

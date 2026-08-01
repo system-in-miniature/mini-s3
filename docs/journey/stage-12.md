@@ -15,6 +15,8 @@ Normal completion order is correct, but a crash can interrupt after assembly at 
 
 The pre-publication test crashes completion at `before_manifest_publish`, reopens, and completes the same upload successfully. If recovery deletes all staging eagerly, the retry becomes impossible even though no object was committed.
 
+### Test contract
+
 ??? note "File diff: tests/test_storage.py"
     ```diff
     diff --git a/tests/test_storage.py b/tests/test_storage.py

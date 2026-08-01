@@ -19,7 +19,31 @@ Stage 01 can describe one value but cannot decide what PUT or DELETE does to an 
 
 ### Failure preview
 
-The focused contract writes an unversioned value, enables versioning, writes again, suspends versioning, and then attempts to return to `UNVERSIONED`. If that final transition succeeds, named history can be silently reinterpreted as if versioning never existed. The expected `ValueError` locks the state machine before persistence complicates it.
+Once a bucket has produced named history, returning to `UNVERSIONED` makes the model claim that versioning never existed. Later code could then replace or discard that history under the wrong rules, and persistence would make the corruption durable.
+
+### Test contract
+
+<!-- journey-file: tests/test_bucket.py -->
+#### `tests/test_bucket.py`
+
+##### What it is and why it appears
+
+This contract exercises the aggregate before service and disk layers can hide the source of an error.
+
+##### Runtime role
+
+It writes an unversioned value, enables versioning, writes again, suspends versioning, and then attempts the forbidden return to `UNVERSIONED`. The same sequence also proves deterministic `null/e00000001` and `v00000002/e00000002` identities.
+
+##### Key code
+
+```python
+with pytest.raises(ValueError):
+    bucket.set_versioning(VersioningState.UNVERSIONED)
+```
+
+##### Statement understanding
+
+The failure is part of domain behavior, not merely validation style: once named versions can exist, “never versioned” is no longer a truthful state.
 
 ### Basic concepts
 
@@ -60,28 +84,6 @@ else:
 
 Enabled PUT preserves every earlier version by prepending. The `else` branch deliberately replaces the public `null` slot while retaining named history; treating both branches alike would break suspended semantics.
 
-<!-- journey-file: tests/test_bucket.py -->
-#### `tests/test_bucket.py`
-
-##### What it is and why it appears
-
-This contract exercises the aggregate before service and disk layers can hide the source of an error.
-
-##### Runtime role
-
-It proves the same sequence produces `null/e00000001` and then `v00000002/e00000002`, and it locks the forbidden backward transition.
-
-##### Key code
-
-```python
-with pytest.raises(ValueError):
-    bucket.set_versioning(VersioningState.UNVERSIONED)
-```
-
-##### Statement understanding
-
-The failure is part of domain behavior, not merely validation style: once named versions can exist, “never versioned” is no longer a truthful state.
-
 ### Verification evidence
 
 Run `uv run pytest -q $(cat journey/stages/02-bucket-state/tests.txt)`. It proves the focused transition and identity contract, but not disk recovery or concurrent service calls.
@@ -115,7 +117,31 @@ Stage 01 只能描述一份值，还不能决定已有历史上的 PUT 或 DELET
 
 ### 先看会坏在哪里
 
-聚合契约先写入未版本化值，再启用版本化、再次写入、暂停版本化，最后尝试回到 `UNVERSIONED`。如果最后一步成功，已存在的具名历史会被误解释为“从未启用版本化”。预期的 `ValueError` 在引入持久化以前就锁定状态机。
+Bucket 一旦产生过具名历史，再回到 `UNVERSIONED` 就等于宣称“版本化从未存在”。后续代码可能因此按错误规则替换或丢弃具名历史，引入持久化后还会把这种破坏落盘。
+
+### 测试契约
+
+<!-- journey-file: tests/test_bucket.py -->
+#### `tests/test_bucket.py`
+
+##### 是什么，为什么现在需要
+
+这个契约先单测聚合，避免服务层和磁盘层掩盖错误来源。
+
+##### 在运行时做什么
+
+它依次写入未版本化值、启用版本化、再次写入、暂停版本化，最后尝试禁止的 `UNVERSIONED` 倒退。同一序列还证明身份可确定地产生 `null/e00000001` 与 `v00000002/e00000002`。
+
+##### 关键代码
+
+```python
+with pytest.raises(ValueError):
+    bucket.set_versioning(VersioningState.UNVERSIONED)
+```
+
+##### 关键语句理解
+
+这个失败属于领域行为：一旦可能存在具名版本，“从未版本化”就不再是真实状态。
 
 ### 基本概念
 
@@ -155,28 +181,6 @@ else:
 ##### 关键语句理解
 
 Enabled PUT 通过前插保留全部旧版本；`else` 则替换公开 `null` 槽并保留具名历史。把两个分支写成一样会破坏暂停语义。
-
-<!-- journey-file: tests/test_bucket.py -->
-#### `tests/test_bucket.py`
-
-##### 是什么，为什么现在需要
-
-这个契约先单测聚合，避免服务层和磁盘层掩盖错误来源。
-
-##### 在运行时做什么
-
-它证明相同序列源依次产生 `null/e00000001` 与 `v00000002/e00000002`，并锁定禁止的倒退迁移。
-
-##### 关键代码
-
-```python
-with pytest.raises(ValueError):
-    bucket.set_versioning(VersioningState.UNVERSIONED)
-```
-
-##### 关键语句理解
-
-这个失败属于领域行为：一旦可能存在具名版本，“从未版本化”就不再是真实状态。
 
 ### 验证证据
 

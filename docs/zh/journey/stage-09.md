@@ -17,6 +17,8 @@ Whole-object PUT 无法表示客户端把大内容拆成可独立重试的 Part�
 
 领域契约提供暂存 Part 与客户端完成清单。调换两个条目必须得到 `InvalidPartOrder`；Part 正确但 ETag 错误必须得到 `InvalidPart`。没有这些检查，完成操作可能静默拼装客户端未授权的字节。
 
+### 测试契约
+
 ??? note "文件差异：tests/test_multipart_domain.py"
     ```diff
     diff --git a/tests/test_multipart_domain.py b/tests/test_multipart_domain.py

@@ -23,6 +23,8 @@ This stage creates those values without adding storage or service behavior. Late
 
 The highest-signal contract uses `ObjectRecord(key="/a//b/")` and expects the exact same string back. If model code treats the key as a filesystem path, repeated or leading slashes may disappear before storage even exists. The test makes that corruption visible at the smallest possible boundary.
 
+### Test contract
+
 ??? note "File diff: tests/test_model.py"
     ```diff
     diff --git a/tests/test_model.py b/tests/test_model.py

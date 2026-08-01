@@ -15,6 +15,8 @@
 
 父链契约在创建 `one/two/three` 时记录 fsync，要求现有根目录和每个新目录的父级都出现。若只 fsync 最后一层，一个缺失的祖先目录项就可能让整棵子树在重启后不可达。
 
+### 测试契约
+
 ??? note "文件差异：tests/test_storage.py"
     ```diff
     diff --git a/tests/test_storage.py b/tests/test_storage.py

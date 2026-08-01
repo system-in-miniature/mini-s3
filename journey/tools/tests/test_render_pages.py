@@ -202,6 +202,7 @@ Book.
             (
                 False,
                 "### Failure preview",
+                "### Test contract",
                 '??? note "File diff: tests/test_bucket.py"',
                 "This contract exercises the aggregate",
                 "### Basic concepts",
@@ -210,6 +211,7 @@ Book.
             (
                 True,
                 "### 先看会坏在哪里",
+                "### 测试契约",
                 '??? note "文件差异：tests/test_bucket.py"',
                 "这个契约先单测聚合",
                 "### 基本概念",
@@ -217,15 +219,31 @@ Book.
             ),
         )
         stage_two = self.cards[1]
-        for chinese, failure, drawer, explanation, concepts, mechanisms in expectations:
+        for chinese, failure, contract, drawer, explanation, concepts, mechanisms in expectations:
             with self.subTest(chinese=chinese):
                 page = render_pages.render_card(stage_two, chinese=chinese)
+                self.assertLess(page.index(failure), page.index(contract))
+                self.assertLess(page.index(contract), page.index(drawer))
                 self.assertLess(page.index(failure), page.index(drawer))
                 self.assertLess(page.index(drawer), page.index(explanation))
                 self.assertLess(page.index(explanation), page.index(concepts))
                 self.assertLess(page.index(concepts), page.index(mechanisms))
                 self.assertEqual(page.count(drawer), 1)
                 self.assertNotIn(drawer, page[page.index(mechanisms):])
+
+    def test_authored_test_lessons_are_not_stored_under_mechanism_blocks(self) -> None:
+        stage_two = self.cards[1]
+        expectations = (
+            (stage_two.english, "### Test contract", "### Basic concepts", "### Mechanism blocks", "### Verification evidence"),
+            (stage_two.chinese, "### 测试契约", "### 基本概念", "### 机制板块", "### 验证证据"),
+        )
+        marker = "<!-- journey-file: tests/test_bucket.py -->"
+        for body, contract, concepts, mechanisms, verification in expectations:
+            with self.subTest(contract=contract):
+                test_section = body[body.index(contract):body.index(concepts)]
+                mechanism_section = body[body.index(mechanisms):body.index(verification)]
+                self.assertIn(marker, test_section)
+                self.assertNotIn(marker, mechanism_section)
 
     def test_failure_preview_uses_test_specific_walkthrough_labels(self) -> None:
         stage_two = self.cards[1]

@@ -20,6 +20,8 @@ Stage 09 只能验证抽象暂存 Part；真实客户端需要 upload ID 和 Par
 
 第一条集成契约为 Key `right` 创建上传，再尝试用 Key `wrong` 和 Part 编号 `0`、`10001` 上传。每次都必须在写暂存前失败，否则 upload ID 会跨 Key 混用或产生非法 Part 文件。
 
+### 测试契约
+
 ??? note "文件差异：tests/test_multipart.py"
     ```diff
     diff --git a/tests/test_multipart.py b/tests/test_multipart.py

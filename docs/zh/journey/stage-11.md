@@ -16,6 +16,8 @@ Part 已经持久但刻意不可见。完成操作必须把选中的私有 Part 
 
 主契约上传两个 Part，并在完成前确认 List 为空。完成后要求 Body 为 `abcend`、ETag 是不同于 whole-body ETag 的两 Part 组合 ETag，并且只出现一个可见 Key。提前创建 ObjectRecord 或算错 ETag 都会直接暴露。
 
+### 测试契约
+
 ??? note "文件差异：tests/test_multipart.py"
     ```diff
     diff --git a/tests/test_multipart.py b/tests/test_multipart.py

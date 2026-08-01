@@ -22,6 +22,29 @@ Whole-object PUT cannot represent a client uploading large content in independen
 
 The domain contract supplies staged parts and a client completion manifest. Swapping two entries must raise `InvalidPartOrder`; naming the right part with the wrong ETag must raise `InvalidPart`. Without these checks, completion can silently assemble bytes the client did not authorize.
 
+### Test contract
+
+<!-- journey-file: tests/test_multipart_domain.py -->
+#### `tests/test_multipart_domain.py`
+
+##### What it is and why it appears
+
+This focused contract makes completion rules visible before durable staging is added.
+
+##### Runtime role
+
+It supplies explicit staged parts and manifests, proving both accepted order/composite ETag and the major rejection paths.
+
+##### Key code
+
+```python
+def test_completion_validation_orders_parts_and_hashes_binary_digests() -> None:
+```
+
+##### Statement understanding
+
+The test name captures two independent obligations: client order is semantic, and composite hashing uses binary digests rather than concatenated hexadecimal text.
+
 ### Basic concepts
 
 `MultipartUpload` identifies one private staging session. `StagedPart` owns bytes and derives its receipt (`part_number`, ETag, size). The completion manifest is the client's ordered claim about which staged parts should form the object.
@@ -80,27 +103,6 @@ return tuple(selected), f'"{composite}-{len(selected)}"'
 
 The return keeps validated order and its derived composite fingerprint together. The `-N` suffix records part count and distinguishes multipart ETags from normal whole-body ETags.
 
-<!-- journey-file: tests/test_multipart_domain.py -->
-#### `tests/test_multipart_domain.py`
-
-##### What it is and why it appears
-
-This focused contract makes completion rules visible before durable staging is added.
-
-##### Runtime role
-
-It supplies explicit staged parts and manifests, proving both accepted order/composite ETag and the major rejection paths.
-
-##### Key code
-
-```python
-def test_completion_validation_orders_parts_and_hashes_binary_digests() -> None:
-```
-
-##### Statement understanding
-
-The test name captures two independent obligations: client order is semantic, and composite hashing uses binary digests rather than concatenated hexadecimal text.
-
 ### Verification evidence
 
 Run `uv run pytest -q $(cat journey/stages/09-multipart-domain/tests.txt)`. It proves pure completion validation only; no staged bytes are durable or visible yet.
@@ -136,6 +138,29 @@ Whole-object PUT 无法表示客户端把大内容拆成可独立重试的 Part�
 ### 先看会坏在哪里
 
 领域契约提供暂存 Part 与客户端完成清单。调换两个条目必须得到 `InvalidPartOrder`；Part 正确但 ETag 错误必须得到 `InvalidPart`。没有这些检查，完成操作可能静默拼装客户端未授权的字节。
+
+### 测试契约
+
+<!-- journey-file: tests/test_multipart_domain.py -->
+#### `tests/test_multipart_domain.py`
+
+##### 是什么，为什么现在需要
+
+这个聚焦契约在加入持久暂存以前就让完成规则可见。
+
+##### 在运行时做什么
+
+它提供显式暂存 Part 与清单，证明可接受顺序/组合 ETag 和主要拒绝路径。
+
+##### 关键代码
+
+```python
+def test_completion_validation_orders_parts_and_hashes_binary_digests() -> None:
+```
+
+##### 关键语句理解
+
+测试名锁定两个独立义务：客户端顺序有语义，组合哈希使用二进制摘要而不是十六进制文本拼接。
 
 ### 基本概念
 
@@ -194,27 +219,6 @@ return tuple(selected), f'"{composite}-{len(selected)}"'
 ##### 关键语句理解
 
 返回值把已验证顺序和派生组合指纹绑定在一起；`-N` 记录 Part 数，也让 Multipart ETag 与普通 ETag 可区分。
-
-<!-- journey-file: tests/test_multipart_domain.py -->
-#### `tests/test_multipart_domain.py`
-
-##### 是什么，为什么现在需要
-
-这个聚焦契约在加入持久暂存以前就让完成规则可见。
-
-##### 在运行时做什么
-
-它提供显式暂存 Part 与清单，证明可接受顺序/组合 ETag 和主要拒绝路径。
-
-##### 关键代码
-
-```python
-def test_completion_validation_orders_parts_and_hashes_binary_digests() -> None:
-```
-
-##### 关键语句理解
-
-测试名锁定两个独立义务：客户端顺序有语义，组合哈希使用二进制摘要而不是十六进制文本拼接。
 
 ### 验证证据
 

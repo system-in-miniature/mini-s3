@@ -28,6 +28,29 @@ This stage creates those values without adding storage or service behavior. Late
 
 The highest-signal contract uses `ObjectRecord(key="/a//b/")` and expects the exact same string back. If model code treats the key as a filesystem path, repeated or leading slashes may disappear before storage even exists. The test makes that corruption visible at the smallest possible boundary.
 
+### Test contract
+
+<!-- journey-file: tests/test_model.py -->
+#### `tests/test_model.py`
+
+##### What it is and why it appears
+
+These tests record the three model invariants introduced today: quoted ETags, opaque keys with immutable values, and body-less delete markers.
+
+##### Runtime role
+
+They call the learner-visible values directly. They prove value semantics only; they do not yet prove bucket transitions, disk persistence, or a public object service.
+
+##### Key code
+
+```python
+assert record.key == "/a//b/"
+```
+
+##### Statement understanding
+
+The deliberately unusual key catches path normalization. Passing this assertion means the model preserved the exact string, not that directory behavior exists.
+
 ### Basic concepts
 
 An S3 object value is a complete byte string, not an editable file range. A normal ETag in this miniature is the quoted lowercase MD5 of those bytes. It is a content fingerprint used for comparison; it is not an access-control secret.
@@ -101,27 +124,6 @@ It performs wiring only. If a public name is missing here, import fails before a
 ##### Statement understanding
 
 The explicit imports are the first public API contract. Internal helpers stay internal until a later stage deliberately exports them.
-
-<!-- journey-file: tests/test_model.py -->
-#### `tests/test_model.py`
-
-##### What it is and why it appears
-
-These tests record the three model invariants introduced today: quoted ETags, opaque keys with immutable values, and body-less delete markers.
-
-##### Runtime role
-
-They call the learner-visible values directly. They prove value semantics only; they do not yet prove bucket transitions, disk persistence, or a public object service.
-
-##### Key code
-
-```python
-assert record.key == "/a//b/"
-```
-
-##### Statement understanding
-
-The deliberately unusual key catches path normalization. Passing this assertion means the model preserved the exact string, not that directory behavior exists.
 
 <!-- journey-file: README.md -->
 #### `README.md`
@@ -210,6 +212,29 @@ MiniS3 first establishes immutable object values so later state machines and sto
 
 最直观的契约会创建 `ObjectRecord(key="/a//b/")`，并要求读取时得到完全相同的字符串。如果模型把 Key 当文件系统路径，开头或重复斜杠可能在存储出现以前就被吞掉。这个测试在最小边界上直接暴露数据被改写的问题。
 
+### 测试契约
+
+<!-- journey-file: tests/test_model.py -->
+#### `tests/test_model.py`
+
+##### 是什么，为什么现在需要
+
+三个测试分别固定带引号 ETag、含斜杠的不透明 Key 与不可变性、无 Body 删除标记。
+
+##### 在运行时做什么
+
+它们直接调用学习者可见的领域值，只证明值语义；目前还不能证明 Bucket 迁移、磁盘持久化或对象服务。
+
+##### 关键代码
+
+```python
+assert record.key == "/a//b/"
+```
+
+##### 关键语句理解
+
+故意使用异常形状的 Key 是为了捕获路径规范化。断言通过只证明字符串被原样保存，不代表系统真的存在目录。
+
 ### 基本概念
 
 S3 对象值是一整段字节，不是可局部编辑的文件。本项目里的普通 ETag 是对象字节的带引号小写 MD5；它用于比较内容，不是访问控制密钥。
@@ -283,27 +308,6 @@ return f'"{digest}"'
 ##### 关键语句理解
 
 显式导入组成第一版公开 API；内部辅助函数只有在后续阶段明确加入时才成为公开能力。
-
-<!-- journey-file: tests/test_model.py -->
-#### `tests/test_model.py`
-
-##### 是什么，为什么现在需要
-
-三个测试分别固定带引号 ETag、含斜杠的不透明 Key 与不可变性、无 Body 删除标记。
-
-##### 在运行时做什么
-
-它们直接调用学习者可见的领域值，只证明值语义；目前还不能证明 Bucket 迁移、磁盘持久化或对象服务。
-
-##### 关键代码
-
-```python
-assert record.key == "/a//b/"
-```
-
-##### 关键语句理解
-
-故意使用异常形状的 Key 是为了捕获路径规范化。断言通过只证明字符串被原样保存，不代表系统真的存在目录。
 
 <!-- journey-file: README.md -->
 #### `README.md`

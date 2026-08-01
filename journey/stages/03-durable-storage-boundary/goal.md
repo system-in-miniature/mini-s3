@@ -23,6 +23,29 @@ Stage 02 owns correct in-memory histories, but a process exit loses all of them.
 
 The storage contract writes a bucket, creates a new `DiskStorage` over the same directory, and expects the exact body, ETag, version, and maximum sequence back. A missing fsync or publish order may pass an in-process read yet fail this restart observation.
 
+### Test contract
+
+<!-- journey-file: tests/test_storage_boundary.py -->
+#### `tests/test_storage_boundary.py`
+
+##### What it is and why it appears
+
+This first storage contract proves one complete bucket can cross a process-like restart boundary.
+
+##### Runtime role
+
+It persists state, constructs a fresh adapter, and compares recovered values and sequence metadata. It is broader than a serialization unit test but narrower than the public MiniS3 service.
+
+##### Key code
+
+```python
+recovered, maximum_sequence = DiskStorage(tmp_path).load_buckets()
+```
+
+##### Statement understanding
+
+Using a new adapter is essential: reading the same in-memory Bucket would not prove bytes were published or recoverable. Returning `maximum` also prevents future sequence reuse.
+
 ### Basic concepts
 
 Atomic visibility and durability are separate. `os.replace` makes readers observe either the old complete name or the new complete name. File `fsync` persists file bytes; parent-directory `fsync` persists the name change.
@@ -99,27 +122,6 @@ It provides stable imports while keeping layout helpers internal.
 
 Exporting `DiskStorage` names the storage owner; exporting `InjectedCrash` makes crash boundaries testable without exposing every helper.
 
-<!-- journey-file: tests/test_storage_boundary.py -->
-#### `tests/test_storage_boundary.py`
-
-##### What it is and why it appears
-
-This first storage contract proves one complete bucket can cross a process-like restart boundary.
-
-##### Runtime role
-
-It persists state, constructs a fresh adapter, and compares recovered values and sequence metadata. It is broader than a serialization unit test but narrower than the public MiniS3 service.
-
-##### Key code
-
-```python
-recovered, maximum_sequence = DiskStorage(tmp_path).load_buckets()
-```
-
-##### Statement understanding
-
-Using a new adapter is essential: reading the same in-memory Bucket would not prove bytes were published or recoverable. Returning `maximum` also prevents future sequence reuse.
-
 ### Verification evidence
 
 Run `uv run pytest -q $(cat journey/stages/03-durable-storage-boundary/tests.txt)`. It proves a clean publish/restart path. Stages 07 and 08 will separately prove crash points and directory-fsync cleanup.
@@ -156,6 +158,29 @@ Stage 02 已有正确内存历史，但进程退出就会全部消失。直接�
 ### 先看会坏在哪里
 
 存储契约写入 Bucket 后，用同一目录创建全新的 `DiskStorage`，要求恢复完全相同的 Body、ETag、版本和最大序列。缺少 fsync 或发布顺序错误可能在进程内读取时看不出来，却会在这次重启观察中失败。
+
+### 测试契约
+
+<!-- journey-file: tests/test_storage_boundary.py -->
+#### `tests/test_storage_boundary.py`
+
+##### 是什么，为什么现在需要
+
+这是第一条存储契约，证明一个完整 Bucket 能跨越类似进程重启的边界。
+
+##### 在运行时做什么
+
+它持久化状态、创建新适配器，再比较恢复后的值与序列元数据。它比序列化单测更广，但还没到公开 MiniS3 服务。
+
+##### 关键代码
+
+```python
+recovered, maximum_sequence = DiskStorage(tmp_path).load_buckets()
+```
+
+##### 关键语句理解
+
+必须使用新适配器；读取原内存 Bucket 无法证明字节已发布并可恢复。返回 `maximum` 还能避免未来复用序列。
 
 ### 基本概念
 
@@ -232,27 +257,6 @@ Manifest 写入被两个命名崩溃点夹住，因为它正是可见性边界�
 ##### 关键语句理解
 
 导出 `DiskStorage` 明确存储所有者；导出 `InjectedCrash` 让崩溃边界可测试，而不必公开全部 helper。
-
-<!-- journey-file: tests/test_storage_boundary.py -->
-#### `tests/test_storage_boundary.py`
-
-##### 是什么，为什么现在需要
-
-这是第一条存储契约，证明一个完整 Bucket 能跨越类似进程重启的边界。
-
-##### 在运行时做什么
-
-它持久化状态、创建新适配器，再比较恢复后的值与序列元数据。它比序列化单测更广，但还没到公开 MiniS3 服务。
-
-##### 关键代码
-
-```python
-recovered, maximum_sequence = DiskStorage(tmp_path).load_buckets()
-```
-
-##### 关键语句理解
-
-必须使用新适配器；读取原内存 Bucket 无法证明字节已发布并可恢复。返回 `maximum` 还能避免未来复用序列。
 
 ### 验证证据
 

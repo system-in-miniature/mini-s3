@@ -23,6 +23,8 @@
 
 最直观的契约会创建 `ObjectRecord(key="/a//b/")`，并要求读取时得到完全相同的字符串。如果模型把 Key 当文件系统路径，开头或重复斜杠可能在存储出现以前就被吞掉。这个测试在最小边界上直接暴露数据被改写的问题。
 
+### 测试契约
+
 ??? note "文件差异：tests/test_model.py"
     ```diff
     diff --git a/tests/test_model.py b/tests/test_model.py

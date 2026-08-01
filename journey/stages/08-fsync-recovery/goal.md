@@ -20,19 +20,7 @@ The crash matrix proves which manifest is visible, but durability also depends o
 
 The parent-chain contract records fsync calls while creating `one/two/three`. It expects calls for the existing root and each newly created directory's parent. If only the final directory is fsynced, one missing ancestor entry can make the whole subtree unreachable after restart.
 
-### Basic concepts
-
-A directory stores name-to-inode mappings. Persisting file contents does not automatically persist creation or rename of that name. Cleanup classifies files by authority: temporary names and unreferenced artifacts may be removed; manifest-referenced artifacts must remain.
-
-### Why this mechanism is necessary
-
-Crash safety is an end-to-end ordering property, not merely a call to `fsync` somewhere. Recording the exact parent chain and exercising cleanup protects the subtle filesystem assumptions that ordinary object assertions cannot see.
-
-### Runtime mental model
-
-Tests replace `fsync_directory` with a recorder, perform real directory/storage creation, and assert the ordered parents. A separate restart case plants a stray temporary file, reopens storage, and requires cleanup while the published object remains readable.
-
-### Mechanism blocks
+### Test contract
 
 <!-- journey-file: tests/test_storage.py -->
 #### `tests/test_storage.py`
@@ -54,6 +42,20 @@ assert calls == [tmp_path, tmp_path / "one", tmp_path / "one" / "two"]
 ##### Statement understanding
 
 Each new directory entry lives in its parent, so the expected list walks the ancestry rather than repeating the final path. This assertion locks the durability chain.
+
+### Basic concepts
+
+A directory stores name-to-inode mappings. Persisting file contents does not automatically persist creation or rename of that name. Cleanup classifies files by authority: temporary names and unreferenced artifacts may be removed; manifest-referenced artifacts must remain.
+
+### Why this mechanism is necessary
+
+Crash safety is an end-to-end ordering property, not merely a call to `fsync` somewhere. Recording the exact parent chain and exercising cleanup protects the subtle filesystem assumptions that ordinary object assertions cannot see.
+
+### Runtime mental model
+
+Tests replace `fsync_directory` with a recorder, perform real directory/storage creation, and assert the ordered parents. A separate restart case plants a stray temporary file, reopens storage, and requires cleanup while the published object remains readable.
+
+### Mechanism blocks
 
 ### Verification evidence
 
@@ -89,19 +91,7 @@ MiniS3 makes publication survive power loss by fsyncing every parent whose direc
 
 父链契约在创建 `one/two/three` 时记录 fsync，要求现有根目录和每个新目录的父级都出现。若只 fsync 最后一层，一个缺失的祖先目录项就可能让整棵子树在重启后不可达。
 
-### 基本概念
-
-目录保存名称到 inode 的映射。持久化文件内容不会自动持久化这个名称的创建或 rename。清理依据权威分类：临时名称和未引用 Artifact 可删除；Manifest 引用的 Artifact 必须保留。
-
-### 为什么需要这个机制
-
-崩溃安全是端到端顺序属性，不是“某处调用了 fsync”就够。记录精确父链并运行清理，能保护普通对象断言看不到的文件系统假设。
-
-### 运行时心智模型
-
-测试用 recorder 替换 `fsync_directory`，执行真实目录/存储创建，再断言父级顺序。另一个重启场景植入 stray 临时文件，重开存储后要求清理它，同时已发布对象仍可读取。
-
-### 机制板块
+### 测试契约
 
 <!-- journey-file: tests/test_storage.py -->
 #### `tests/test_storage.py`
@@ -123,6 +113,20 @@ assert calls == [tmp_path, tmp_path / "one", tmp_path / "one" / "two"]
 ##### 关键语句理解
 
 每个新目录项存放在其父目录中，因此期望列表沿祖先链前进，而不是重复最终路径。这条断言锁定持久化链。
+
+### 基本概念
+
+目录保存名称到 inode 的映射。持久化文件内容不会自动持久化这个名称的创建或 rename。清理依据权威分类：临时名称和未引用 Artifact 可删除；Manifest 引用的 Artifact 必须保留。
+
+### 为什么需要这个机制
+
+崩溃安全是端到端顺序属性，不是“某处调用了 fsync”就够。记录精确父链并运行清理，能保护普通对象断言看不到的文件系统假设。
+
+### 运行时心智模型
+
+测试用 recorder 替换 `fsync_directory`，执行真实目录/存储创建，再断言父级顺序。另一个重启场景植入 stray 临时文件，重开存储后要求清理它，同时已发布对象仍可读取。
+
+### 机制板块
 
 ### 验证证据
 

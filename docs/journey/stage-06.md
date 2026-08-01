@@ -18,6 +18,8 @@ Version listing can expose history, but normal object listing still has no answe
 
 The delimiter contract stores `a.txt`, `raw`, and several `photos/...` keys. Listing the root with delimiter `/` must return two contents plus exactly one `photos/` common prefix. If the implementation walks directories or returns every photo key, the externally visible projection is wrong.
 
+### Test contract
+
 ??? note "File diff: tests/test_listing.py"
     ```diff
     diff --git a/tests/test_listing.py b/tests/test_listing.py

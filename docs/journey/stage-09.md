@@ -17,6 +17,8 @@ Whole-object PUT cannot represent a client uploading large content in independen
 
 The domain contract supplies staged parts and a client completion manifest. Swapping two entries must raise `InvalidPartOrder`; naming the right part with the wrong ETag must raise `InvalidPart`. Without these checks, completion can silently assemble bytes the client did not authorize.
 
+### Test contract
+
 ??? note "File diff: tests/test_multipart_domain.py"
     ```diff
     diff --git a/tests/test_multipart_domain.py b/tests/test_multipart_domain.py

@@ -20,19 +20,7 @@ Stage 03 described publish-last storage, and clean restarts pass. That is not ye
 
 One test injects `before_manifest_publish` after new artifacts are durable. Reopening must still return the old object and remove the unreferenced new artifact. If artifact existence alone controls visibility, the new value leaks despite the manifest never committing it.
 
-### Basic concepts
-
-A linearization point is the instant a concurrent or recovering observer treats an operation as having taken effect. A crash matrix probes both sides: before the point the old state wins; after the point the complete new state wins. There is no legal half-state.
-
-### Why this mechanism is necessary
-
-Documentation and happy-path tests cannot prove crash atomicity. Deliberate process-like interruption turns publication order into executable evidence and prevents a future refactor from moving visibility to artifact creation accidentally.
-
-### Runtime mental model
-
-The test prepares old state, installs `CrashOnce`, attempts a mutation, catches `InjectedCrash`, and constructs a fresh service. It then checks visible data and disk debris. The production code does not change in this stage; the new value is confidence in the existing boundary.
-
-### Mechanism blocks
+### Test contract
 
 <!-- journey-file: tests/test_storage.py -->
 #### `tests/test_storage.py`
@@ -54,6 +42,20 @@ crash_injector=CrashOnce("before_manifest_publish"),
 ##### Statement understanding
 
 The named hook fixes the exact interruption boundary. Assertions after a fresh open can therefore distinguish “artifacts durable” from “state published.”
+
+### Basic concepts
+
+A linearization point is the instant a concurrent or recovering observer treats an operation as having taken effect. A crash matrix probes both sides: before the point the old state wins; after the point the complete new state wins. There is no legal half-state.
+
+### Why this mechanism is necessary
+
+Documentation and happy-path tests cannot prove crash atomicity. Deliberate process-like interruption turns publication order into executable evidence and prevents a future refactor from moving visibility to artifact creation accidentally.
+
+### Runtime mental model
+
+The test prepares old state, installs `CrashOnce`, attempts a mutation, catches `InjectedCrash`, and constructs a fresh service. It then checks visible data and disk debris. The production code does not change in this stage; the new value is confidence in the existing boundary.
+
+### Mechanism blocks
 
 ### Verification evidence
 
@@ -89,19 +91,7 @@ Stage 03 描述了最后发布的存储，正常重启也通过了，但这还�
 
 一条测试在新 Artifact 已持久化后注入 `before_manifest_publish`。重开后必须仍返回旧对象并删除未引用的新 Artifact。如果 Artifact 只要存在就算可见，新值会在 Manifest 从未提交时泄漏。
 
-### 基本概念
-
-线性化点是并发或恢复观察者认为操作已经生效的瞬间。崩溃矩阵探测它两侧：点之前旧状态获胜，点之后完整新状态获胜，不允许半状态。
-
-### 为什么需要这个机制
-
-文档和 happy path 无法证明崩溃原子性。故意中断把发布顺序变成可执行证据，也防止未来重构误把可见性移动到 Artifact 创建时。
-
-### 运行时心智模型
-
-测试准备旧状态、安装 `CrashOnce`、尝试变更、捕获 `InjectedCrash`，再创建全新服务。随后检查可见数据与磁盘残留。本 Stage 不改生产代码，新增的是对现有边界的可信证据。
-
-### 机制板块
+### 测试契约
 
 <!-- journey-file: tests/test_storage.py -->
 #### `tests/test_storage.py`
@@ -123,6 +113,20 @@ crash_injector=CrashOnce("before_manifest_publish"),
 ##### 关键语句理解
 
 命名 hook 固定精确中断边界；全新实例上的断言因而能区分“Artifact 已持久化”和“状态已发布”。
+
+### 基本概念
+
+线性化点是并发或恢复观察者认为操作已经生效的瞬间。崩溃矩阵探测它两侧：点之前旧状态获胜，点之后完整新状态获胜，不允许半状态。
+
+### 为什么需要这个机制
+
+文档和 happy path 无法证明崩溃原子性。故意中断把发布顺序变成可执行证据，也防止未来重构误把可见性移动到 Artifact 创建时。
+
+### 运行时心智模型
+
+测试准备旧状态、安装 `CrashOnce`、尝试变更、捕获 `InjectedCrash`，再创建全新服务。随后检查可见数据与磁盘残留。本 Stage 不改生产代码，新增的是对现有边界的可信证据。
+
+### 机制板块
 
 ### 验证证据
 

@@ -18,6 +18,8 @@ GET 只返回一份被寻址的数据版本，无法解释最新值或 Marker �
 
 暂停删除契约先创建具名历史，再写 `null` 值，最后不带版本 ID 删除。预期历史包含新的 `null` Marker 和旧具名版本，但不再包含被替换的 `null` 数据。简单“列出全部值”会报告错误状态。
 
+### 测试契约
+
 ??? note "文件差异：tests/test_versioning.py"
     ```diff
     diff --git a/tests/test_versioning.py b/tests/test_versioning.py

@@ -23,6 +23,50 @@ The domain can calculate a next Bucket and storage can publish it, but callers s
 
 The restart contract writes two versions, opens a fresh `MiniS3`, reads both bodies, then writes again and requires a new ID. It exposes two distinct bugs at once: state not published to disk, or the recovered sequence counter reusing an old identity.
 
+### Test contract
+
+<!-- journey-file: tests/test_storage.py -->
+#### `tests/test_storage.py`
+
+##### What it is and why it appears
+
+These contracts exercise persistence through the public service, including restart, crash injection, bucket deletion, and sequence recovery.
+
+##### Runtime role
+
+They detect gaps between in-memory success and reopened state. This is where orchestration and storage meet.
+
+##### Key code
+
+```python
+assert reopened.get_object("b", "k", version_id=first.version_id).body == b"one"
+```
+
+##### Statement understanding
+
+Addressing the old version after constructing `reopened` proves both the version history and its bytes survived publication; checking only the latest value would be weaker.
+
+<!-- journey-file: tests/test_versioning.py -->
+#### `tests/test_versioning.py`
+
+##### What it is and why it appears
+
+This file locks the full public versioning state machine and DELETE meanings.
+
+##### Runtime role
+
+It distinguishes unversioned deletion, marker creation, specific-version deletion, latest-marker 404 behavior, and retained named history.
+
+##### Key code
+
+```python
+assert bucket.get("k", historical.version_id) == historical
+```
+
+##### Statement understanding
+
+The defensive case proves an unversioned delete cannot erase a named version already present in recovered or externally constructed history.
+
 ### Basic concepts
 
 An application service coordinates existing owners; it does not absorb their responsibilities. Bucket still decides legal history, DiskStorage still decides publication and recovery, and `MiniS3` owns the public operation, lock, lookup, and ordering between them.
@@ -76,48 +120,6 @@ It establishes the intended entry point; callers no longer need to assemble Buck
 
 Public export is API wiring, not proof of runtime behavior. The service tests below provide that evidence.
 
-<!-- journey-file: tests/test_storage.py -->
-#### `tests/test_storage.py`
-
-##### What it is and why it appears
-
-These contracts exercise persistence through the public service, including restart, crash injection, bucket deletion, and sequence recovery.
-
-##### Runtime role
-
-They detect gaps between in-memory success and reopened state. This is where orchestration and storage meet.
-
-##### Key code
-
-```python
-assert reopened.get_object("b", "k", version_id=first.version_id).body == b"one"
-```
-
-##### Statement understanding
-
-Addressing the old version after constructing `reopened` proves both the version history and its bytes survived publication; checking only the latest value would be weaker.
-
-<!-- journey-file: tests/test_versioning.py -->
-#### `tests/test_versioning.py`
-
-##### What it is and why it appears
-
-This file locks the full public versioning state machine and DELETE meanings.
-
-##### Runtime role
-
-It distinguishes unversioned deletion, marker creation, specific-version deletion, latest-marker 404 behavior, and retained named history.
-
-##### Key code
-
-```python
-assert bucket.get("k", historical.version_id) == historical
-```
-
-##### Statement understanding
-
-The defensive case proves an unversioned delete cannot erase a named version already present in recovered or externally constructed history.
-
 ### Verification evidence
 
 Run `uv run pytest -q $(cat journey/stages/04-object-service/tests.txt)`. Fifteen cases cover service orchestration and version behavior. They do not yet prove listing projections or injected crash outcomes around the manifest rename.
@@ -154,6 +156,50 @@ The service owns orchestration and locking; Bucket owns domain transitions; stor
 ### 先看会坏在哪里
 
 重启契约写入两个版本，再打开全新的 `MiniS3` 读取两份 Body，随后继续写入并要求新 ID。它同时暴露两类错误：状态没有真正发布到磁盘，或者恢复后的序列计数器复用了旧身份。
+
+### 测试契约
+
+<!-- journey-file: tests/test_storage.py -->
+#### `tests/test_storage.py`
+
+##### 是什么，为什么现在需要
+
+这些契约通过公开服务检查持久化，包括重启、崩溃注入、Bucket 删除和序列恢复。
+
+##### 在运行时做什么
+
+它们捕获“内存成功但重开失败”的缺口，是编排层与存储层相遇的位置。
+
+##### 关键代码
+
+```python
+assert reopened.get_object("b", "k", version_id=first.version_id).body == b"one"
+```
+
+##### 关键语句理解
+
+在新实例上按旧版本 ID 读取，证明版本历史和字节都跨发布保存；只检查最新值证据更弱。
+
+<!-- journey-file: tests/test_versioning.py -->
+#### `tests/test_versioning.py`
+
+##### 是什么，为什么现在需要
+
+这里锁定完整公开版本状态机和 DELETE 含义。
+
+##### 在运行时做什么
+
+它区分未版本化删除、Marker 创建、指定版本删除、最新 Marker 导致 404，以及具名历史保留。
+
+##### 关键代码
+
+```python
+assert bucket.get("k", historical.version_id) == historical
+```
+
+##### 关键语句理解
+
+这个防御性场景证明：即使恢复或外部构造中出现具名历史，未版本化删除也不能把它擦掉。
 
 ### 基本概念
 
@@ -207,48 +253,6 @@ self._buckets[bucket] = candidate
 ##### 关键语句理解
 
 公开导出只是 API 接线，不证明运行时行为；下面的服务测试才提供证据。
-
-<!-- journey-file: tests/test_storage.py -->
-#### `tests/test_storage.py`
-
-##### 是什么，为什么现在需要
-
-这些契约通过公开服务检查持久化，包括重启、崩溃注入、Bucket 删除和序列恢复。
-
-##### 在运行时做什么
-
-它们捕获“内存成功但重开失败”的缺口，是编排层与存储层相遇的位置。
-
-##### 关键代码
-
-```python
-assert reopened.get_object("b", "k", version_id=first.version_id).body == b"one"
-```
-
-##### 关键语句理解
-
-在新实例上按旧版本 ID 读取，证明版本历史和字节都跨发布保存；只检查最新值证据更弱。
-
-<!-- journey-file: tests/test_versioning.py -->
-#### `tests/test_versioning.py`
-
-##### 是什么，为什么现在需要
-
-这里锁定完整公开版本状态机和 DELETE 含义。
-
-##### 在运行时做什么
-
-它区分未版本化删除、Marker 创建、指定版本删除、最新 Marker 导致 404，以及具名历史保留。
-
-##### 关键代码
-
-```python
-assert bucket.get("k", historical.version_id) == historical
-```
-
-##### 关键语句理解
-
-这个防御性场景证明：即使恢复或外部构造中出现具名历史，未版本化删除也不能把它擦掉。
 
 ### 验证证据
 

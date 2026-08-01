@@ -21,6 +21,29 @@ Parts are durable but intentionally invisible. Completion must turn selected pri
 
 The main contract uploads two parts and confirms List is empty before completion. After completion it requires body `abcend`, a two-part composite ETag different from the whole-body ETag, and exactly one visible key. Any early ObjectRecord or wrong ETag is immediately visible.
 
+### Test contract
+
+<!-- journey-file: tests/test_multipart.py -->
+#### `tests/test_multipart.py`
+
+##### What it is and why it appears
+
+Four cases cover invisibility until completion, same-number replacement, manifest validation, abort, and restart of unfinished staging.
+
+##### Runtime role
+
+They exercise the complete public lifecycle and inspect both visible objects and private upload behavior.
+
+##### Key code
+
+```python
+assert completed.etag != content_etag(completed.body)
+```
+
+##### Statement understanding
+
+This prevents an easy but incorrect implementation from hashing assembled bytes as a normal PUT. Multipart identity is derived from part digests.
+
 ### Basic concepts
 
 Completion is one ordered transaction at the service boundary: reload staging, validate the client's receipt list, concatenate selected bytes, reuse Bucket PUT with the composite ETag, publish the candidate Bucket, then remove staging.
@@ -60,27 +83,6 @@ self._storage.remove_multipart_upload(bucket, key, upload_id)
 
 Cleanup is last. If publication fails, the upload remains retryable; once publication succeeds, removing staging cannot make the committed object disappear.
 
-<!-- journey-file: tests/test_multipart.py -->
-#### `tests/test_multipart.py`
-
-##### What it is and why it appears
-
-Four cases cover invisibility until completion, same-number replacement, manifest validation, abort, and restart of unfinished staging.
-
-##### Runtime role
-
-They exercise the complete public lifecycle and inspect both visible objects and private upload behavior.
-
-##### Key code
-
-```python
-assert completed.etag != content_etag(completed.body)
-```
-
-##### Statement understanding
-
-This prevents an easy but incorrect implementation from hashing assembled bytes as a normal PUT. Multipart identity is derived from part digests.
-
 ### Verification evidence
 
 Run `uv run pytest -q $(cat journey/stages/11-multipart-complete/tests.txt)`. The cases prove normal completion and validation. Crash recovery on either side of publication is isolated in Stage 12.
@@ -115,6 +117,29 @@ Part 已经持久但刻意不可见。完成操作必须把选中的私有 Part 
 ### 先看会坏在哪里
 
 主契约上传两个 Part，并在完成前确认 List 为空。完成后要求 Body 为 `abcend`、ETag 是不同于 whole-body ETag 的两 Part 组合 ETag，并且只出现一个可见 Key。提前创建 ObjectRecord 或算错 ETag 都会直接暴露。
+
+### 测试契约
+
+<!-- journey-file: tests/test_multipart.py -->
+#### `tests/test_multipart.py`
+
+##### 是什么，为什么现在需要
+
+四个场景覆盖完成前不可见、同编号替换、清单验证、Abort 和未完成上传重启。
+
+##### 在运行时做什么
+
+它们运行完整公开生命周期，同时观察可见对象与私有上传行为。
+
+##### 关键代码
+
+```python
+assert completed.etag != content_etag(completed.body)
+```
+
+##### 关键语句理解
+
+这防止实现偷懒地把组装 Body 当普通 PUT 计算哈希；Multipart 身份来自 Part 摘要。
 
 ### 基本概念
 
@@ -154,27 +179,6 @@ self._storage.remove_multipart_upload(bucket, key, upload_id)
 ##### 关键语句理解
 
 清理必须最后执行。发布失败时上传仍可重试；发布成功后再删 Staging，也不会让已提交对象消失。
-
-<!-- journey-file: tests/test_multipart.py -->
-#### `tests/test_multipart.py`
-
-##### 是什么，为什么现在需要
-
-四个场景覆盖完成前不可见、同编号替换、清单验证、Abort 和未完成上传重启。
-
-##### 在运行时做什么
-
-它们运行完整公开生命周期，同时观察可见对象与私有上传行为。
-
-##### 关键代码
-
-```python
-assert completed.etag != content_etag(completed.body)
-```
-
-##### 关键语句理解
-
-这防止实现偷懒地把组装 Body 当普通 PUT 计算哈希；Multipart 身份来自 Part 摘要。
 
 ### 验证证据
 

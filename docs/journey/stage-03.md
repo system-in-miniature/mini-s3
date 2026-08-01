@@ -18,6 +18,8 @@ Stage 02 owns correct in-memory histories, but a process exit loses all of them.
 
 The storage contract writes a bucket, creates a new `DiskStorage` over the same directory, and expects the exact body, ETag, version, and maximum sequence back. A missing fsync or publish order may pass an in-process read yet fail this restart observation.
 
+### Test contract
+
 ??? note "File diff: tests/test_storage_boundary.py"
     ```diff
     diff --git a/tests/test_storage_boundary.py b/tests/test_storage_boundary.py

@@ -18,6 +18,8 @@ Version 已有创建时间，但没有任何机制让它们过期。把时间读
 
 纯边界契约在时间 `9.999` 与 `10.0` 对同一历史求值。阈值前不能有 action，到达时必须出现。隐藏 wall clock 或使用严格 `>` 会让边界 flaky 或晚一个 tick。
 
+### 测试契约
+
 ??? note "文件差异：tests/test_lifecycle.py"
     ```diff
     diff --git a/tests/test_lifecycle.py b/tests/test_lifecycle.py
