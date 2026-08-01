@@ -24,10 +24,156 @@ class RenderPagesTest(unittest.TestCase):
         self.assertLess(paths.index("src/minis3/model.py"), paths.index("tests/test_model.py"))
         self.assertLess(paths.index("tests/test_model.py"), paths.index("pyproject.toml"))
 
+    def test_authored_file_sections_bind_exactly_to_patch_paths(self) -> None:
+        for card in self.cards:
+            expected = {
+                item.path for item in render_pages.split_file_patches(card.patch)
+            }
+            for chinese, body in ((False, card.english), (True, card.chinese)):
+                with self.subTest(stage=card.number, chinese=chinese):
+                    lesson = render_pages.parse_localized_lesson(
+                        body,
+                        card_number=card.number,
+                        chinese=chinese,
+                        file_patches=render_pages.split_file_patches(card.patch),
+                    )
+                    paths = [item.path for item in lesson.files]
+                    self.assertEqual(set(paths), expected)
+                    self.assertEqual(len(paths), len(set(paths)))
+
+    def test_required_explanation_precedes_files_and_verification_follows(self) -> None:
+        headings = (
+            (
+                False,
+                "### The problem at this point",
+                "### Failure preview",
+                "### Basic concepts",
+                "### Why this mechanism is necessary",
+                "### Runtime mental model",
+                "### File-by-file walkthrough",
+                "### Verification evidence",
+                "### Durable takeaways",
+            ),
+            (
+                True,
+                "### 当前遇到的问题",
+                "### 先看会坏在哪里",
+                "### 基本概念",
+                "### 为什么需要这个机制",
+                "### 运行时心智模型",
+                "### 逐文件走读",
+                "### 验证证据",
+                "### 需要真正记住的内容",
+            ),
+        )
+        for card in self.cards:
+            for chinese, *ordered in headings:
+                body = card.chinese if chinese else card.english
+                with self.subTest(stage=card.number, chinese=chinese):
+                    positions = [body.index(heading) for heading in ordered]
+                    self.assertEqual(positions, sorted(positions))
+
+    def test_key_code_must_be_short_and_match_its_file_patch(self) -> None:
+        file_patch = render_pages.FilePatch(
+            path="src/minis3/example.py",
+            patch=(
+                "diff --git a/src/minis3/example.py b/src/minis3/example.py\n"
+                "new file mode 100644\n"
+                "--- /dev/null\n"
+                "+++ b/src/minis3/example.py\n"
+                "@@ -0,0 +1,2 @@\n"
+                "+def answer() -> int:\n"
+                "+    return 42\n"
+            ),
+            role_rank=0,
+            changed_symbols=("answer",),
+        )
+        valid = """### Goal
+
+### Deliverable files / 交付文件
+
+### The problem at this point
+
+Problem.
+
+### Failure preview
+
+One failing behavior.
+
+### Basic concepts
+
+Concepts.
+
+### Why this mechanism is necessary
+
+Necessity.
+
+### Runtime mental model
+
+Flow.
+
+### File-by-file walkthrough
+
+<!-- journey-file: src/minis3/example.py -->
+#### `src/minis3/example.py`
+
+##### Key code
+
+```python
+def answer() -> int:
+    return 42
+```
+
+### Verification evidence
+
+Evidence.
+
+### Durable takeaways
+
+Takeaway.
+
+### Explain it in your own words
+
+Summary.
+
+### Textbook
+
+Book.
+"""
+        lesson = render_pages.parse_localized_lesson(
+            valid,
+            card_number=99,
+            chinese=False,
+            file_patches=[file_patch],
+        )
+        self.assertEqual(lesson.files[0].code_slices, ("def answer() -> int:\n    return 42",))
+
+        missing = valid.replace("return 42", "return 41")
+        with self.assertRaisesRegex(ValueError, "stage-99.*src/minis3/example.py"):
+            render_pages.parse_localized_lesson(
+                missing,
+                card_number=99,
+                chinese=False,
+                file_patches=[file_patch],
+            )
+
+        long_slice = "\n".join(f"line_{index}" for index in range(16))
+        too_long = valid.replace(
+            "def answer() -> int:\n    return 42",
+            long_slice,
+        )
+        with self.assertRaisesRegex(ValueError, "at most 15"):
+            render_pages.parse_localized_lesson(
+                too_long,
+                card_number=99,
+                chinese=False,
+                file_patches=[file_patch],
+            )
+
     def test_stage_page_has_one_localized_walkthrough_per_changed_file(self) -> None:
         expectations = (
-            (False, "### File-by-file diff walkthrough", "File diff: "),
-            (True, "### 逐文件 Diff 走读", "文件差异："),
+            (False, "### File-by-file walkthrough", "File diff: "),
+            (True, "### 逐文件走读", "文件差异："),
         )
         for chinese, heading, label in expectations:
             with self.subTest(chinese=chinese):
@@ -43,17 +189,17 @@ class RenderPagesTest(unittest.TestCase):
                 self.assertIn("Complete reference patch / 完整参考补丁", page)
                 self.assertEqual(page.count("diff --git "), self.stage_one.patch.count("diff --git "))
 
-    def test_all_stages_have_bilingual_mechanism_source_content(self) -> None:
+    def test_all_stages_have_bilingual_authored_teaching_content(self) -> None:
         self.assertEqual(len(self.cards), 15)
         for card in self.cards:
             with self.subTest(stage=card.number, language="en"):
-                self.assertIn("### Mechanism walkthrough", card.english)
-                self.assertIn("#### Ownership and flow", card.english)
-                self.assertIn("#### Failure and debugging", card.english)
+                self.assertIn("### Basic concepts", card.english)
+                self.assertIn("### Why this mechanism is necessary", card.english)
+                self.assertIn("##### Statement understanding", card.english)
             with self.subTest(stage=card.number, language="zh"):
-                self.assertIn("### 机制走读", card.chinese)
-                self.assertIn("#### 所有权与数据流", card.chinese)
-                self.assertIn("#### 失败与排查", card.chinese)
+                self.assertIn("### 基本概念", card.chinese)
+                self.assertIn("### 为什么需要这个机制", card.chinese)
+                self.assertIn("##### 关键语句理解", card.chinese)
 
     def test_every_implementation_stage_adds_executable_evidence(self) -> None:
         for card in self.cards[:-1]:
@@ -64,25 +210,25 @@ class RenderPagesTest(unittest.TestCase):
                     f"stage-{card.number:02d} changes behavior without stage-owned tests",
                 )
 
-    def test_pages_close_with_verification_code_reading_and_interview_sections(self) -> None:
+    def test_pages_close_with_verification_takeaways_and_learner_explanation(self) -> None:
         expectations = (
             (
                 False,
                 "### Verification evidence",
-                "### Code-reading check",
-                "### Interview-ready summary",
+                "### Durable takeaways",
+                "### Explain it in your own words",
             ),
-            (True, "### 验证证据", "### 代码阅读检查", "### 面试表达"),
+            (True, "### 验证证据", "### 需要真正记住的内容", "### 用自己的话讲清楚"),
         )
         for card in self.cards:
-            for chinese, verification, reading, interview in expectations:
+            for chinese, verification, takeaways, explanation in expectations:
                 with self.subTest(stage=card.number, chinese=chinese):
                     page = render_pages.render_card(card, chinese=chinese)
                     self.assertIn(verification, page)
-                    self.assertIn(reading, page)
-                    self.assertIn(interview, page)
-                    self.assertLess(page.index(verification), page.index(reading))
-                    self.assertLess(page.index(reading), page.index(interview))
+                    self.assertIn(takeaways, page)
+                    self.assertIn(explanation, page)
+                    self.assertLess(page.index(verification), page.index(takeaways))
+                    self.assertLess(page.index(takeaways), page.index(explanation))
                     self.assertNotIn("do not copy the patch first", page.lower())
                     self.assertNotIn("不要先复制补丁", page)
 
@@ -95,6 +241,19 @@ class RenderPagesTest(unittest.TestCase):
                     self.assertEqual(page.count(label), len(expected_paths))
                     for path in expected_paths:
                         self.assertEqual(page.count(f"{label}{path}"), 1)
+
+    def test_rendered_pages_do_not_use_generic_teaching_boilerplate(self) -> None:
+        forbidden = (
+            "Supporting project wiring for this stage.",
+            "本阶段所需的项目支撑接线。",
+            "Which test would fail first",
+            "如果绕过新边界，哪个测试会最先失败",
+        )
+        for card in self.cards:
+            for chinese in (False, True):
+                page = render_pages.render_card(card, chinese=chinese)
+                for phrase in forbidden:
+                    self.assertNotIn(phrase, page)
 
 
 if __name__ == "__main__":
