@@ -8,6 +8,16 @@ Turn all 15 MiniS3 Journey stages from generated diff indexes into complete brow
 
 The browser lesson does not have a live tutor performing MCQ screening or adapting questions. It therefore must establish the learner's mental model directly in the authored explanation instead of asking the learner to infer missing concepts.
 
+## Three Learning Modes
+
+MiniS3 presents three distinct paths:
+
+1. **Mechanism Tutorial** teaches the system by topic through the original tutorial chapters.
+2. **Self-Guided Rebuild** is the 15-Stage browser Journey defined by this design.
+3. **Agent-Guided Rebuild** prepares a Stage N-1 CLI workspace with `AGENTS.md` and agent-only Stage N context for adaptive questions, implementation, guided code reading, and parity verification.
+
+The Agent-Guided web page is only a usage tutorial. It must not duplicate Stage explanations or become a fourth source of course content. Interactive behavior belongs to `AGENTS.md`; Stage-specific facts remain in `goal.md`, `stage.patch`, and `tests.txt`.
+
 ## Scope
 
 This redesign applies to every English and Chinese Journey page from Stage 01 through Stage 15.
@@ -64,12 +74,13 @@ Every localized stage lesson uses this order:
 
 1. Goal and deliverable files.
 2. The problem at this point in the journey.
-3. Basic concepts.
-4. Why the mechanism is necessary.
-5. Runtime mental model and failure path.
-6. File-by-file walkthrough.
-7. Verification evidence.
-8. Durable takeaways and interview-ready expression.
+3. One high-signal failure preview from the stage's executable contracts.
+4. Basic concepts.
+5. Why the mechanism is necessary.
+6. Runtime mental model and failure path.
+7. File-by-file walkthrough.
+8. Verification evidence.
+9. Durable takeaways and an explanation in the learner's own words.
 
 ## Section Contract
 
@@ -82,6 +93,12 @@ Explain what the previous stage can already do, the concrete limitation now enco
 Define each new term in project language. For each important concept, state what it is, what it is not when a likely misconception exists, and give a small MiniS3-specific example.
 
 The section is explanatory, not a hidden quiz. It cannot depend on the learner opening the patch first.
+
+### Failure preview
+
+Select one stage-owned test scenario that makes the current limitation concrete. Show the input, failure, crash boundary, or conflicting outcomes in a small excerpt or compact scenario, then explain which behavior the contract locks down.
+
+This is executable motivation, not a full RED-GREEN tutorial. Do not move the entire test suite ahead of the lesson or teach testing-framework mechanics here. The complete evidence remains in the verification section after the walkthrough.
 
 ### Why this mechanism is necessary
 
@@ -122,7 +139,9 @@ The lesson then closes with:
 
 - the mechanism and invariant the learner should retain;
 - likely confusions already answered in prose;
-- a concise interview-ready explanation tied to the implementation.
+- a concise explanation the learner can reproduce in their own words, organized as problem, mechanism, constraint, and failure consequence.
+
+This closing structure may reuse the compression discipline of interview practice, but the Journey is a learning model rather than an interview-preparation product. Learner-facing headings and prose must not frame the lesson as interview training.
 
 Static optional reveal blocks may summarize an answer, but the page must not rely on an unanswered MCQ or open question to introduce required knowledge.
 

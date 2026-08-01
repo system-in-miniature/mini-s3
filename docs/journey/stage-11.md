@@ -2,34 +2,58 @@
 
 ### Goal
 
-Validate an ordered client manifest, assemble bytes, and publish exactly one visible object.
+Validate an ordered completion manifest, assemble staged bytes, and publish exactly one visible object.
 
 ### Deliverable files / 交付文件
 
 - `src/minis3/store.py`
 - `tests/test_multipart.py`
 
-### Mechanism walkthrough
+### The problem at this point
 
-#### Ownership and flow
+Parts are durable but intentionally invisible. Completion must turn selected private parts into one normal version without exposing intermediate bytes, accepting stale receipts, or deleting retryable staging before publication succeeds.
 
-Completion loads private parts, validates the ordered client manifest, concatenates bytes, publishes once through normal `Bucket.put`, then removes staging.
+### Failure preview
 
-#### Failure and debugging
+The main contract uploads two parts and confirms List is empty before completion. After completion it requires body `abcend`, a two-part composite ETag different from the whole-body ETag, and exactly one visible key. Any early ObjectRecord or wrong ETag is immediately visible.
 
-Inspect validation before assembly and manifest publication before cleanup. A visible partial object means publication was split; lost retry state means cleanup happened too early.
+### Basic concepts
 
-### File-by-file diff walkthrough
+Completion is one ordered transaction at the service boundary: reload staging, validate the client's receipt list, concatenate selected bytes, reuse Bucket PUT with the composite ETag, publish the candidate Bucket, then remove staging.
 
-Read by runtime responsibility, not patch storage order. Every block comes directly from the canonical `stage.patch`.
+Part replacement and completion are separate. Re-uploading part 1 changes the current receipt; a client that completes with the old ETag must fail rather than assemble unexpected bytes.
+
+### Why this mechanism is necessary
+
+Publishing each part would violate whole-object visibility. Removing staging before the manifest commits destroys retryability. Reusing the established Bucket and manifest path keeps multipart from creating a weaker second consistency model.
+
+### Runtime mental model
+
+`complete_multipart_upload` holds the service lock, loads upload plus parts, calls pure `validate_completion`, joins bodies, mutates a candidate Bucket with composite ETag/provenance, persists it, swaps it into memory, and only then removes the upload directory.
+
+### File-by-file walkthrough
 
 #### `src/minis3/store.py`
 
-Application service coordinating domain and persistence.
+##### What it is and why it appears
 
-Receives public calls, owns locking and orchestration, then delegates to domain, projection, and storage boundaries.
+The service gains the completion orchestration that connects private staging to the existing object publication path.
 
-**Changed anchors:** `complete_multipart_upload`, `abort_multipart_upload`
+##### Runtime role
+
+It owns the ordering across storage load, pure validation, Bucket mutation, manifest publication, and staging cleanup.
+
+##### Key code
+
+```python
+self._storage.persist_bucket(candidate)
+self._buckets[bucket] = candidate
+self._storage.remove_multipart_upload(bucket, key, upload_id)
+```
+
+##### Statement understanding
+
+Cleanup is last. If publication fails, the upload remains retryable; once publication succeeds, removing staging cannot make the committed object disappear.
 
 ??? note "File diff: src/minis3/store.py"
     ```diff
@@ -81,11 +105,23 @@ Receives public calls, owns locking and orchestration, then delegates to domain,
 
 #### `tests/test_multipart.py`
 
-Executable proof of the stage behavior.
+##### What it is and why it appears
 
-Calls the learner-visible boundary and records the expected state or failure; start here only when verifying the mechanism.
+Four cases cover invisibility until completion, same-number replacement, manifest validation, abort, and restart of unfinished staging.
 
-**Changed anchors:** `_md5`, `test_multipart_is_invisible_until_ordered_atomic_complete`, `test_uploading_same_part_number_replaces_the_staged_part`, `test_complete_validates_order_presence_etag_and_nonfinal_size`, `test_abort_removes_upload_and_restart_preserves_unfinished_parts`, `test_upload_identity_and_part_number_are_validated`
+##### Runtime role
+
+They exercise the complete public lifecycle and inspect both visible objects and private upload behavior.
+
+##### Key code
+
+```python
+assert completed.etag != content_etag(completed.body)
+```
+
+##### Statement understanding
+
+This prevents an easy but incorrect implementation from hashing assembled bytes as a normal PUT. Multipart identity is derived from part digests.
 
 ??? note "File diff: tests/test_multipart.py"
     ```diff
@@ -207,27 +243,15 @@ Calls the learner-visible boundary and records the expected state or failure; st
 
 ### Verification evidence
 
-`uv run pytest -q $(cat journey/stages/11-multipart-complete/tests.txt)`
+Run `uv run pytest -q $(cat journey/stages/11-multipart-complete/tests.txt)`. The cases prove normal completion and validation. Crash recovery on either side of publication is isolated in Stage 12.
 
-This stage adds 4 executable case(s), anchored at `test_multipart_is_invisible_until_ordered_atomic_complete`, `test_uploading_same_part_number_replaces_the_staged_part`, `test_complete_validates_order_presence_etag_and_nonfinal_size`, `test_abort_removes_upload_and_restart_preserves_unfinished_parts`. Run them after the mechanism walkthrough; the cumulative gate also reruns every earlier stage contract.
+### Durable takeaways
 
-### Concept check
+Completion validates before mutation, publishes one candidate object, and cleans staging only after commit. Multipart ETag remains distinct from whole-body ETag.
 
-Which invariant must remain true after this stage?
+### Explain it in your own words
 
-??? note "Answer"
-    Completion becomes visible only through the same bucket-manifest publication boundary as PUT.
-
-### Code-reading check
-
-Start at `complete_multipart_upload` in `src/minis3/store.py`: what state or value enters this boundary, and which owner consumes the result next?
-
-??? note "Answer"
-    Receives public calls, owns locking and orchestration, then delegates to domain, projection, and storage boundaries.
-
-### Interview-ready summary
-
-Completion becomes visible only through the same bucket-manifest publication boundary as PUT.
+MiniS3 treats completion as the bridge from private staged parts to one ordinary visible version. It validates the client's exact ordered receipts, assembles bytes, uses the established manifest publication boundary, and retains staging whenever publication has not committed.
 
 ### Textbook
 

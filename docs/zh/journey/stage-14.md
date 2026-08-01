@@ -2,7 +2,7 @@
 
 ### 目标
 
-把纯过期决策与显式、注入时钟的变更 tick 分离。
+把纯过期决策与由注入时钟驱动的显式变更 tick 分开。
 
 ### 交付文件
 
@@ -11,27 +11,49 @@
 - `src/minis3/store.py`
 - `tests/test_lifecycle.py`
 
-### 机制走读
+### 当前遇到的问题
 
-#### 所有权与数据流
+Version 已有创建时间，但没有任何机制让它们过期。把时间读取藏进策略或后台线程，会让边界行为不确定，并把“应该发生什么”和“现在执行”混在一起。
 
-`evaluate_expiration` 是针对带时间戳版本的纯策略；`MiniS3.lifecycle_tick` 注入时间、在锁内执行动作并持久化结果历史。
+### 先看会坏在哪里
 
-#### 失败与排查
+纯边界契约在时间 `9.999` 与 `10.0` 对同一历史求值。阈值前不能有 action，到达时必须出现。隐藏 wall clock 或使用严格 `>` 会让边界 flaky 或晚一个 tick。
 
-先单独运行纯评估器；候选错误属于策略或时间问题，动作正确但存储状态错误属于变更或持久化问题。
+### 基本概念
 
-### 逐文件 Diff 走读
+策略求值是不可变历史、规则和显式 `now` 的纯计算，输出 `LifecycleAction` 决策。`lifecycle_tick` 是独立变更边界，在服务锁内应用决策，并只在状态变化时持久化。
 
-按运行时职责阅读，而不是按补丁存储顺序阅读。每个代码块都直接来自 canonical `stage.patch`。
+当前数据版本过期会创建删除标记，使旧历史继续隐藏；非当前版本过期则物理移除被寻址的历史项。
+
+### 为什么需要这个机制
+
+纯求值可无副作用重复推理；注入 clock 让测试和重放确定；显式 tick 还明确了锁与持久化义务从哪里开始。
+
+### 运行时心智模型
+
+调用方用规则调用 `lifecycle_tick`。服务取得注入时间、深拷贝 Bucket、调用 `evaluate_expiration`、通过 Bucket 删除语义应用每个 action；有 action 时持久化并替换候选，最后返回 action 列表。
+
+### 逐文件走读
 
 #### `src/minis3/lifecycle.py`
 
-纯生命周期过期策略。
+##### 是什么，为什么现在需要
 
-由 `MiniS3` 作为策略函数调用；接收显式值并返回由服务执行的决策。
+这个纯策略模块定义过期规则、action 值和决策求值。
 
-**变化锚点:** `ExpirationRule`, `__post_init__`, `LifecycleActionKind`, `LifecycleAction`, `_old_enough`, `evaluate_expiration`
+##### 在运行时做什么
+
+它读取历史并返回应该改变什么，从不调用存储或修改 Bucket records。
+
+##### 关键代码
+
+```python
+return threshold is not None and now - created_at >= threshold
+```
+
+##### 关键语句理解
+
+`>=` 让策略边界包含阈值且确定；`None` 表示该类别没有过期规则，不是年龄零。
 
 ??? note "文件差异：src/minis3/lifecycle.py"
     ```diff
@@ -148,11 +170,23 @@
 
 #### `src/minis3/store.py`
 
-协调领域逻辑与持久化的应用服务。
+##### 是什么，为什么现在需要
 
-接收公开调用，拥有加锁与编排，再委托给领域、投影和存储边界。
+服务增加把纯 action 转成持久状态迁移的显式 tick。
 
-**变化锚点:** `lifecycle_tick`
+##### 在运行时做什么
+
+它在锁内提供一个时间值与稳定快照，再复用 Bucket 删除和候选发布。
+
+##### 关键代码
+
+```python
+self._storage.persist_bucket(candidate)
+```
+
+##### 关键语句理解
+
+策略输出本身不改变任何状态。持久化候选才让过期跨重启保存；无 action tick 不必发布。
 
 ??? note "文件差异：src/minis3/store.py"
     ```diff
@@ -366,11 +400,17 @@
 
 #### `src/minis3/__init__.py`
 
-受支持的包级公开接口。
+##### 是什么，为什么现在需要
 
-由用户导入触达；接线错误会在运行时流程开始前表现为名称缺失。
+规则与 action 类型加入公开学习 API。
 
-**变化锚点:** 配置、导出或文档变化
+##### 在运行时做什么
+
+调用方可构造策略、检查返回决策，而不依赖生命周期内部实现。
+
+##### 关键语句理解
+
+包导出声明式值，实际变更仍是 `MiniS3` 操作。
 
 ??? note "文件差异：src/minis3/__init__.py"
     ```diff
@@ -422,11 +462,23 @@
 
 #### `tests/test_lifecycle.py`
 
-本阶段行为的可执行证明。
+##### 是什么，为什么现在需要
 
-调用学习者可见边界并记录预期状态或失败；验证机制时再从这里进入。
+四条契约覆盖纯过滤/边界、当前与非当前迁移、注入时间/重启和非法规则。
 
-**变化锚点:** `ManualClock`, `__init__`, `__call__`, `test_rule_evaluation_is_pure_prefix_filtered_and_boundary_inclusive`, `test_tick_expires_current_to_marker_and_noncurrent_physically`, `test_tick_uses_injected_time_and_persists_timestamps_across_restart`, `test_expiration_rule_rejects_empty_or_negative_policy`
+##### 在运行时做什么
+
+`ManualClock` 让测试主动推进时间，证明持久时间戳，而不是等待 wall time。
+
+##### 关键代码
+
+```python
+assert evaluate_expiration(snapshot, [rule], now=9.999) == ()
+```
+
+##### 关键语句理解
+
+这是刚到阈值前的边界；与 `10.0` 断言成对后，精确证明 inclusive，而不是只测明显过期对象。
 
 ??? note "文件差异：tests/test_lifecycle.py"
     ```diff
@@ -550,27 +602,15 @@
 
 ### 验证证据
 
-`uv run pytest -q $(cat journey/stages/14-lifecycle-tick/tests.txt)`
+运行 `uv run pytest -q $(cat journey/stages/14-lifecycle-tick/tests.txt)`。用例证明纯策略、显式变更、时间注入、重启持久化与规则校验。
 
-本阶段新增 4 个可执行用例，入口为 `test_rule_evaluation_is_pure_prefix_filtered_and_boundary_inclusive`、`test_tick_expires_current_to_marker_and_noncurrent_physically`、`test_tick_uses_injected_time_and_persists_timestamps_across_restart`、`test_expiration_rule_rejects_empty_or_negative_policy`。它们在机制走读之后运行，并与此前 Stage 的用例一起守住累计行为。
+### 需要真正记住的内容
 
-### 概念检查
+纯计算决定、显式 tick 变更、时间可注入、只持久化已应用 action；当前过期建 Marker，非当前过期删除一个历史版本。
 
-本阶段完成后，哪条不变量必须保持成立？
+### 用自己的话讲清楚
 
-??? note "答案"
-    当评估保持纯函数、时间只从服务边界注入时，生命周期行为才可确定复现。
-
-### 代码阅读检查
-
-从 `src/minis3/lifecycle.py` 的 `ExpirationRule` 开始：进入这个边界的状态或值是什么，结果又交给哪个所有者？
-
-??? note "答案"
-    由 `MiniS3` 作为策略函数调用；接收显式值并返回由服务执行的决策。
-
-### 面试表达
-
-当评估保持纯函数、时间只从服务边界注入时，生命周期行为才可确定复现。
+MiniS3 把生命周期策略和执行分开。纯函数根据历史、规则与显式时钟决定 action；带锁 tick 通过已有版本语义应用并发布结果，使时间行为确定且可恢复。
 
 ### 教材
 

@@ -2,7 +2,7 @@
 
 ### Goal
 
-Separate pure expiration decisions from an explicit, injected-clock mutation tick.
+Separate pure expiration decisions from an explicit mutation tick driven by an injected clock.
 
 ### Deliverable files / 交付文件
 
@@ -11,27 +11,49 @@ Separate pure expiration decisions from an explicit, injected-clock mutation tic
 - `src/minis3/store.py`
 - `tests/test_lifecycle.py`
 
-### Mechanism walkthrough
+### The problem at this point
 
-#### Ownership and flow
+Versions now carry creation times, but nothing expires them. Hiding time reads inside policy or background threads would make boundary behavior nondeterministic and combine “what should happen” with “apply it now.”
 
-`evaluate_expiration` is a pure policy over timestamped versions; `MiniS3.lifecycle_tick` injects time, applies returned actions under lock, and persists the resulting histories.
+### Failure preview
 
-#### Failure and debugging
+The pure-boundary contract evaluates the same history at time `9.999` and `10.0`. No action is allowed before the threshold; the action appears exactly at it. A hidden wall clock or strict `>` comparison makes this boundary flaky or one tick late.
 
-Run the pure evaluator first. Wrong candidates are policy/time bugs; correct actions with wrong stored state are mutation or persistence bugs.
+### Basic concepts
 
-### File-by-file diff walkthrough
+Policy evaluation is a pure calculation from immutable history, rules, and explicit `now`. It emits `LifecycleAction` decisions. `lifecycle_tick` is the separate mutation boundary that applies those decisions under the service lock and persists only when state changes.
 
-Read by runtime responsibility, not patch storage order. Every block comes directly from the canonical `stage.patch`.
+Expiring a current data version creates a delete marker so older history stays hidden. Expiring a noncurrent version physically removes that addressed historical item.
+
+### Why this mechanism is necessary
+
+Pure evaluation can be reasoned about and repeated without side effects. An injected clock makes tests and replay deterministic. An explicit tick also makes it clear when durability and locking obligations begin.
+
+### Runtime mental model
+
+The caller invokes `lifecycle_tick` with rules. The service captures injected time, deep-copies the Bucket, calls `evaluate_expiration`, applies each action through Bucket deletion semantics, persists the candidate if actions exist, swaps it, and returns the action list.
+
+### File-by-file walkthrough
 
 #### `src/minis3/lifecycle.py`
 
-Pure lifecycle expiration policy.
+##### What it is and why it appears
 
-Called by `MiniS3` as a policy function; receives explicit values and returns a decision for the service to apply.
+This pure policy module defines expiration rules, action values, and decision evaluation.
 
-**Changed anchors:** `ExpirationRule`, `__post_init__`, `LifecycleActionKind`, `LifecycleAction`, `_old_enough`, `evaluate_expiration`
+##### Runtime role
+
+It reads histories and returns what should change; it never calls storage or mutates Bucket records.
+
+##### Key code
+
+```python
+return threshold is not None and now - created_at >= threshold
+```
+
+##### Statement understanding
+
+`>=` makes the policy boundary inclusive and deterministic. `None` means that category has no expiration rule, not age zero.
 
 ??? note "File diff: src/minis3/lifecycle.py"
     ```diff
@@ -148,11 +170,23 @@ Called by `MiniS3` as a policy function; receives explicit values and returns a 
 
 #### `src/minis3/store.py`
 
-Application service coordinating domain and persistence.
+##### What it is and why it appears
 
-Receives public calls, owns locking and orchestration, then delegates to domain, projection, and storage boundaries.
+The service adds the explicit tick that converts pure actions into durable state transitions.
 
-**Changed anchors:** `lifecycle_tick`
+##### Runtime role
+
+It supplies one time value and stable snapshot under the lock, then reuses Bucket deletion and candidate publication.
+
+##### Key code
+
+```python
+self._storage.persist_bucket(candidate)
+```
+
+##### Statement understanding
+
+Policy output alone changes nothing. Persisting the candidate is what makes an applied expiration survive restart; no-action ticks avoid needless publication.
 
 ??? note "File diff: src/minis3/store.py"
     ```diff
@@ -366,11 +400,17 @@ Receives public calls, owns locking and orchestration, then delegates to domain,
 
 #### `src/minis3/__init__.py`
 
-Supported public package surface.
+##### What it is and why it appears
 
-Reached by user imports; wiring errors appear as missing names before any runtime flow starts.
+Rules and action types join the public learning API.
 
-**Changed anchors:** configuration, export, or documentation change
+##### Runtime role
+
+Callers can construct policy and inspect returned decisions without depending on lifecycle internals.
+
+##### Statement understanding
+
+The package exports declarative values, while actual mutation remains a `MiniS3` operation.
 
 ??? note "File diff: src/minis3/__init__.py"
     ```diff
@@ -422,11 +462,23 @@ Reached by user imports; wiring errors appear as missing names before any runtim
 
 #### `tests/test_lifecycle.py`
 
-Executable proof of the stage behavior.
+##### What it is and why it appears
 
-Calls the learner-visible boundary and records the expected state or failure; start here only when verifying the mechanism.
+Four contracts cover pure filtering/boundaries, current versus noncurrent transitions, injected time/restart, and invalid rules.
 
-**Changed anchors:** `ManualClock`, `__init__`, `__call__`, `test_rule_evaluation_is_pure_prefix_filtered_and_boundary_inclusive`, `test_tick_expires_current_to_marker_and_noncurrent_physically`, `test_tick_uses_injected_time_and_persists_timestamps_across_restart`, `test_expiration_rule_rejects_empty_or_negative_policy`
+##### Runtime role
+
+`ManualClock` lets tests advance time deliberately and prove persisted timestamps rather than waiting on wall time.
+
+##### Key code
+
+```python
+assert evaluate_expiration(snapshot, [rule], now=9.999) == ()
+```
+
+##### Statement understanding
+
+This is the just-before boundary. Paired with the `10.0` assertion, it proves inclusion precisely rather than merely testing an obviously old object.
 
 ??? note "File diff: tests/test_lifecycle.py"
     ```diff
@@ -550,27 +602,15 @@ Calls the learner-visible boundary and records the expected state or failure; st
 
 ### Verification evidence
 
-`uv run pytest -q $(cat journey/stages/14-lifecycle-tick/tests.txt)`
+Run `uv run pytest -q $(cat journey/stages/14-lifecycle-tick/tests.txt)`. The cases prove pure policy, explicit mutation, time injection, restart persistence, and rule validation.
 
-This stage adds 4 executable case(s), anchored at `test_rule_evaluation_is_pure_prefix_filtered_and_boundary_inclusive`, `test_tick_expires_current_to_marker_and_noncurrent_physically`, `test_tick_uses_injected_time_and_persists_timestamps_across_restart`, `test_expiration_rule_rejects_empty_or_negative_policy`. Run them after the mechanism walkthrough; the cumulative gate also reruns every earlier stage contract.
+### Durable takeaways
 
-### Concept check
+Decide purely, mutate explicitly, inject time, and persist only applied actions. Current expiration creates a marker; noncurrent expiration removes one historical version.
 
-Which invariant must remain true after this stage?
+### Explain it in your own words
 
-??? note "Answer"
-    Lifecycle is deterministic when evaluation is pure and time enters only through the service boundary.
-
-### Code-reading check
-
-Start at `ExpirationRule` in `src/minis3/lifecycle.py`: what state or value enters this boundary, and which owner consumes the result next?
-
-??? note "Answer"
-    Called by `MiniS3` as a policy function; receives explicit values and returns a decision for the service to apply.
-
-### Interview-ready summary
-
-Lifecycle is deterministic when evaluation is pure and time enters only through the service boundary.
+MiniS3 separates lifecycle policy from execution. A pure function decides actions from history, rules, and an explicit clock; a locked tick applies those actions through existing version semantics and publishes the resulting Bucket so time-based behavior remains deterministic and recoverable.
 
 ### Textbook
 

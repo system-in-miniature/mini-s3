@@ -62,14 +62,17 @@ print(stored.version_id, stored.etag)
 - 纯 expiration 规则只在注入时间的显式 `lifecycle_tick` 中执行：当前版本化数据
   产生 delete marker，符合条件的 noncurrent 数据版本被物理删除。
 
-## 逐 Stage 重建 Journey
+## 三种学习模式
 
-[通过 15 个累计 Stage 重建 MiniS3](docs/zh/journey/index.md)。每个 Stage 都是可
-独立浏览的完整课程：先理解机制、所有权与数据流，再逐文件阅读本次 Diff，最后运行
-聚焦验证，并完成代码阅读与面试表达。测试是机制讲解后的证据，不要求测试优先。
+1. **[机制教程](docs/zh/tutorial/index.md)**：按主题理解对象存储机制。
+2. **[自主重建](docs/zh/journey/index.md)**：通过 15 个完整浏览课程，依次理解当前
+   问题、一条失败预览、基本概念、每个变更文件与关键语句。
+3. **[Agent 带教](docs/zh/agent-guided.md)**：运行
+   `python journey/tools/build_journey.py agent N`，在 Codex 中进入准备好的工作区，
+   通过互动筛查、实现、小片段代码走读与 parity 验收完成 Stage N。
 
-如果还想在编辑器中把当前 Stage 显示为未提交变更，可运行
-`python journey/tools/build_journey.py study N`，它只操作专用学习工作区。
+测试是可执行的问题动机和最终证据，不要求把整套课程写成测试优先。Agent 带教网页
+只提供使用教程；实际教学行为由 `AGENTS.md` 和选中的 Stage 资料驱动。
 
 ## 仓库导览
 

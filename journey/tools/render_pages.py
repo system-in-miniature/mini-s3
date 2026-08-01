@@ -37,9 +37,59 @@ class FilePatch:
     changed_symbols: tuple[str, ...]
 
 
+@dataclass(frozen=True)
+class FileLesson:
+    path: str
+    body: str
+    code_slices: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class LocalizedLesson:
+    pre_walkthrough: str
+    files: tuple[FileLesson, ...]
+    post_walkthrough: str
+
+
 PATCH_HEADER = re.compile(r"^diff --git a/(.+?) b/(.+?)$", re.MULTILINE)
 PYTHON_SYMBOL = re.compile(r"^\+\s*(?:async\s+)?(?:def|class)\s+(\w+)", re.MULTILINE)
 TEST_SYMBOL = re.compile(r"^\+def\s+(test_\w+)", re.MULTILINE)
+FILE_MARKER = re.compile(r"<!-- journey-file: ([^\n]+) -->")
+CODE_FENCE = re.compile(
+    r"^##### (?:Key code|关键代码)\s*\n+```[^\n]*\n(.*?)\n```",
+    re.MULTILINE | re.DOTALL,
+)
+
+REQUIRED_HEADINGS = {
+    False: (
+        "### Goal",
+        "### Deliverable files / 交付文件",
+        "### The problem at this point",
+        "### Failure preview",
+        "### Basic concepts",
+        "### Why this mechanism is necessary",
+        "### Runtime mental model",
+        "### File-by-file walkthrough",
+        "### Verification evidence",
+        "### Durable takeaways",
+        "### Explain it in your own words",
+        "### Textbook",
+    ),
+    True: (
+        "### 目标",
+        "### 交付文件",
+        "### 当前遇到的问题",
+        "### 先看会坏在哪里",
+        "### 基本概念",
+        "### 为什么需要这个机制",
+        "### 运行时心智模型",
+        "### 逐文件走读",
+        "### 验证证据",
+        "### 需要真正记住的内容",
+        "### 用自己的话讲清楚",
+        "### 教材",
+    ),
+}
 
 
 def role_rank(path: str) -> int:
@@ -130,258 +180,151 @@ def compare_link(number: int) -> str:
     return f"{REPO_URL}/compare/stage-{number - 1:02d}...stage-{number:02d}"
 
 
-def split_lesson(body: str, *, chinese: bool) -> tuple[str, str, str]:
-    mechanism_heading = "### 机制走读" if chinese else "### Mechanism walkthrough"
-    checks_heading = "### 自查" if chinese else "### Self-check"
-    mechanism_start = body.index(mechanism_heading)
-    checks_start = body.index(checks_heading, mechanism_start)
-    return (
-        body[:mechanism_start].rstrip(),
-        body[mechanism_start:checks_start].strip(),
-        body[checks_start:].strip(),
+def _heading_positions(body: str, headings: tuple[str, ...], *, label: str) -> None:
+    positions: list[int] = []
+    for heading in headings:
+        occurrences = [match.start() for match in re.finditer(rf"^{re.escape(heading)}$", body, re.MULTILINE)]
+        if len(occurrences) != 1:
+            raise ValueError(f"{label}: expected one {heading!r}, found {len(occurrences)}")
+        positions.append(occurrences[0])
+    if positions != sorted(positions):
+        raise ValueError(f"{label}: required lesson headings are out of order")
+
+
+def _post_patch_text(file_patch: FilePatch) -> str:
+    """Return changed-hunk after-state text for authored slice validation."""
+
+    lines: list[str] = []
+    inside_hunk = False
+    for line in file_patch.patch.splitlines():
+        if line.startswith("@@"):
+            inside_hunk = True
+            continue
+        if not inside_hunk or line.startswith("\\ No newline"):
+            continue
+        if line.startswith("+") and not line.startswith("+++"):
+            lines.append(line[1:].rstrip())
+        elif line.startswith(" "):
+            lines.append(line[1:].rstrip())
+    return "\n".join(lines)
+
+
+def _normalize_slice(code: str) -> str:
+    lines = [line.rstrip() for line in code.strip("\n").splitlines()]
+    if not lines:
+        return ""
+    indent = min((len(line) - len(line.lstrip()) for line in lines if line.strip()), default=0)
+    return "\n".join(line[indent:] if line.strip() else "" for line in lines)
+
+
+def _slice_in_patch(code: str, after_text: str) -> bool:
+    wanted = _normalize_slice(code)
+    wanted_lines = wanted.splitlines()
+    source_lines = after_text.splitlines()
+    for start in range(len(source_lines) - len(wanted_lines) + 1):
+        window = "\n".join(source_lines[start:start + len(wanted_lines)])
+        if _normalize_slice(window) == wanted:
+            return True
+    return False
+
+
+def parse_localized_lesson(
+    body: str,
+    *,
+    card_number: int,
+    chinese: bool,
+    file_patches: list[FilePatch],
+) -> LocalizedLesson:
+    language = "zh" if chinese else "en"
+    label = f"stage-{card_number:02d} {language}"
+    headings = REQUIRED_HEADINGS[chinese]
+    _heading_positions(body, headings, label=label)
+
+    walkthrough_heading = "### 逐文件走读" if chinese else "### File-by-file walkthrough"
+    verification_heading = "### 验证证据" if chinese else "### Verification evidence"
+    walkthrough_start = body.index(walkthrough_heading) + len(walkthrough_heading)
+    verification_start = body.index(verification_heading, walkthrough_start)
+    walkthrough = body[walkthrough_start:verification_start].strip()
+    markers = list(FILE_MARKER.finditer(walkthrough))
+    if not markers:
+        raise ValueError(f"{label}: no journey-file sections")
+
+    patch_by_path = {item.path: item for item in file_patches}
+    files: list[FileLesson] = []
+    for index, marker in enumerate(markers):
+        path = marker.group(1).strip()
+        end = markers[index + 1].start() if index + 1 < len(markers) else len(walkthrough)
+        file_body = walkthrough[marker.end():end].strip()
+        expected_heading = f"#### `{path}`"
+        if not file_body.startswith(expected_heading):
+            raise ValueError(f"{label} {path}: marker must be followed by {expected_heading}")
+        if path not in patch_by_path:
+            raise ValueError(f"{label} {path}: file is absent from stage.patch")
+
+        slices = tuple(_normalize_slice(match) for match in CODE_FENCE.findall(file_body))
+        after_text = _post_patch_text(patch_by_path[path])
+        for code in slices:
+            if len([line for line in code.splitlines() if line.strip()]) > 15:
+                raise ValueError(f"{label} {path}: key code must contain at most 15 nonblank lines")
+            if code and not _slice_in_patch(code, after_text):
+                raise ValueError(f"{label} {path}: key code does not match stage.patch")
+        files.append(FileLesson(path=path, body=file_body, code_slices=slices))
+
+    paths = [item.path for item in files]
+    if len(paths) != len(set(paths)):
+        raise ValueError(f"{label}: duplicate journey-file section")
+    expected_paths = {item.path for item in file_patches}
+    actual_paths = set(paths)
+    if actual_paths != expected_paths:
+        missing = sorted(expected_paths - actual_paths)
+        extra = sorted(actual_paths - expected_paths)
+        raise ValueError(f"{label}: walkthrough coverage mismatch; missing={missing}, extra={extra}")
+
+    return LocalizedLesson(
+        pre_walkthrough=body[:walkthrough_start].rstrip(),
+        files=tuple(files),
+        post_walkthrough=body[verification_start:].strip(),
     )
 
 
-def browser_prelude(prelude: str, *, chinese: bool) -> str:
-    """Keep the browser lesson explanatory; self-implementation stays in attempt mode."""
-
-    task_heading = "### 动手任务" if chinese else "### Hands-on task"
-    deliverable_heading = "### 交付文件" if chinese else "### Deliverable files / 交付文件"
-    task_start = prelude.index(task_heading)
-    deliverable_start = prelude.index(deliverable_heading, task_start)
-    return (prelude[:task_start].rstrip() + "\n\n" + prelude[deliverable_start:]).strip()
-
-
-def file_role(path: str, *, chinese: bool) -> str:
-    roles = {
-        "tests/": ("Executable proof of the stage behavior.", "本阶段行为的可执行证明。"),
-        "src/minis3/__init__.py": ("Supported public package surface.", "受支持的包级公开接口。"),
-        "src/minis3/errors.py": ("Shared domain failure vocabulary.", "共享的领域失败词汇。"),
-        "src/minis3/model.py": ("Immutable values carried through the system.", "贯穿系统的不可变领域值。"),
-        "src/minis3/bucket.py": ("Aggregate that owns per-bucket state transitions.", "拥有 Bucket 内部状态迁移的聚合。"),
-        "src/minis3/storage/atomic.py": ("Reusable write/fsync/rename durability primitive.", "可复用的 write/fsync/rename 持久性原语。"),
-        "src/minis3/storage/disk.py": ("Disk layout, publication, and recovery owner.", "磁盘布局、发布与恢复的所有者。"),
-        "src/minis3/storage/__init__.py": ("Storage adapter boundary exports.", "存储适配器边界导出。"),
-        "src/minis3/listing.py": ("Read-side projection and pagination logic.", "读取侧投影与分页逻辑。"),
-        "src/minis3/store.py": ("Application service coordinating domain and persistence.", "协调领域逻辑与持久化的应用服务。"),
-        "src/minis3/multipart.py": ("Multipart values and completion rules.", "Multipart 领域值与完成规则。"),
-        "src/minis3/conditional.py": ("ETag precondition matching rules.", "ETag 前置条件匹配规则。"),
-        "src/minis3/lifecycle.py": ("Pure lifecycle expiration policy.", "纯生命周期过期策略。"),
-        "README.md": ("Journey workspace orientation.", "Journey 工作区入口说明。"),
-        "pyproject.toml": ("Install and test configuration.", "安装与测试配置。"),
-        "uv.lock": ("Reproducible dependency lock.", "可复现依赖锁。"),
-    }
-    key = "tests/" if path.startswith("tests/") else path
-    english, translated = roles.get(
-        key,
-        ("Supporting project wiring for this stage.", "本阶段所需的项目支撑接线。"),
-    )
-    return translated if chinese else english
-
-
-def file_flow(path: str, *, chinese: bool) -> str:
-    if path.startswith("tests/"):
-        pair = (
-            "Calls the learner-visible boundary and records the expected state or failure; start here only when verifying the mechanism.",
-            "调用学习者可见边界并记录预期状态或失败；验证机制时再从这里进入。",
-        )
-    elif path in {"src/minis3/errors.py", "src/minis3/model.py"}:
-        pair = (
-            "Constructed by bucket/service code and returned upward without owning I/O; inspect field values when state is correct but results look wrong.",
-            "由 Bucket/服务代码构造并向上返回，不拥有 I/O；状态正确但结果异常时检查这些字段。",
-        )
-    elif path == "src/minis3/bucket.py":
-        pair = (
-            "Called by `MiniS3`; turns one command plus the current record into the next in-memory history.",
-            "由 `MiniS3` 调用；把一次命令和当前记录转换为下一份内存历史。",
-        )
-    elif path.startswith("src/minis3/storage/"):
-        pair = (
-            "Called after a domain mutation; turns in-memory state into durable artifacts and reconstructs it on startup.",
-            "在领域变更后调用；把内存状态变成持久 Artifact，并在启动时重建。",
-        )
-    elif path == "src/minis3/listing.py":
-        pair = (
-            "Called by the service read path; converts stored histories into sorted, paginated response values without mutation.",
-            "由服务读取路径调用；把存储历史转换成排序、分页的响应值，不修改状态。",
-        )
-    elif path in {"src/minis3/multipart.py", "src/minis3/conditional.py", "src/minis3/lifecycle.py"}:
-        pair = (
-            "Called by `MiniS3` as a policy function; receives explicit values and returns a decision for the service to apply.",
-            "由 `MiniS3` 作为策略函数调用；接收显式值并返回由服务执行的决策。",
-        )
-    elif path == "src/minis3/store.py":
-        pair = (
-            "Receives public calls, owns locking and orchestration, then delegates to domain, projection, and storage boundaries.",
-            "接收公开调用，拥有加锁与编排，再委托给领域、投影和存储边界。",
-        )
-    elif path == "src/minis3/__init__.py":
-        pair = (
-            "Reached by user imports; wiring errors appear as missing names before any runtime flow starts.",
-            "由用户导入触达；接线错误会在运行时流程开始前表现为名称缺失。",
-        )
-    else:
-        pair = (
-            "Supports installation or orientation rather than the runtime data path; debug it when imports, builds, or commands fail before execution.",
-            "支撑安装或入口说明，不属于运行时数据流；导入、构建或命令执行前失败时从这里排查。",
-        )
-    return pair[1] if chinese else pair[0]
-
-
-def render_file_walkthrough(card: Card, *, chinese: bool) -> str:
-    heading = "### 逐文件 Diff 走读" if chinese else "### File-by-file diff walkthrough"
-    intro = (
-        "按运行时职责阅读，而不是按补丁存储顺序阅读。每个代码块都直接来自 canonical `stage.patch`。"
-        if chinese
-        else "Read by runtime responsibility, not patch storage order. Every block comes directly from the canonical `stage.patch`."
-    )
+def _render_diff(file_patch: FilePatch, *, chinese: bool) -> str:
     label = "文件差异：" if chinese else "File diff: "
-    anchors_label = "变化锚点" if chinese else "Changed anchors"
-    no_symbols = "配置、导出或文档变化" if chinese else "configuration, export, or documentation change"
-    lines = [heading, "", intro, ""]
-    for item in order_file_patches(split_file_patches(card.patch)):
-        anchors = ", ".join(f"`{name}`" for name in item.changed_symbols) or no_symbols
-        lines.extend(
-            [
-                f"#### `{item.path}`",
-                "",
-                file_role(item.path, chinese=chinese),
-                "",
-                file_flow(item.path, chinese=chinese),
-                "",
-                f"**{anchors_label}:** {anchors}",
-                "",
-                f'??? note "{label}{item.path}"',
-                "    ```diff",
-                *[
-                    f"    {clean}" if (clean := line.rstrip()) else ""
-                    for line in item.patch.splitlines()
-                ],
-                "    ```",
-                "",
-            ]
-        )
-    return "\n".join(lines).rstrip()
-
-
-def code_reading_target(card: Card) -> FilePatch:
-    candidates = [
-        item
-        for item in order_file_patches(split_file_patches(card.patch))
-        if item.path.startswith("src/")
-        and not item.path.endswith("/__init__.py")
-        and item.path != "src/minis3/errors.py"
-    ]
-    if not candidates:
-        candidates = [
-            item
-            for item in order_file_patches(split_file_patches(card.patch))
-            if item.path.startswith("src/")
-        ]
-    if not candidates:
-        candidates = order_file_patches(split_file_patches(card.patch))
-    return candidates[0]
-
-
-def render_closeout(card: Card, checks: str, *, chinese: bool) -> str:
-    lesson_heading = "### 对应真实 S3 的一课" if chinese else "### The real S3 lesson"
-    textbook_heading = "### 教材" if chinese else "### Textbook"
-    lesson = section(checks, lesson_heading, textbook_heading)
-    textbook = checks[checks.index(textbook_heading):].strip()
-    target = code_reading_target(card)
-    anchor = (
-        target.changed_symbols[0]
-        if target.changed_symbols
-        else "the public export list"
-        if target.path.endswith("/__init__.py")
-        else "the changed hunk"
+    lines = [f'??? note "{label}{file_patch.path}"', "    ```diff"]
+    lines.extend(
+        f"    {clean}" if (clean := line.rstrip()) else ""
+        for line in file_patch.patch.splitlines()
     )
-    tests = tuple(dict.fromkeys(TEST_SYMBOL.findall(card.patch)))
-    command = (
-        f"`uv run pytest -q $(cat journey/stages/{card.number:02d}-{card.slug}/tests.txt)`"
-    )
-
-    if chinese:
-        if tests:
-            proof = (
-                f"本阶段新增 {card.tests_added} 个可执行用例，入口为 "
-                + "、".join(f"`{name}`" for name in tests)
-                + "。它们在机制走读之后运行，并与此前 Stage 的用例一起守住累计行为。"
-            )
-        else:
-            proof = (
-                "本阶段不再新增行为用例；累计测试守住公开导出，"
-                "`python journey/tools/build_journey.py --check` 另外证明最终源码与 Journey 所有测试逐字节一致。"
-            )
-        return "\n\n".join(
-            [
-                "### 验证证据\n\n" + command + "\n\n" + proof,
-                (
-                    "### 概念检查\n\n本阶段完成后，哪条不变量必须保持成立？\n\n"
-                    '??? note "答案"\n    ' + lesson
-                ),
-                (
-                    f"### 代码阅读检查\n\n从 `{target.path}` 的 `{anchor}` 开始："
-                    "进入这个边界的状态或值是什么，结果又交给哪个所有者？\n\n"
-                    '??? note "答案"\n    ' + file_flow(target.path, chinese=True)
-                ),
-                "### 面试表达\n\n" + lesson,
-                textbook,
-            ]
-        )
-
-    if tests:
-        proof = (
-            f"This stage adds {card.tests_added} executable case(s), anchored at "
-            + ", ".join(f"`{name}`" for name in tests)
-            + ". Run them after the mechanism walkthrough; the cumulative gate also reruns every earlier stage contract."
-        )
-    else:
-        proof = (
-            "This stage adds no new behavior case: the cumulative suite guards the public exports, while "
-            "`python journey/tools/build_journey.py --check` separately proves byte-for-byte final source and Journey-test parity."
-        )
-    return "\n\n".join(
-        [
-            "### Verification evidence\n\n" + command + "\n\n" + proof,
-            (
-                "### Concept check\n\nWhich invariant must remain true after this stage?\n\n"
-                '??? note "Answer"\n    ' + lesson
-            ),
-            (
-                f"### Code-reading check\n\nStart at `{anchor}` in `{target.path}`: "
-                "what state or value enters this boundary, and which owner consumes the result next?\n\n"
-                '??? note "Answer"\n    ' + file_flow(target.path, chinese=False)
-            ),
-            "### Interview-ready summary\n\n" + lesson,
-            textbook,
-        ]
-    )
+    lines.append("    ```")
+    return "\n".join(lines)
 
 
 def render_card(card: Card, *, chinese: bool) -> str:
     title = card.chinese_title if chinese else card.english_title
     body = card.chinese if chinese else card.english
+    file_patches = split_file_patches(card.patch)
+    lesson = parse_localized_lesson(
+        body,
+        card_number=card.number,
+        chinese=chinese,
+        file_patches=file_patches,
+    )
+    patch_by_path = {item.path: item for item in file_patches}
+    file_sections = [
+        f"{item.body}\n\n{_render_diff(patch_by_path[item.path], chinese=chinese)}"
+        for item in lesson.files
+    ]
     link_label = "在 GitHub 查看阶段差异" if chinese else "Compare this stage on GitHub"
     checkout = (
         f"完成后可运行 `git checkout stage-{card.number:02d}` 对照你的结果。"
         if chinese
         else f"After finishing, use `git checkout stage-{card.number:02d}` to compare your result."
     )
-    patch_link = (
-        f"{REPO_URL}/blob/main/journey/stages/"
-        f"{card.number:02d}-{card.slug}/stage.patch"
-    )
-    prelude, mechanism, checks = split_lesson(body, chinese=chinese)
-    prelude = browser_prelude(prelude, chinese=chinese)
-    walkthrough = render_file_walkthrough(card, chinese=chinese)
-    closeout = render_closeout(card, checks, chinese=chinese)
+    patch_link = f"{REPO_URL}/blob/main/journey/stages/{card.number:02d}-{card.slug}/stage.patch"
     return (
         f"# Stage {card.number:02d} · {title}\n\n"
-        f"{prelude}\n\n"
-        f"{mechanism}\n\n"
-        f"{walkthrough}\n\n"
-        f"{closeout}\n\n"
+        f"{lesson.pre_walkthrough}\n\n"
+        + "\n\n".join(file_sections)
+        + f"\n\n{lesson.post_walkthrough}\n\n"
         f"[{link_label}]({compare_link(card.number)})\n\n"
         f"{checkout}\n\n"
         f"[Complete reference patch / 完整参考补丁]({patch_link})\n"
@@ -391,22 +334,26 @@ def render_card(card: Card, *, chinese: bool) -> str:
 def render_index(cards: list[Card], *, chinese: bool) -> str:
     if chinese:
         lines = [
-            "# MiniS3 Journey",
+            "# 自主重建",
             "",
-            "每个 Stage 都是一节可独立浏览的完整课：先理解 S3 问题与机制，再按运行时职责逐文件阅读 Diff，最后用测试、自查题与面试表达完成闭环。",
+            "每个 Stage 都是一节可独立浏览的完整课：先理解当前问题、基本概念与必要性，再逐文件读懂关键语句，最后用验证证据和自己的话完成理解闭环。",
             "",
-            "如果希望在编辑器里聚焦当前增量，运行 `python journey/tools/build_journey.py study N`，再打开 `../MiniS3-journey-workspace`。Agent 导师可以增强互动，但不是完成课程的前提。",
+            "这是三种学习模式中的浏览器自主学习路径。按主题学习请进入[机制教程](../tutorial/index.md)；需要 CLI 互动请查看 [Agent 带教使用教程](../agent-guided.md)。",
+            "",
+            "如果希望在编辑器里聚焦当前增量，运行 `python journey/tools/build_journey.py study N`，再打开 `../MiniS3-journey-workspace`。",
             "",
             "| Stage | 主题 | 新增测试 | 教材章节 |",
             "|---:|---|---:|---:|",
         ]
     else:
         lines = [
-            "# MiniS3 Journey",
+            "# Self-Guided Rebuild",
             "",
-            "Each Stage is a complete independent-browser lesson: understand the S3 problem and mechanism, read every changed file by runtime responsibility, then close with verification, checks, and interview language.",
+            "Each Stage is a complete independent-browser lesson: understand the current problem, concepts, and necessity; read each changed file and its critical statements; then close with evidence and your own explanation.",
             "",
-            "For an editor-focused diff, run `python journey/tools/build_journey.py study N` and open `../MiniS3-journey-workspace`. An agent tutor adds interaction but is not required to complete the course.",
+            "This is the browser-based path among MiniS3's three learning modes. Use the [Mechanism Tutorial](../tutorial/index.md) for topic-oriented study, or the [Agent-Guided usage guide](../agent-guided.md) for interactive CLI teaching.",
+            "",
+            "For an editor-focused diff, run `python journey/tools/build_journey.py study N` and open `../MiniS3-journey-workspace`.",
             "",
             "| Stage | Topic | New tests | Book chapter |",
             "|---:|---|---:|---:|",

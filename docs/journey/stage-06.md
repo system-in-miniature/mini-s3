@@ -2,7 +2,7 @@
 
 ### Goal
 
-Derive contents and common prefixes from flat keys, with opaque query-bound pagination tokens.
+Derive current contents and common prefixes from flat keys, with query-bound opaque pagination tokens.
 
 ### Deliverable files / 交付文件
 
@@ -11,27 +11,49 @@ Derive contents and common prefixes from flat keys, with opaque query-bound pagi
 - `src/minis3/store.py`
 - `tests/test_listing.py`
 
-### Mechanism walkthrough
+### The problem at this point
 
-#### Ownership and flow
+Version listing can expose history, but normal object listing still has no answer for prefix, delimiter, or pagination. Treating slash-containing keys as real directories would contradict Stage 01 and create state that S3 does not store.
 
-`list_objects` sorts visible flat keys, derives common prefixes at read time, counts prefixes and objects in one page budget, and binds the opaque cursor to the original query.
+### Failure preview
 
-#### Failure and debugging
+The delimiter contract stores `a.txt`, `raw`, and several `photos/...` keys. Listing the root with delimiter `/` must return two contents plus exactly one `photos/` common prefix. If the implementation walks directories or returns every photo key, the externally visible projection is wrong.
 
-Log the sorted candidate stream before pagination. Missing keys usually come from marker filtering; duplicate/shifted pages come from cursor or prefix accounting.
+### Basic concepts
 
-### File-by-file diff walkthrough
+`prefix` filters keys by exact string start. `delimiter` groups the remaining suffix at its first delimiter into a `common_prefix`; this is a computed view, not a stored folder. A page counts both returned objects and common prefixes because both consume result slots.
 
-Read by runtime responsibility, not patch storage order. Every block comes directly from the canonical `stage.patch`.
+A continuation token is an opaque cursor. MiniS3 encodes the offset together with prefix and delimiter, so a token from one query cannot be replayed against another and silently skip different results.
+
+### Why this mechanism is necessary
+
+Exposing a raw numeric offset leaks implementation and allows query mismatch. Treating common prefixes as objects would confuse HEAD/GET and deletion. One pure projection keeps flat storage intact while producing familiar directory-like navigation.
+
+### Runtime mental model
+
+The service locks a Bucket snapshot and calls `list_objects`. The function selects each key's current visible data, applies prefix and delimiter projection, sorts the combined entries, decodes a query-bound offset, slices one page, and creates the next opaque token when more entries remain.
+
+### File-by-file walkthrough
 
 #### `src/minis3/listing.py`
 
-Read-side projection and pagination logic.
+##### What it is and why it appears
 
-Called by the service read path; converts stored histories into sorted, paginated response values without mutation.
+The read-side projection now owns current-object listing, delimiter grouping, and pagination tokens alongside version listing.
 
-**Changed anchors:** `ListedObject`, `ListObjectsResult`, `is_truncated`, `_encode_token`, `_decode_token`, `list_objects`, `list_object_versions`
+##### Runtime role
+
+It consumes Bucket records without mutation and returns immutable `contents`, `common_prefixes`, and `next_token`.
+
+##### Key code
+
+```python
+return urlsafe_b64encode(payload).decode().rstrip("=")
+```
+
+##### Statement understanding
+
+The token hides the cursor representation. Its payload also contains the query shape, so decoding can reject a cursor that belongs to another prefix or delimiter.
 
 ??? note "File diff: src/minis3/listing.py"
     ```diff
@@ -182,11 +204,23 @@ Called by the service read path; converts stored histories into sorted, paginate
 
 #### `src/minis3/store.py`
 
-Application service coordinating domain and persistence.
+##### What it is and why it appears
 
-Receives public calls, owns locking and orchestration, then delegates to domain, projection, and storage boundaries.
+The service adds the public locked entry for current listing.
 
-**Changed anchors:** `list_objects`
+##### Runtime role
+
+It supplies one consistent records snapshot and delegates all read-only projection rules to `listing.py`.
+
+##### Key code
+
+```python
+with self._lock:
+```
+
+##### Statement understanding
+
+Even a pure projection needs a stable input snapshot. The lock prevents a concurrent PUT or DELETE from changing keys halfway through pagination construction.
 
 ??? note "File diff: src/minis3/store.py"
     ```diff
@@ -313,11 +347,17 @@ Receives public calls, owns locking and orchestration, then delegates to domain,
 
 #### `src/minis3/__init__.py`
 
-Supported public package surface.
+##### What it is and why it appears
 
-Reached by user imports; wiring errors appear as missing names before any runtime flow starts.
+The package exports current-list response types together with the accumulated public API.
 
-**Changed anchors:** configuration, export, or documentation change
+##### Runtime role
+
+It keeps callers on one supported import surface; it does not calculate prefixes or tokens.
+
+##### Statement understanding
+
+The explicit `__all__` begins documenting which accumulated names are public rather than exporting every imported helper accidentally.
 
 ??? note "File diff: src/minis3/__init__.py"
     ```diff
@@ -375,11 +415,23 @@ Reached by user imports; wiring errors appear as missing names before any runtim
 
 #### `tests/test_listing.py`
 
-Executable proof of the stage behavior.
+##### What it is and why it appears
 
-Calls the learner-visible boundary and records the expected state or failure; start here only when verifying the mechanism.
+Five contracts cover directory illusion, combined pagination, marker hiding, flattened version history, and invalid tokens.
 
-**Changed anchors:** `_populated_store`, `test_delimiter_derives_common_prefixes_from_flat_keys`, `test_pagination_counts_contents_and_prefixes_and_token_is_opaque`, `test_current_listing_hides_key_behind_delete_marker`, `test_version_listing_flattens_versions_and_marks_latest`, `test_malformed_or_query_mismatched_tokens_are_rejected`
+##### Runtime role
+
+They build state through `MiniS3` and inspect public results, so the examples connect model semantics to the final read view.
+
+##### Key code
+
+```python
+assert root.common_prefixes == ("photos/",)
+```
+
+##### Statement understanding
+
+Several flat keys collapse into one projected prefix at the root. The tuple does not mean a `photos/` object or directory was stored.
 
 ??? note "File diff: tests/test_listing.py"
     ```diff
@@ -486,27 +538,15 @@ Calls the learner-visible boundary and records the expected state or failure; st
 
 ### Verification evidence
 
-`uv run pytest -q $(cat journey/stages/06-directory-illusion/tests.txt)`
+Run `uv run pytest -q $(cat journey/stages/06-directory-illusion/tests.txt)`. The five new cases prove projection and token behavior while all earlier history tests remain cumulative.
 
-This stage adds 5 executable case(s), anchored at `test_delimiter_derives_common_prefixes_from_flat_keys`, `test_pagination_counts_contents_and_prefixes_and_token_is_opaque`, `test_current_listing_hides_key_behind_delete_marker`, `test_version_listing_flattens_versions_and_marks_latest`, `test_malformed_or_query_mismatched_tokens_are_rejected`. Run them after the mechanism walkthrough; the cumulative gate also reruns every earlier stage contract.
+### Durable takeaways
 
-### Concept check
+Keys stay flat; directories are a read-time illusion; contents and prefixes share page capacity; continuation tokens belong to one exact query.
 
-Which invariant must remain true after this stage?
+### Explain it in your own words
 
-??? note "Answer"
-    S3 directories are a delimiter projection; contents and prefixes share one page budget.
-
-### Code-reading check
-
-Start at `ListedObject` in `src/minis3/listing.py`: what state or value enters this boundary, and which owner consumes the result next?
-
-??? note "Answer"
-    Called by the service read path; converts stored histories into sorted, paginated response values without mutation.
-
-### Interview-ready summary
-
-S3 directories are a delimiter projection; contents and prefixes share one page budget.
+MiniS3 produces directory-like listing by grouping flat strings at a delimiter. It never creates folders. Pagination operates on the combined projected result, and its opaque token is bound to the prefix and delimiter so it cannot be reused with different query semantics.
 
 ### Textbook
 

@@ -2,7 +2,7 @@
 
 ### 目标
 
-公开完整历史，使 null 版本、具名版本与删除标记保持可区分。
+投影完整历史，同时保持 null 版本、具名版本和删除标记可区分。
 
 ### 交付文件
 
@@ -11,27 +11,47 @@
 - `src/minis3/store.py`
 - `tests/test_versioning.py`
 
-### 机制走读
+### 当前遇到的问题
 
-#### 所有权与数据流
+GET 只返回一份被寻址的数据版本，无法解释最新值或 Marker 背后隐藏的历史。管理和恢复视图需要看到全部保留项，并有足够字段区分它们的含义。
 
-变更仍由 `Bucket` 负责；`listing.py` 把有序历史展平成只读 `ListedVersion` 行，同时保留 latest 与 delete-marker 标记。
+### 先看会坏在哪里
 
-#### 失败与排查
+暂停删除契约先创建具名历史，再写 `null` 值，最后不带版本 ID 删除。预期历史包含新的 `null` Marker 和旧具名版本，但不再包含被替换的 `null` 数据。简单“列出全部值”会报告错误状态。
 
-先检查存储的 Tuple，再判断投影；null 槽替换错误属于变更问题，历史正确但顺序或标记错误才属于 Listing 问题。
+### 基本概念
 
-### 逐文件 Diff 走读
+投影是从已有状态派生的只读形状。`ListedVersion` 不成为第二个历史所有者；它只是把 `Version` 或 `DeleteMarker` 转成调用方需要的字段。`is_latest` 由单个 Key 的新到旧位置决定，不是全局比较 ID 字符串。
 
-按运行时职责阅读，而不是按补丁存储顺序阅读。每个代码块都直接来自 canonical `stage.patch`。
+### 为什么需要这个机制
+
+返回内部原始对象会把调用方耦合到存储字段并诱发修改；只返回当前数据又会抹掉 Marker 和非当前版本。显式投影既保留语义，也让聚合继续保持权威。
+
+### 运行时心智模型
+
+服务加锁，把 Bucket records 交给 `list_object_versions`。纯函数按精确 Key 前缀过滤、确定性遍历 Key、展开新到旧历史、只把索引 0 标成 latest，再返回不可变结果。
+
+### 逐文件走读
 
 #### `src/minis3/listing.py`
 
-读取侧投影与分页逻辑。
+##### 是什么，为什么现在需要
 
-由服务读取路径调用；把存储历史转换成排序、分页的响应值，不修改状态。
+这个读取侧模块引入响应值与纯历史投影。
 
-**变化锚点:** `ListedVersion`, `ListObjectVersionsResult`, `list_object_versions`
+##### 在运行时做什么
+
+它不修改 records，只输出稳定序列，携带 Key、ID、数据存在时的 ETag/size、Marker 标记与 latest 标记。
+
+##### 关键代码
+
+```python
+etag=item.etag if is_data else None,
+```
+
+##### 关键语句理解
+
+Marker 没有基于 Body 的 ETag。显式使用 `None` 保留区别，而不是伪造一个空对象指纹。
 
 ??? note "文件差异：src/minis3/listing.py"
     ```diff
@@ -100,11 +120,23 @@
 
 #### `src/minis3/store.py`
 
-协调领域逻辑与持久化的应用服务。
+##### 是什么，为什么现在需要
 
-接收公开调用，拥有加锁与编排，再委托给领域、投影和存储边界。
+公开服务增加带锁的历史读取方法。
 
-**变化锚点:** `list_object_versions`, `_bucket`
+##### 在运行时做什么
+
+它解析 Bucket 并委托纯 Listing 函数，同时阻止并发变更在读取中途改变快照。
+
+##### 关键代码
+
+```python
+return list_object_versions(self._bucket(bucket).records, prefix=prefix)
+```
+
+##### 关键语句理解
+
+服务传入 records，但不重复投影逻辑。这样职责清晰，纯函数也能独立理解。
 
 ??? note "文件差异：src/minis3/store.py"
     ```diff
@@ -138,11 +170,17 @@
 
 #### `src/minis3/__init__.py`
 
-受支持的包级公开接口。
+##### 是什么，为什么现在需要
 
-由用户导入触达；接线错误会在运行时流程开始前表现为名称缺失。
+新的结果类型成为受支持包级接口。
 
-**变化锚点:** 配置、导出或文档变化
+##### 在运行时做什么
+
+调用方无需导入内部模块路径就能引用响应契约。
+
+##### 关键语句理解
+
+导出结果值是兼容性决策；内部展开 helper 仍是实现细节。
 
 ??? note "文件差异：src/minis3/__init__.py"
     ```diff
@@ -159,11 +197,23 @@
 
 #### `tests/test_versioning.py`
 
-本阶段行为的可执行证明。
+##### 是什么，为什么现在需要
 
-调用学习者可见边界并记录预期状态或失败；验证机制时再从这里进入。
+三个新场景锁定未版本化替换、暂停替换和暂停删除后的投影。
 
-**变化锚点:** `test_unversioned_put_replaces_null_and_delete_removes_it`, `test_enabled_puts_stack_and_delete_marker_hides_history`, `test_suspended_put_replaces_null_but_preserves_named_history`, `test_latest_marker_is_404_even_when_older_data_exists`, `test_suspended_delete_replaces_null_with_null_marker`, `test_nonempty_bucket_cannot_be_deleted`
+##### 在运行时做什么
+
+它们观察真实服务变更后的公开历史，因此证据同时覆盖 Bucket 与投影，而不是只测虚构输入。
+
+##### 关键代码
+
+```python
+assert marker is not None and marker.version_id == "null"
+```
+
+##### 关键语句理解
+
+暂停不表示删除变成物理删除。新 Marker 占据公开 `null` 槽，具名历史仍可寻址。
 
 ??? note "文件差异：tests/test_versioning.py"
     ```diff
@@ -271,27 +321,15 @@
 
 ### 验证证据
 
-`uv run pytest -q $(cat journey/stages/05-version-history/tests.txt)`
+运行 `uv run pytest -q $(cat journey/stages/05-version-history/tests.txt)`。累计测试证明跨版本状态的投影语义；当前对象分页属于 Stage 06。
 
-本阶段新增 3 个可执行用例，入口为 `test_unversioned_put_replaces_null_and_delete_removes_it`、`test_suspended_put_replaces_null_but_preserves_named_history`、`test_suspended_delete_replaces_null_with_null_marker`。它们在机制走读之后运行，并与此前 Stage 的用例一起守住累计行为。
+### 需要真正记住的内容
 
-### 概念检查
+读取投影解释状态但不拥有状态。null 数据、具名数据、Marker 保持可区分，“latest” 只属于单个精确 Key 历史。
 
-本阶段完成后，哪条不变量必须保持成立？
+### 用自己的话讲清楚
 
-??? note "答案"
-    当前可见性与保留历史，是同一记录的两种投影。
-
-### 代码阅读检查
-
-从 `src/minis3/listing.py` 的 `ListedVersion` 开始：进入这个边界的状态或值是什么，结果又交给哪个所有者？
-
-??? note "答案"
-    由服务读取路径调用；把存储历史转换成排序、分页的响应值，不修改状态。
-
-### 面试表达
-
-当前可见性与保留历史，是同一记录的两种投影。
+版本 Listing 是 Bucket 历史的纯视图。它保留 GET 故意隐藏的条目，把每个 Key 的历史头标为 latest，并让 Marker 的数据字段保持为空，使调用方能还原发生了什么而不修改源状态。
 
 ### 教材
 

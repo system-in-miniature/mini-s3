@@ -2,60 +2,59 @@
 
 ### 目标
 
-让 Bucket 通过单一存储所有者拥有持久 manifest 与不可变对象制品。
+用不可变 Artifact 与最后发布的 Manifest 为 Bucket 状态建立持久表示。
 
 ### 交付文件
 
 - `src/minis3/storage/__init__.py`
 - `src/minis3/storage/atomic.py`
 - `src/minis3/storage/disk.py`
+- `tests/test_storage_boundary.py`
 
-### 机制走读
+### 当前遇到的问题
 
-#### 所有权与数据流
+Stage 02 已有正确内存历史，但进程退出就会全部消失。直接覆盖一个可变 JSON 也不够：崩溃可能留下半份文件，或者留下尚未持久化的目录项。
 
-`DiskStorage` 先写不可变数据与元数据 Artifact，最后发布 `manifest.json`；`atomic_write` 让 rename 成为可见性点，fsync 让目录项持久化。
+### 先看会坏在哪里
 
-#### 失败与排查
+存储契约写入 Bucket 后，用同一目录创建全新的 `DiskStorage`，要求恢复完全相同的 Body、ETag、版本和最大序列。缺少 fsync 或发布顺序错误可能在进程内读取时看不出来，却会在这次重启观察中失败。
 
-按 Artifact 路径、临时名、rename、父目录 fsync 的顺序追踪；重启时对照 Manifest 引用与恢复文件，未引用 Artifact 不能变得可见。
+### 基本概念
 
-### 逐文件 Diff 走读
+原子可见性与持久性不是一件事。`os.replace` 让读者看到旧完整文件或新完整文件；文件 `fsync` 持久化内容字节，父目录 `fsync` 持久化名称变化。
 
-按运行时职责阅读，而不是按补丁存储顺序阅读。每个代码块都直接来自 canonical `stage.patch`。
+MiniS3 保存不可变数据/元数据 Artifact 与较小的可变 `manifest.json`。Manifest 是权威：重启后只有被成功发布 Manifest 引用的 Artifact 才可见。
 
-#### `src/minis3/storage/__init__.py`
+### 为什么需要这个机制
 
-存储适配器边界导出。
+直接更新一个大型可变状态文件会让每次对象写入都重写共享状态并扩大崩溃面。不可变 Artifact 可以先安全落盘，最后发布引用则给恢复过程一个明确提交记录，并允许清除孤儿数据。
 
-在领域变更后调用；把内存状态变成持久 Artifact，并在启动时重建。
+### 运行时心智模型
 
-**变化锚点:** 配置、导出或文档变化
+`DiskStorage.persist_bucket` 先写缺失的不可变 Artifact，再为 Manifest 调用 `atomic_write`。后者写临时文件、flush、文件 fsync、替换最终名称、父目录 fsync。启动时只加载 Manifest 引用并清理其余内容。
 
-??? note "文件差异：src/minis3/storage/__init__.py"
-    ```diff
-    diff --git a/src/minis3/storage/__init__.py b/src/minis3/storage/__init__.py
-    new file mode 100644
-    index 0000000..673ad9e
-    --- /dev/null
-    +++ b/src/minis3/storage/__init__.py
-    @@ -0,0 +1,7 @@
-    +"""Durable storage boundary for manifest-based atomic publication."""
-    +
-    +from .atomic import InjectedCrash
-    +from .disk import DiskStorage
-    +
-    +__all__ = ["DiskStorage", "InjectedCrash"]
-    +
-    ```
+### 逐文件走读
 
 #### `src/minis3/storage/atomic.py`
 
-可复用的 write/fsync/rename 持久性原语。
+##### 是什么，为什么现在需要
 
-在领域变更后调用；把内存状态变成持久 Artifact，并在启动时重建。
+这个文件拥有可复用的文件系统发布原语，不负责 S3 领域决策。
 
-**变化锚点:** `InjectedCrash`, `fsync_directory`, `durable_mkdir`, `atomic_write`
+##### 在运行时做什么
+
+当文件或目录项必须跨崩溃保存时，DiskStorage 调用它；这里是检查可见性与持久化顺序的最底层边界。
+
+##### 关键代码
+
+```python
+os.replace(temporary, path)
+fsync_directory(path.parent)
+```
+
+##### 关键语句理解
+
+replace 改变最终名称指向哪份完整文件，随后的目录 fsync 才持久化这次 rename。省略第二行可能出现“现在看得到，掉电后却消失”。
 
 ??? note "文件差异：src/minis3/storage/atomic.py"
     ```diff
@@ -126,11 +125,25 @@
 
 #### `src/minis3/storage/disk.py`
 
-磁盘布局、发布与恢复的所有者。
+##### 是什么，为什么现在需要
 
-在领域变更后调用；把内存状态变成持久 Artifact，并在启动时重建。
+这是 Bucket 磁盘布局、Manifest 发布和启动恢复的唯一所有者。
 
-**变化锚点:** `_encoded_name`, `_object_directory`, `DiskStorage`, `__init__`, `load_buckets`, `create_bucket`, `delete_bucket`, `persist_bucket`, `_bucket_directory`, `_manifest_bytes`, `_write_artifact`, `_load_bucket`, `_load_artifact`, `_clean_bucket`
+##### 在运行时做什么
+
+它把 Bucket 历史变成不可变 `.data`/`.json` Artifact 和 Manifest 引用，并在启动时重建 Bucket。
+
+##### 关键代码
+
+```python
+self._inject("before_manifest_publish")
+atomic_write(directory / "manifest.json", self._manifest_bytes(bucket))
+self._inject("after_manifest_publish")
+```
+
+##### 关键语句理解
+
+Manifest 写入被两个命名崩溃点夹住，因为它正是可见性边界。此前的 Artifact 尚未被引用；此后恢复必须把新状态视为已提交。
 
 ??? note "文件差异：src/minis3/storage/disk.py"
     ```diff
@@ -369,13 +382,56 @@
     +                path.rmdir()
     ```
 
+#### `src/minis3/storage/__init__.py`
+
+##### 是什么，为什么现在需要
+
+这个包边界导出持久适配器，以及后续崩溃实验使用的故意崩溃类型。
+
+##### 在运行时做什么
+
+它提供稳定导入，同时保持布局辅助函数为内部细节。
+
+##### 关键语句理解
+
+导出 `DiskStorage` 明确存储所有者；导出 `InjectedCrash` 让崩溃边界可测试，而不必公开全部 helper。
+
+??? note "文件差异：src/minis3/storage/__init__.py"
+    ```diff
+    diff --git a/src/minis3/storage/__init__.py b/src/minis3/storage/__init__.py
+    new file mode 100644
+    index 0000000..673ad9e
+    --- /dev/null
+    +++ b/src/minis3/storage/__init__.py
+    @@ -0,0 +1,7 @@
+    +"""Durable storage boundary for manifest-based atomic publication."""
+    +
+    +from .atomic import InjectedCrash
+    +from .disk import DiskStorage
+    +
+    +__all__ = ["DiskStorage", "InjectedCrash"]
+    +
+    ```
+
 #### `tests/test_storage_boundary.py`
 
-本阶段行为的可执行证明。
+##### 是什么，为什么现在需要
 
-调用学习者可见边界并记录预期状态或失败；验证机制时再从这里进入。
+这是第一条存储契约，证明一个完整 Bucket 能跨越类似进程重启的边界。
 
-**变化锚点:** `test_disk_storage_publishes_and_recovers_one_complete_bucket`
+##### 在运行时做什么
+
+它持久化状态、创建新适配器，再比较恢复后的值与序列元数据。它比序列化单测更广，但还没到公开 MiniS3 服务。
+
+##### 关键代码
+
+```python
+recovered, maximum_sequence = DiskStorage(tmp_path).load_buckets()
+```
+
+##### 关键语句理解
+
+必须使用新适配器；读取原内存 Bucket 无法证明字节已发布并可恢复。返回 `maximum` 还能避免未来复用序列。
 
 ??? note "文件差异：tests/test_storage_boundary.py"
     ```diff
@@ -407,27 +463,15 @@
 
 ### 验证证据
 
-`uv run pytest -q $(cat journey/stages/03-durable-storage-boundary/tests.txt)`
+运行 `uv run pytest -q $(cat journey/stages/03-durable-storage-boundary/tests.txt)`。它证明正常发布/重启路径；Stage 07、08 会分别证明崩溃点和目录 fsync 清理。
 
-本阶段新增 1 个可执行用例，入口为 `test_disk_storage_publishes_and_recovers_one_complete_bucket`。它们在机制走读之后运行，并与此前 Stage 的用例一起守住累计行为。
+### 需要真正记住的内容
 
-### 概念检查
+rename 提供原子可见性，fsync 提供持久性，Manifest 是提交记录；Artifact 存在不代表它已经可见。
 
-本阶段完成后，哪条不变量必须保持成立？
+### 用自己的话讲清楚
 
-??? note "答案"
-    manifest 引用可见的不可变制品；发布顺序决定可见性。
-
-### 代码阅读检查
-
-从 `src/minis3/storage/atomic.py` 的 `InjectedCrash` 开始：进入这个边界的状态或值是什么，结果又交给哪个所有者？
-
-??? note "答案"
-    在领域变更后调用；把内存状态变成持久 Artifact，并在启动时重建。
-
-### 面试表达
-
-manifest 引用可见的不可变制品；发布顺序决定可见性。
+MiniS3 先写不可变对象 Artifact，最后原子发布 Manifest。恢复只信任 Manifest，所以崩溃可以留下多余文件，却不能暴露半发布对象。rename 是可见性点，父目录 fsync 让这个决定跨重启保存。
 
 ### 教材
 

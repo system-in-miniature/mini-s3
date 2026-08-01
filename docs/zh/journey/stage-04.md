@@ -2,7 +2,7 @@
 
 ### 目标
 
-用加锁服务连接 Bucket 与存储，支持版本化 PUT、GET、HEAD 与 DELETE。
+在一个带锁公开服务后连接 Bucket 与 DiskStorage，提供 Bucket 和对象操作。
 
 ### 交付文件
 
@@ -11,27 +11,50 @@
 - `tests/test_storage.py`
 - `tests/test_versioning.py`
 
-### 机制走读
+### 当前遇到的问题
 
-#### 所有权与数据流
+领域层能计算下一份 Bucket，存储层也能发布它，但调用方仍需自己协调两者。缺少服务所有者时，一条路径可能只改内存不持久化，另一条路径可能在状态迁移中途与它竞争。
 
-`MiniS3` 是应用边界：加锁、解析 Bucket、把状态迁移委托给 `Bucket`、持久化成功变更，并返回协议无关的值。
+### 先看会坏在哪里
 
-#### 失败与排查
+重启契约写入两个版本，再打开全新的 `MiniS3` 读取两份 Body，随后继续写入并要求新 ID。它同时暴露两类错误：状态没有真正发布到磁盘，或者恢复后的序列计数器复用了旧身份。
 
-沿一次公开调用追踪 `_bucket`、聚合操作和 `DiskStorage.persist_bucket`；若内存结果与重启结果不同，缺口就在变更与发布之间。
+### 基本概念
 
-### 逐文件 Diff 走读
+应用服务负责协调已有所有者，而不是吞掉它们的职责。Bucket 仍决定合法历史，DiskStorage 仍决定发布和恢复，`MiniS3` 拥有公开操作、锁、查找以及两者之间的调用顺序。
 
-按运行时职责阅读，而不是按补丁存储顺序阅读。每个代码块都直接来自 canonical `stage.patch`。
+实现先深拷贝候选 Bucket，对候选执行变更并持久化，最后才替换内存引用。因此发布失败时，原本可见的内存状态不会被污染。
+
+### 为什么需要这个机制
+
+只锁 Bucket 或只锁磁盘都不够，因为公开变更跨越两者。服务锁串行化“读取—检查—变更—发布”，候选发布则避免暴露未提交内存。
+
+### 运行时心智模型
+
+`put_object` 加锁、解析 Bucket、复制候选、把 PUT 委托给候选、持久化候选、替换 `_buckets`，最后返回 Version。GET/HEAD 在同一把锁下读取；HEAD 复用 GET，因为当前协议无关模型返回相同元数据值。
+
+### 逐文件走读
 
 #### `src/minis3/store.py`
 
-协调领域逻辑与持久化的应用服务。
+##### 是什么，为什么现在需要
 
-接收公开调用，拥有加锁与编排，再委托给领域、投影和存储边界。
+这是公开应用边界，协调锁、聚合迁移、持久化与恢复。
 
-**变化锚点:** `MiniS3`, `__init__`, `create_bucket`, `delete_bucket`, `set_bucket_versioning`, `put_object`, `get_object`, `head_object`, `delete_object`, `_bucket`
+##### 在运行时做什么
+
+所有公开 Bucket/对象调用从这里进入。成功变更依次跨过 Bucket 和 DiskStorage；读取解析当前内存聚合。
+
+##### 关键代码
+
+```python
+self._storage.persist_bucket(candidate)
+self._buckets[bucket] = candidate
+```
+
+##### 关键语句理解
+
+候选先发布，之后才成为进程可见 Bucket。反过来会让失败的磁盘写入泄漏成“当前可见但重启消失”的状态。
 
 ??? note "文件差异：src/minis3/store.py"
     ```diff
@@ -149,11 +172,17 @@
 
 #### `src/minis3/__init__.py`
 
-受支持的包级公开接口。
+##### 是什么，为什么现在需要
 
-由用户导入触达；接线错误会在运行时流程开始前表现为名称缺失。
+包现在除领域值外，还导出 `MiniS3` 与版本化状态。
 
-**变化锚点:** 配置、导出或文档变化
+##### 在运行时做什么
+
+它建立预期入口，调用方不再需要自行拼装 Bucket 与 DiskStorage。
+
+##### 关键语句理解
+
+公开导出只是 API 接线，不证明运行时行为；下面的服务测试才提供证据。
 
 ??? note "文件差异：src/minis3/__init__.py"
     ```diff
@@ -172,11 +201,23 @@
 
 #### `tests/test_storage.py`
 
-本阶段行为的可执行证明。
+##### 是什么，为什么现在需要
 
-调用学习者可见边界并记录预期状态或失败；验证机制时再从这里进入。
+这些契约通过公开服务检查持久化，包括重启、崩溃注入、Bucket 删除和序列恢复。
 
-**变化锚点:** `CrashOnce`, `__init__`, `__call__`, `test_restart_restores_versions_bodies_and_counter`
+##### 在运行时做什么
+
+它们捕获“内存成功但重开失败”的缺口，是编排层与存储层相遇的位置。
+
+##### 关键代码
+
+```python
+assert reopened.get_object("b", "k", version_id=first.version_id).body == b"one"
+```
+
+##### 关键语句理解
+
+在新实例上按旧版本 ID 读取，证明版本历史和字节都跨发布保存；只检查最新值证据更弱。
 
 ??? note "文件差异：tests/test_storage.py"
     ```diff
@@ -222,11 +263,23 @@
 
 #### `tests/test_versioning.py`
 
-本阶段行为的可执行证明。
+##### 是什么，为什么现在需要
 
-调用学习者可见边界并记录预期状态或失败；验证机制时再从这里进入。
+这里锁定完整公开版本状态机和 DELETE 含义。
 
-**变化锚点:** `test_versioning_state_machine_exhaustive`, `test_unversioned_delete_defensively_preserves_named_history`, `test_enabled_puts_stack_and_delete_marker_hides_history`, `test_specific_delete_removes_only_addressed_version`, `test_latest_marker_is_404_even_when_older_data_exists`, `test_nonempty_bucket_cannot_be_deleted`
+##### 在运行时做什么
+
+它区分未版本化删除、Marker 创建、指定版本删除、最新 Marker 导致 404，以及具名历史保留。
+
+##### 关键代码
+
+```python
+assert bucket.get("k", historical.version_id) == historical
+```
+
+##### 关键语句理解
+
+这个防御性场景证明：即使恢复或外部构造中出现具名历史，未版本化删除也不能把它擦掉。
 
 ??? note "文件差异：tests/test_versioning.py"
     ```diff
@@ -349,27 +402,15 @@
 
 ### 验证证据
 
-`uv run pytest -q $(cat journey/stages/04-object-service/tests.txt)`
+运行 `uv run pytest -q $(cat journey/stages/04-object-service/tests.txt)`。15 个用例覆盖服务编排与版本行为，但还不证明 Listing 投影或 Manifest rename 两侧的注入崩溃结果。
 
-本阶段新增 15 个可执行用例，入口为 `test_restart_restores_versions_bodies_and_counter`、`test_versioning_state_machine_exhaustive`、`test_unversioned_delete_defensively_preserves_named_history`、`test_enabled_puts_stack_and_delete_marker_hides_history`、`test_specific_delete_removes_only_addressed_version`、`test_latest_marker_is_404_even_when_older_data_exists`、`test_nonempty_bucket_cannot_be_deleted`。它们在机制走读之后运行，并与此前 Stage 的用例一起守住累计行为。
+### 需要真正记住的内容
 
-### 概念检查
+服务拥有编排和锁，Bucket 拥有领域迁移，存储拥有持久化；先 persist 再 swap 让内存与已提交状态一致。
 
-本阶段完成后，哪条不变量必须保持成立？
+### 用自己的话讲清楚
 
-??? note "答案"
-    强一致性来自单一变更锁，以及先发布再替换候选状态。
-
-### 代码阅读检查
-
-从 `src/minis3/store.py` 的 `MiniS3` 开始：进入这个边界的状态或值是什么，结果又交给哪个所有者？
-
-??? note "答案"
-    接收公开调用，拥有加锁与编排，再委托给领域、投影和存储边界。
-
-### 面试表达
-
-强一致性来自单一变更锁，以及先发布再替换候选状态。
+`MiniS3` 把领域组件和存储组件组成一次一致的公开操作。它串行化完整迁移，在暴露候选 Bucket 前先发布，所以写入失败时当前内存与重启可见状态会留在同一侧。
 
 ### 教材
 

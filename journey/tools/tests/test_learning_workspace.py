@@ -47,6 +47,7 @@ class LearningWorkspaceTest(unittest.TestCase):
             help_output = run([*cli, "--help"]).stdout
             self.assertIn("study N", help_output)
             self.assertIn("attempt N", help_output)
+            self.assertIn("agent N", help_output)
             self.assertIn("check N", help_output)
 
             studied = run(
@@ -105,6 +106,7 @@ class LearningWorkspaceTest(unittest.TestCase):
                 run(["git", "status", "--short"], cwd=workspace).stdout,
                 "",
             )
+
             self.assertEqual(
                 run(["git", "log", "-1", "--pretty=%s"], cwd=workspace)
                 .stdout.strip(),
@@ -117,6 +119,46 @@ class LearningWorkspaceTest(unittest.TestCase):
             self.assertNotEqual(attempt_check.returncode, 0)
             self.assertIn("stage-02 tests failed", attempt_check.stdout)
             self.assertIn("src/minis3/bucket.py", attempt_check.stdout)
+
+    def test_agent_mode_installs_tutor_contract_and_current_stage_context(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="minis3-agent-test-") as temporary:
+            workspace = Path(temporary) / "learner"
+            cli = [sys.executable, str(TOOL)]
+
+            output = run(
+                [*cli, "agent", "3", "--workspace", str(workspace), "--yes"]
+            ).stdout
+
+            self.assertIn("[agent stage-03] READY", output)
+            self.assertIn("Start prompt: 开始 Stage 03", output)
+            self.assertIn("codex", output)
+            self.assertTrue((workspace / "AGENTS.md").is_file())
+            self.assertTrue((workspace / ".journey" / "stage.md").is_file())
+            self.assertTrue((workspace / ".journey" / "reference.patch").is_file())
+            self.assertTrue((workspace / ".journey" / "tests.txt").is_file())
+            self.assertIn(
+                "# Stage 03 · Durable storage boundary",
+                (workspace / ".journey" / "stage.md").read_text(),
+            )
+            self.assertIn(
+                "quick misconception screening",
+                (workspace / "AGENTS.md").read_text(),
+            )
+            self.assertEqual(
+                run(["git", "status", "--short"], cwd=workspace).stdout,
+                "",
+            )
+
+            # Existing learning repositories created before agent mode should
+            # gain the support-file excludes on their next preparation.
+            (workspace / ".git" / "info" / "exclude").write_text(
+                ".venv/\n.pytest_cache/\n__pycache__/\n*.pyc\n"
+            )
+            run([*cli, "agent", "4", "--workspace", str(workspace), "--yes"])
+            self.assertEqual(
+                run(["git", "status", "--short"], cwd=workspace).stdout,
+                "",
+            )
 
 
 if __name__ == "__main__":

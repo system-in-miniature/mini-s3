@@ -2,7 +2,7 @@
 
 ### Goal
 
-Turn ETags into cache validators and serialized compare-and-swap preconditions.
+Use ETags as cache validators and serialized compare-and-swap preconditions for reads and mutations.
 
 ### Deliverable files / 交付文件
 
@@ -12,27 +12,50 @@ Turn ETags into cache validators and serialized compare-and-swap preconditions.
 - `src/minis3/store.py`
 - `tests/test_conditional.py`
 
-### Mechanism walkthrough
+### The problem at this point
 
-#### Ownership and flow
+ETags exist but callers cannot make an operation conditional on the value they observed. A stale writer can overwrite a newer value, and a cache cannot ask whether its copy is still current without downloading the body again.
 
-Pure helpers evaluate ETag syntax; `MiniS3` holds one lock across reading the current visible ETag, checking the precondition, and publishing the mutation.
+### Failure preview
 
-#### Failure and debugging
+The concurrency contract starts two writers with the same initial ETag. Exactly one may pass `If-Match`; the second must see the changed current ETag and fail. If the check occurs outside the mutation lock, both can validate stale state and both appear to win.
 
-Separate matching errors from serialization errors. If two conditional writers both win, comparison and mutation escaped the same critical section.
+### Basic concepts
 
-### File-by-file diff walkthrough
+`If-None-Match` on GET is a cache validator: a match means the representation is not modified (304-shaped). `If-Match` is a precondition: mismatch means the requested operation cannot be applied to the addressed current state (412-shaped).
 
-Read by runtime responsibility, not patch storage order. Every block comes directly from the canonical `stage.patch`.
+Compare-and-swap means “change only if the current identity still equals what I observed.” Correctness depends on checking and mutating within one serialized critical section, not just on comparing strings.
+
+### Why this mechanism is necessary
+
+Without preconditions, read-modify-write clients lose updates. Without distinct 304/412 failures, callers cannot tell a successful cache validation from a rejected mutation. Central match helpers keep wildcard and comma-list behavior consistent.
+
+### Runtime mental model
+
+The service acquires its lock, resolves the current or addressed ETag, applies `require_if_match`/`require_if_none_match`, and only then reads or mutates. A successful PUT changes the ETag before the next waiting writer performs its check.
+
+### File-by-file walkthrough
 
 #### `src/minis3/conditional.py`
 
-ETag precondition matching rules.
+##### What it is and why it appears
 
-Called by `MiniS3` as a policy function; receives explicit values and returns a decision for the service to apply.
+This pure policy module parses ETag conditions and raises the correct semantic failure.
 
-**Changed anchors:** `etag_matches`, `require_if_match`, `require_if_none_match`
+##### Runtime role
+
+Store supplies the current ETag; the helpers decide match, precondition failure, or not-modified without owning locks or state.
+
+##### Key code
+
+```python
+if condition is not None and not etag_matches(condition, current_etag):
+    raise PreconditionFailed(condition)
+```
+
+##### Statement understanding
+
+Absent condition means no guard. A present nonmatch must stop the operation before mutation; returning `False` for the caller to ignore would weaken the contract.
 
 ??? note "File diff: src/minis3/conditional.py"
     ```diff
@@ -81,11 +104,23 @@ Called by `MiniS3` as a policy function; receives explicit values and returns a 
 
 #### `src/minis3/errors.py`
 
-Shared domain failure vocabulary.
+##### What it is and why it appears
 
-Constructed by bucket/service code and returned upward without owning I/O; inspect field values when state is correct but results look wrong.
+The failure vocabulary gains distinct precondition-failed and not-modified outcomes.
 
-**Changed anchors:** `PreconditionFailed`, `NotModified`
+##### Runtime role
+
+Protocol adapters can later map them to 412 and 304 without embedding HTTP in the domain service.
+
+##### Key code
+
+```python
+class NotModified(MiniS3Error):
+```
+
+##### Statement understanding
+
+Not-modified is control-flow evidence for a validator, not the same error as a mutation rejected against stale state.
 
 ??? note "File diff: src/minis3/errors.py"
     ```diff
@@ -109,11 +144,23 @@ Constructed by bucket/service code and returned upward without owning I/O; inspe
 
 #### `src/minis3/store.py`
 
-Application service coordinating domain and persistence.
+##### What it is and why it appears
 
-Receives public calls, owns locking and orchestration, then delegates to domain, projection, and storage boundaries.
+Public GET, PUT, and DELETE accept conditional parameters and evaluate them inside existing locks.
 
-**Changed anchors:** `put_object`, `_current_etag`, `_addressed_etag`, `_bucket`
+##### Runtime role
+
+It owns atomicity between current-ETag lookup, precondition decision, and any subsequent Bucket mutation/publication.
+
+##### Key code
+
+```python
+require_if_match(self._current_etag(candidate, key), if_match)
+```
+
+##### Statement understanding
+
+The check reads from the candidate snapshot while the service lock is held. No other writer can change the current visible ETag between this line and mutation.
 
 ??? note "File diff: src/minis3/store.py"
     ```diff
@@ -229,11 +276,17 @@ Receives public calls, owns locking and orchestration, then delegates to domain,
 
 #### `src/minis3/__init__.py`
 
-Supported public package surface.
+##### What it is and why it appears
 
-Reached by user imports; wiring errors appear as missing names before any runtime flow starts.
+Conditional failures become part of the supported API.
 
-**Changed anchors:** configuration, export, or documentation change
+##### Runtime role
+
+Callers catch semantic outcomes from the package root; match helpers remain internal policy.
+
+##### Statement understanding
+
+Exposing outcome types but not parsing internals keeps the public surface small.
 
 ??? note "File diff: src/minis3/__init__.py"
     ```diff
@@ -250,11 +303,23 @@ Reached by user imports; wiring errors appear as missing names before any runtim
 
 #### `tests/test_conditional.py`
 
-Executable proof of the stage behavior.
+##### What it is and why it appears
 
-Calls the learner-visible boundary and records the expected state or failure; start here only when verifying the mechanism.
+Four contracts cover GET validators, mutation guards, wildcard behavior, and the two-writer CAS race.
 
-**Changed anchors:** `test_get_if_none_match_has_304_semantics_and_if_match_has_412`, `test_put_and_delete_if_match_compare_against_current_visible_etag`, `test_if_match_wildcard_requires_a_current_visible_object`, `test_two_conditional_writers_have_exactly_one_winner`, `writer`
+##### Runtime role
+
+The threaded test proves serialization behavior that a sequential helper unit test cannot establish.
+
+##### Key code
+
+```python
+assert sorted(outcomes) == ["412", "stored"]
+```
+
+##### Statement understanding
+
+One `stored` and one `412` is the externally visible CAS guarantee. Two stored outcomes would prove the check and mutation were not atomic.
 
 ??? note "File diff: tests/test_conditional.py"
     ```diff
@@ -349,27 +414,15 @@ Calls the learner-visible boundary and records the expected state or failure; st
 
 ### Verification evidence
 
-`uv run pytest -q $(cat journey/stages/13-conditional-cas/tests.txt)`
+Run `uv run pytest -q $(cat journey/stages/13-conditional-cas/tests.txt)`. The cases prove matching forms, failure meanings, mutation guards, and one-winner concurrency.
 
-This stage adds 4 executable case(s), anchored at `test_get_if_none_match_has_304_semantics_and_if_match_has_412`, `test_put_and_delete_if_match_compare_against_current_visible_etag`, `test_if_match_wildcard_requires_a_current_visible_object`, `test_two_conditional_writers_have_exactly_one_winner`. Run them after the mechanism walkthrough; the cumulative gate also reruns every earlier stage contract.
+### Durable takeaways
 
-### Concept check
+ETag comparison becomes safe concurrency control only when check and mutation share the same lock. 304-style validation and 412-style rejection are different outcomes.
 
-Which invariant must remain true after this stage?
+### Explain it in your own words
 
-??? note "Answer"
-    The comparison and publication must share one critical section or two writers can both win.
-
-### Code-reading check
-
-Start at `etag_matches` in `src/minis3/conditional.py`: what state or value enters this boundary, and which owner consumes the result next?
-
-??? note "Answer"
-    Called by `MiniS3` as a policy function; receives explicit values and returns a decision for the service to apply.
-
-### Interview-ready summary
-
-The comparison and publication must share one critical section or two writers can both win.
+Conditional requests let a caller act on the exact value it observed. MiniS3 evaluates the ETag guard inside the service's mutation lock, so one writer can commit and every stale competitor then fails against the new current ETag instead of overwriting it.
 
 ### Textbook
 

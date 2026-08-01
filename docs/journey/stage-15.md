@@ -2,33 +2,53 @@
 
 ### Goal
 
-Expose the complete teaching API and prove the reconstructed source and Journey-owned tests equal main byte for byte.
+Expose the complete teaching API and prove the stage-built source and Journey tests match main byte for byte.
 
 ### Deliverable files / 交付文件
 
 - `src/minis3/__init__.py`
 
-### Mechanism walkthrough
+### The problem at this point
 
-#### Ownership and flow
+All mechanisms exist, but accumulated imports can still expose accidental names or omit intended ones. Passing behavioral tests also does not by itself prove the Journey reconstructs the exact maintained source and test corpus.
 
-`minis3.__init__` is the supported adapter surface; the Journey builder then applies every patch and compares final `src/minis3` plus Journey-owned tests byte for byte with main. Site-only documentation tests stay outside this rebuild contract.
+### Failure preview
 
-#### Failure and debugging
+The parity command rebuilds every patch into a fresh tree and compares bytes with main. One missing export line or stale stage test makes the check fail even if a narrow pytest selection remains green. This catches drift between the learning path and finished repository.
 
-An import failure belongs to export wiring; a final parity failure names missing, extra, or changed files and must be fixed in the stage chain rather than hidden in generated commits.
+### Basic concepts
 
-### File-by-file diff walkthrough
+A public API is an intentional compatibility boundary, not every name currently importable from a module. `__all__` records that choice. Source parity and behavioral evidence are complementary: tests prove selected semantics; byte comparison proves the reconstruction artifact is the maintained artifact.
 
-Read by runtime responsibility, not patch storage order. Every block comes directly from the canonical `stage.patch`.
+### Why this mechanism is necessary
+
+A course can slowly become a detached toy while its examples still pass. Closing with exact exports and byte parity makes source alignment an enforceable property rather than a README claim.
+
+### Runtime mental model
+
+User imports resolve through `src/minis3/__init__.py`. Separately, `build_journey.py --check` starts from the empty Journey root, applies all 15 canonical patches, gathers Journey-owned tests, and compares reconstructed bytes to the current main tree without moving refs.
+
+### File-by-file walkthrough
 
 #### `src/minis3/__init__.py`
 
-Supported public package surface.
+##### What it is and why it appears
 
-Reached by user imports; wiring errors appear as missing names before any runtime flow starts.
+The package root receives its final explicit export list for values, services, policies, results, and public failures.
 
-**Changed anchors:** configuration, export, or documentation change
+##### Runtime role
+
+It is the stable learner-facing import boundary. Internal storage helpers and implementation-only functions remain absent.
+
+##### Key code
+
+```python
+__all__ = [
+```
+
+##### Statement understanding
+
+The list converts an implicit collection of imports into a deliberate contract. Adding an internal helper elsewhere no longer makes it public accidentally.
 
 ??? note "File diff: src/minis3/__init__.py"
     ```diff
@@ -79,27 +99,15 @@ Reached by user imports; wiring errors appear as missing names before any runtim
 
 ### Verification evidence
 
-`uv run pytest -q $(cat journey/stages/15-public-api-parity/tests.txt)`
+Run `uv run pytest -q $(cat journey/stages/15-public-api-parity/tests.txt)` for the cumulative suite, then `python journey/tools/build_journey.py --check` for byte-for-byte source and Journey-test parity. Stage 15 adds no new behavior case because its deliverable is the public surface and reconstruction proof.
 
-This stage adds no new behavior case: the cumulative suite guards the public exports, while `python journey/tools/build_journey.py --check` separately proves byte-for-byte final source and Journey-test parity.
+### Durable takeaways
 
-### Concept check
+An import surface, passing tests, and byte parity prove different things. Completion requires all three to agree with the intended course boundary.
 
-Which invariant must remain true after this stage?
+### Explain it in your own words
 
-??? note "Answer"
-    A rebuild journey stays trustworthy only when CI guards both behavior and final-source parity.
-
-### Code-reading check
-
-Start at `the public export list` in `src/minis3/__init__.py`: what state or value enters this boundary, and which owner consumes the result next?
-
-??? note "Answer"
-    Reached by user imports; wiring errors appear as missing names before any runtime flow starts.
-
-### Interview-ready summary
-
-A rebuild journey stays trustworthy only when CI guards both behavior and final-source parity.
+The final Stage makes the learning journey auditable. `__all__` states which concepts are supported publicly, cumulative tests prove their behavior, and the parity rebuild proves the sequence of stages reconstructs the same source and tests maintained on main.
 
 ### Textbook
 

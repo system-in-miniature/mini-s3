@@ -38,6 +38,34 @@ its version ID.
 脚本写入两个版本、创建删除标记，展示普通 GET 此时得到 `NoSuchKey`，然后按
 version ID 取回仍被保留的第一个版本。
 
+## Choose a learning mode / 选择学习模式
+
+### Mechanism Tutorial / 机制教程
+
+Read the [Mechanism Tutorial](tutorial/index.md) when you want a topic-oriented
+explanation of object values, versioning, listing, crash atomicity, multipart,
+conditional requests, and lifecycle expiration.
+
+如果你希望按主题系统理解对象值、版本化、Listing、崩溃原子性、Multipart、条件请求
+与生命周期，请阅读[机制教程](zh/tutorial/index.md)。
+
+### Self-Guided Rebuild / 自主重建
+
+Follow the [Self-Guided Rebuild](journey/index.md) to learn through 15 cumulative
+browser lessons. Each Stage explains the problem and failure first, then walks
+through every changed file and its critical statements.
+
+通过[自主重建](zh/journey/index.md)完成 15 个累积浏览课程。每个 Stage 先解释问题与
+失败场景，再逐文件理解关键语句。
+
+### Agent-Guided Rebuild / Agent 带教
+
+Use the [Agent-Guided Rebuild tutorial](agent-guided.md) to prepare `stage-NN`
+in a dedicated workspace and learn interactively with Codex through `AGENTS.md`.
+
+按照 [Agent 带教使用教程](zh/agent-guided.md)准备专用工作区中的 `stage-NN`，再由
+Codex 根据 `AGENTS.md` 进行互动带教。
+
 ## Reading path / 阅读顺序
 
 Use the repository tour for the code layout, then read the concept mapping.

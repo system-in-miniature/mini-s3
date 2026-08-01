@@ -2,33 +2,58 @@
 
 ### 目标
 
-引入 Bucket 聚合、合法版本化迁移，以及可注入的单调序列。
+引入 Bucket 聚合、合法版本化迁移与确定性身份。
 
 ### 交付文件
 
 - `src/minis3/bucket.py`
+- `tests/test_bucket.py`
 
-### 机制走读
+### 当前遇到的问题
 
-#### 所有权与数据流
+Stage 01 只能描述一份值，还不能决定已有历史上的 PUT 或 DELETE 应该做什么。这些规则必须由同一个边界拥有，否则服务、存储和 Listing 可能各自实现不同的版本化语义。
 
-`Bucket` 拥有每个 Key 的历史与合法版本状态迁移；注入的 `SequenceCounter` 为每次 PUT 或删除标记生成确定性的公开与内部身份。
+### 先看会坏在哪里
 
-#### 失败与排查
+聚合契约先写入未版本化值，再启用版本化、再次写入、暂停版本化，最后尝试回到 `UNVERSIONED`。如果最后一步成功，已存在的具名历史会被误解释为“从未启用版本化”。预期的 `ValueError` 在引入持久化以前就锁定状态机。
 
-先看分支前的 Bucket 状态，再比较变更后的 `version_id`、`storage_id` 与记录顺序；非法迁移必须在修改状态前失败。
+### 基本概念
 
-### 逐文件 Diff 走读
+聚合是相关状态迁移的所有者。这里一个 `Bucket` 同时拥有版本化状态与每个 Key 的 `ObjectRecord`。`UNVERSIONED` 表示从未启用；`SUSPENDED` 表示曾经启用，之后新写入使用公开 `null` 槽，但具名历史仍保留。
 
-按运行时职责阅读，而不是按补丁存储顺序阅读。每个代码块都直接来自 canonical `stage.patch`。
+公开 `version_id` 与内部 `storage_id` 解决不同问题。暂停状态可以反复使用公开 ID `null`，但不可变磁盘 Artifact 仍需要唯一内部名称。注入的单调序列可复现地生成两者。
+
+### 为什么需要这个机制
+
+如果分支散落在调用方，非法迁移和替换规则很容易不一致。集中到 Bucket 后，PUT、GET、DELETE 共用一套历史模型。确定性 ID 还让恢复逻辑能从最大已发布序列继续，而不是依赖随机值。
+
+### 运行时心智模型
+
+调用方给出命令和 `SequenceCounter`。Bucket 校验状态、取一个序列、构造新版本或 Marker，再替换精确 Key 的不可变 `ObjectRecord`。Enabled 写入追加历史；未版本化和暂停写入只替换 `null` 槽。
+
+### 逐文件走读
 
 #### `src/minis3/bucket.py`
 
-拥有 Bucket 内部状态迁移的聚合。
+##### 是什么，为什么现在需要
 
-由 `MiniS3` 调用；把一次命令和当前记录转换为下一份内存历史。
+这个可变聚合是合法版本状态与每 Key 历史的唯一所有者，持久化仍留在外部。
 
-**变化锚点:** `VersioningState`, `SequenceCounter`, `__init__`, `__call__`, `ensure_at_least`, `Bucket`, `set_versioning`, `put`, `get`, `delete`
+##### 在运行时做什么
+
+服务层会调用 `set_versioning`、`put`、`get`、`delete`。每个方法把当前 Bucket 状态变成下一状态，或者在变更前抛错。
+
+##### 关键代码
+
+```python
+if self.versioning is VersioningState.ENABLED:
+    versions = (version, *old.versions)
+else:
+```
+
+##### 关键语句理解
+
+Enabled PUT 通过前插保留全部旧版本；`else` 则替换公开 `null` 槽并保留具名历史。把两个分支写成一样会破坏暂停语义。
 
 ??? note "文件差异：src/minis3/bucket.py"
     ```diff
@@ -201,11 +226,24 @@
 
 #### `tests/test_bucket.py`
 
-本阶段行为的可执行证明。
+##### 是什么，为什么现在需要
 
-调用学习者可见边界并记录预期状态或失败；验证机制时再从这里进入。
+这个契约先单测聚合，避免服务层和磁盘层掩盖错误来源。
 
-**变化锚点:** `test_bucket_owns_versioning_transitions_and_deterministic_ids`
+##### 在运行时做什么
+
+它证明相同序列源依次产生 `null/e00000001` 与 `v00000002/e00000002`，并锁定禁止的倒退迁移。
+
+##### 关键代码
+
+```python
+with pytest.raises(ValueError):
+    bucket.set_versioning(VersioningState.UNVERSIONED)
+```
+
+##### 关键语句理解
+
+这个失败属于领域行为：一旦可能存在具名版本，“从未版本化”就不再是真实状态。
 
 ??? note "文件差异：tests/test_bucket.py"
     ```diff
@@ -240,27 +278,15 @@
 
 ### 验证证据
 
-`uv run pytest -q $(cat journey/stages/02-bucket-state/tests.txt)`
+运行 `uv run pytest -q $(cat journey/stages/02-bucket-state/tests.txt)`。它证明聚合迁移与身份契约，但还不证明磁盘恢复或并发服务调用。
 
-本阶段新增 1 个可执行用例，入口为 `test_bucket_owns_versioning_transitions_and_deterministic_ids`。它们在机制走读之后运行，并与此前 Stage 的用例一起守住累计行为。
+### 需要真正记住的内容
 
-### 概念检查
+Bucket 拥有历史迁移；公开版本身份与内部 Artifact 身份分离；Enabled 与 Suspended 不能混为一谈。
 
-本阶段完成后，哪条不变量必须保持成立？
+### 用自己的话讲清楚
 
-??? note "答案"
-    版本化可启用、可暂停，但不能回到从未启用状态。
-
-### 代码阅读检查
-
-从 `src/minis3/bucket.py` 的 `VersioningState` 开始：进入这个边界的状态或值是什么，结果又交给哪个所有者？
-
-??? note "答案"
-    由 `MiniS3` 调用；把一次命令和当前记录转换为下一份内存历史。
-
-### 面试表达
-
-版本化可启用、可暂停，但不能回到从未启用状态。
+Bucket 聚合阻止每个调用方自行发明版本化规则。它用确定性序列排序变更，在需要时保留具名历史，并拒绝会让现有历史无法解释的状态迁移。
 
 ### 教材
 

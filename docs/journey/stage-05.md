@@ -2,7 +2,7 @@
 
 ### Goal
 
-Expose complete histories so null versions, named versions, and markers remain distinguishable.
+Project complete histories without collapsing null versions, named versions, and delete markers.
 
 ### Deliverable files / 交付文件
 
@@ -11,27 +11,47 @@ Expose complete histories so null versions, named versions, and markers remain d
 - `src/minis3/store.py`
 - `tests/test_versioning.py`
 
-### Mechanism walkthrough
+### The problem at this point
 
-#### Ownership and flow
+GET returns one addressed data version, so it cannot explain the history hidden behind the latest value or marker. Administrative and recovery views need every retained entry plus enough metadata to distinguish their meanings.
 
-Mutation remains in `Bucket`; `listing.py` flattens ordered histories into read-only `ListedVersion` rows while preserving latest and delete-marker flags.
+### Failure preview
 
-#### Failure and debugging
+The suspended-delete contract creates named history, writes a `null` value, then deletes without a version ID. The expected history contains a new `null` marker and the older named versions, but not the replaced `null` data. A flat “all values” list would report the wrong state.
 
-Inspect the stored tuple before blaming projection. Wrong null-slot replacement is a mutation bug; correct history with wrong ordering/flags is a listing bug.
+### Basic concepts
 
-### File-by-file diff walkthrough
+A projection is a read-only shape derived from owned state. `ListedVersion` does not become a second history owner; it converts each `Version` or `DeleteMarker` into fields useful to callers. `is_latest` depends on position within one key's newest-first tuple, not on the highest ID string globally.
 
-Read by runtime responsibility, not patch storage order. Every block comes directly from the canonical `stage.patch`.
+### Why this mechanism is necessary
+
+Returning raw internal objects would couple callers to storage fields and tempt them to mutate history. Returning only current data would erase markers and noncurrent versions. An explicit projection preserves semantics while keeping the aggregate authoritative.
+
+### Runtime mental model
+
+The service locks and passes Bucket records to `list_object_versions`. The pure function filters exact key prefixes, iterates keys deterministically, flattens each newest-first history, marks only index zero as latest, and returns an immutable result.
+
+### File-by-file walkthrough
 
 #### `src/minis3/listing.py`
 
-Read-side projection and pagination logic.
+##### What it is and why it appears
 
-Called by the service read path; converts stored histories into sorted, paginated response values without mutation.
+This read-side module introduces response values and the pure history projection.
 
-**Changed anchors:** `ListedVersion`, `ListObjectVersionsResult`, `list_object_versions`
+##### Runtime role
+
+It consumes records without mutation and emits a stable sequence carrying key, IDs, ETag/size when data exists, marker flag, and latest flag.
+
+##### Key code
+
+```python
+etag=item.etag if is_data else None,
+```
+
+##### Statement understanding
+
+A marker has no body-derived ETag. Making the field explicitly `None` preserves the distinction instead of inventing an empty-object fingerprint.
 
 ??? note "File diff: src/minis3/listing.py"
     ```diff
@@ -100,11 +120,23 @@ Called by the service read path; converts stored histories into sorted, paginate
 
 #### `src/minis3/store.py`
 
-Application service coordinating domain and persistence.
+##### What it is and why it appears
 
-Receives public calls, owns locking and orchestration, then delegates to domain, projection, and storage boundaries.
+The public service gains a locked read method for the new projection.
 
-**Changed anchors:** `list_object_versions`, `_bucket`
+##### Runtime role
+
+It resolves the Bucket and delegates to the pure listing function while preventing a concurrent mutation from changing the snapshot mid-read.
+
+##### Key code
+
+```python
+return list_object_versions(self._bucket(bucket).records, prefix=prefix)
+```
+
+##### Statement understanding
+
+The service passes records but does not reproduce projection logic. This keeps ownership clear and makes the pure function independently understandable.
 
 ??? note "File diff: src/minis3/store.py"
     ```diff
@@ -138,11 +170,17 @@ Receives public calls, owns locking and orchestration, then delegates to domain,
 
 #### `src/minis3/__init__.py`
 
-Supported public package surface.
+##### What it is and why it appears
 
-Reached by user imports; wiring errors appear as missing names before any runtime flow starts.
+The new result type becomes part of the supported package surface.
 
-**Changed anchors:** configuration, export, or documentation change
+##### Runtime role
+
+It lets callers name the response contract without importing an internal module path.
+
+##### Statement understanding
+
+Exporting a result value is a compatibility decision; the internal flattening helper remains an implementation detail.
 
 ??? note "File diff: src/minis3/__init__.py"
     ```diff
@@ -159,11 +197,23 @@ Reached by user imports; wiring errors appear as missing names before any runtim
 
 #### `tests/test_versioning.py`
 
-Executable proof of the stage behavior.
+##### What it is and why it appears
 
-Calls the learner-visible boundary and records the expected state or failure; start here only when verifying the mechanism.
+Three new scenarios lock the projection of unversioned replacement, suspended replacement, and suspended deletion.
 
-**Changed anchors:** `test_unversioned_put_replaces_null_and_delete_removes_it`, `test_enabled_puts_stack_and_delete_marker_hides_history`, `test_suspended_put_replaces_null_but_preserves_named_history`, `test_latest_marker_is_404_even_when_older_data_exists`, `test_suspended_delete_replaces_null_with_null_marker`, `test_nonempty_bucket_cannot_be_deleted`
+##### Runtime role
+
+They observe public histories after real service mutations, so the evidence covers Bucket plus projection rather than a fabricated input alone.
+
+##### Key code
+
+```python
+assert marker is not None and marker.version_id == "null"
+```
+
+##### Statement understanding
+
+Suspension does not mean deletion becomes physical. The new marker occupies the public `null` slot while named history remains addressable.
 
 ??? note "File diff: tests/test_versioning.py"
     ```diff
@@ -271,27 +321,15 @@ Calls the learner-visible boundary and records the expected state or failure; st
 
 ### Verification evidence
 
-`uv run pytest -q $(cat journey/stages/05-version-history/tests.txt)`
+Run `uv run pytest -q $(cat journey/stages/05-version-history/tests.txt)`. The cumulative suite proves projection semantics across versioning states; current-object pagination belongs to Stage 06.
 
-This stage adds 3 executable case(s), anchored at `test_unversioned_put_replaces_null_and_delete_removes_it`, `test_suspended_put_replaces_null_but_preserves_named_history`, `test_suspended_delete_replaces_null_with_null_marker`. Run them after the mechanism walkthrough; the cumulative gate also reruns every earlier stage contract.
+### Durable takeaways
 
-### Concept check
+A read projection explains state without owning it. Null data, named data, and markers remain distinct, and “latest” is local to each exact key history.
 
-Which invariant must remain true after this stage?
+### Explain it in your own words
 
-??? note "Answer"
-    Current visibility and retained history are different projections of the same record.
-
-### Code-reading check
-
-Start at `ListedVersion` in `src/minis3/listing.py`: what state or value enters this boundary, and which owner consumes the result next?
-
-??? note "Answer"
-    Called by the service read path; converts stored histories into sorted, paginated response values without mutation.
-
-### Interview-ready summary
-
-Current visibility and retained history are different projections of the same record.
+Version listing is a pure view over Bucket-owned history. It preserves entries that GET intentionally hides, marks the head of each key as latest, and keeps marker-only fields empty so callers can reconstruct what happened without mutating the source state.
 
 ### Textbook
 

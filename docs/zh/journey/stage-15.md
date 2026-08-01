@@ -2,33 +2,53 @@
 
 ### 目标
 
-公开完整教学 API，并证明重建后的源码与 Journey 所有的测试逐字节等于 main。
+公开完整教学 API，并证明按 Stage 构建的源码与 Journey 测试逐字节等于 main。
 
 ### 交付文件
 
 - `src/minis3/__init__.py`
 
-### 机制走读
+### 当前遇到的问题
 
-#### 所有权与数据流
+所有机制都已存在，但累积 import 仍可能意外公开内部名称，或漏掉预期名称。行为测试通过也不能单独证明 Journey 重建的是当前维护的精确源码与测试集合。
 
-`minis3.__init__` 是受支持的适配器接口；Journey Builder 随后应用全部 Patch，并把最终 `src/minis3` 与 Journey 所有的测试和 main 逐字节比较。仅服务网站的文档测试不属于重建契约。
+### 先看会坏在哪里
 
-#### 失败与排查
+Parity 命令在全新树中重放每个 patch，再与 main 比较字节。即使窄范围 pytest 仍绿，只要漏一条 export 或 Stage 测试过期，检查就会失败。这直接捕获学习路径与完成仓库之间的漂移。
 
-导入失败属于导出接线问题；最终 Parity 失败会列出缺失、多余或变化文件，必须修复 Stage 链，不能藏在生成 Commit 中。
+### 基本概念
 
-### 逐文件 Diff 走读
+公开 API 是有意选择的兼容边界，不是模块里当前能 import 的全部名称。`__all__` 记录这个选择。源码 parity 与行为证据互补：测试证明选定语义，字节比较证明重建 Artifact 就是维护中的 Artifact。
 
-按运行时职责阅读，而不是按补丁存储顺序阅读。每个代码块都直接来自 canonical `stage.patch`。
+### 为什么需要这个机制
+
+课程可能逐渐变成脱离源码的 toy，同时自己的示例仍然通过。用精确 export 与字节 parity 收官，能把源码对齐变成可执行属性，而不是 README 声明。
+
+### 运行时心智模型
+
+用户 import 通过 `src/minis3/__init__.py` 解析。另一边，`build_journey.py --check` 从空 Journey 根开始应用 15 个 canonical patch，收集 Journey 自有测试，再把重建字节与当前 main 比较，不移动 refs。
+
+### 逐文件走读
 
 #### `src/minis3/__init__.py`
 
-受支持的包级公开接口。
+##### 是什么，为什么现在需要
 
-由用户导入触达；接线错误会在运行时流程开始前表现为名称缺失。
+包根得到最终显式导出列表，覆盖值、服务、策略、结果与公开失败。
 
-**变化锚点:** 配置、导出或文档变化
+##### 在运行时做什么
+
+它是稳定的学习者导入边界；内部存储 helper 和实现函数继续不公开。
+
+##### 关键代码
+
+```python
+__all__ = [
+```
+
+##### 关键语句理解
+
+这份列表把隐式 imports 集合变成有意契约；以后在内部增加 helper，也不会意外变成公开 API。
 
 ??? note "文件差异：src/minis3/__init__.py"
     ```diff
@@ -79,27 +99,15 @@
 
 ### 验证证据
 
-`uv run pytest -q $(cat journey/stages/15-public-api-parity/tests.txt)`
+运行 `uv run pytest -q $(cat journey/stages/15-public-api-parity/tests.txt)` 执行累计套件，再运行 `python journey/tools/build_journey.py --check` 做源码与 Journey 测试逐字节 parity。Stage 15 不新增行为用例，因为交付物就是公开面与重建证明。
 
-本阶段不再新增行为用例；累计测试守住公开导出，`python journey/tools/build_journey.py --check` 另外证明最终源码与 Journey 所有测试逐字节一致。
+### 需要真正记住的内容
 
-### 概念检查
+Import 面、测试通过和字节 parity 各自证明不同内容；完成要求三者都与预期课程边界一致。
 
-本阶段完成后，哪条不变量必须保持成立？
+### 用自己的话讲清楚
 
-??? note "答案"
-    只有 CI 同时守护行为与最终源码一致性，重建旅程才可信。
-
-### 代码阅读检查
-
-从 `src/minis3/__init__.py` 的 `the public export list` 开始：进入这个边界的状态或值是什么，结果又交给哪个所有者？
-
-??? note "答案"
-    由用户导入触达；接线错误会在运行时流程开始前表现为名称缺失。
-
-### 面试表达
-
-只有 CI 同时守护行为与最终源码一致性，重建旅程才可信。
+最终 Stage 让学习旅程可审计：`__all__` 声明哪些概念受公开支持，累计测试证明行为，parity 重建证明整段 Stage 序列得到的就是 main 维护的源码与测试。
 
 ### 教材
 

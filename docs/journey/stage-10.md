@@ -2,7 +2,7 @@
 
 ### Goal
 
-Persist invisible uploads and replace parts atomically without creating object records.
+Persist private multipart uploads and atomically replace parts without publishing an object.
 
 ### Deliverable files / 交付文件
 
@@ -13,27 +13,49 @@ Persist invisible uploads and replace parts atomically without creating object r
 - `src/minis3/store.py`
 - `tests/test_multipart.py`
 
-### Mechanism walkthrough
+### The problem at this point
 
-#### Ownership and flow
+Stage 09 validates abstract staged parts, but a real client needs upload IDs and part bytes to survive retries and restarts. Those bytes must remain invisible to normal GET/List until completion publishes exactly one object.
 
-`MiniS3` creates deterministic upload identities, while `DiskStorage` keeps upload metadata and atomically replaced part bytes under private `uploads/` paths outside object manifests.
+### Failure preview
 
-#### Failure and debugging
+The first integration contract creates an upload for key `right`, then tries to upload through key `wrong` and through part numbers `0` and `10001`. Each request must fail before writing staging. Otherwise an upload ID can be confused across keys or create invalid part files.
 
-Resolve bucket, key, and upload ID together before touching a part. If an unfinished upload appears in GET/listing, inspect whether staging accidentally entered the visible manifest.
+### Basic concepts
 
-### File-by-file diff walkthrough
+Staging is durable private state, not a partially visible object. Each upload has identity `(bucket, key, upload_id)` and its own `parts/` directory. Re-uploading the same part number atomically replaces that staged slot.
 
-Read by runtime responsibility, not patch storage order. Every block comes directly from the canonical `stage.patch`.
+The object model gains creation time and optional `multipart_upload_id` provenance for a future completed version. These fields do not make staging visible; only an `ObjectRecord` referenced by the Bucket manifest does that.
+
+### Why this mechanism is necessary
+
+Keeping parts only in memory makes retry and restart unreliable. Writing them directly into object history exposes incomplete values. A separate durable namespace preserves work while maintaining the one publication boundary established earlier.
+
+### Runtime mental model
+
+The service allocates a deterministic upload ID and asks DiskStorage to create `uploads/<id>/upload.json` plus `parts/`. `upload_part` validates the number and upload identity, then atomically writes one numbered `.data` file. Abort removes only that private upload directory.
+
+### File-by-file walkthrough
 
 #### `src/minis3/model.py`
 
-Immutable values carried through the system.
+##### What it is and why it appears
 
-Constructed by bucket/service code and returned upward without owning I/O; inspect field values when state is correct but results look wrong.
+Versions and markers gain timestamps; data versions can record which multipart upload produced them after completion.
 
-**Changed anchors:** configuration, export, or documentation change
+##### Runtime role
+
+Lifecycle and recovery will consume these fields later. They remain immutable metadata attached to published history.
+
+##### Key code
+
+```python
+multipart_upload_id: str | None = None
+```
+
+##### Statement understanding
+
+`None` identifies normal PUTs; a completed multipart version can retain provenance without turning the upload itself into visible history.
 
 ??? note "File diff: src/minis3/model.py"
     ```diff
@@ -67,11 +89,23 @@ Constructed by bucket/service code and returned upward without owning I/O; inspe
 
 #### `src/minis3/bucket.py`
 
-Aggregate that owns per-bucket state transitions.
+##### What it is and why it appears
 
-Called by `MiniS3`; turns one command plus the current record into the next in-memory history.
+Bucket PUT accepts an optional externally calculated ETag, timestamp, and multipart provenance while keeping normal PUT defaults.
 
-**Changed anchors:** `put`
+##### Runtime role
+
+Completion will reuse the same version transition rather than inventing a second publication path.
+
+##### Key code
+
+```python
+etag=content_etag(body) if etag is None else etag,
+```
+
+##### Statement understanding
+
+Normal PUT still derives a whole-body ETag; multipart completion can supply its validated composite ETag. Recomputing it from assembled bytes would be wrong.
 
 ??? note "File diff: src/minis3/bucket.py"
     ```diff
@@ -132,11 +166,23 @@ Called by `MiniS3`; turns one command plus the current record into the next in-m
 
 #### `src/minis3/storage/disk.py`
 
-Disk layout, publication, and recovery owner.
+##### What it is and why it appears
 
-Called after a domain mutation; turns in-memory state into durable artifacts and reconstructs it on startup.
+DiskStorage gains the private upload layout, atomic part writes, identity validation, removal, and restart recovery.
 
-**Changed anchors:** `create_multipart_upload`, `write_multipart_part`, `load_multipart_upload`, `remove_multipart_upload`, `_bucket_directory`, `_upload_directory`, `_manifest_bytes`, `_recover_uploads`
+##### Runtime role
+
+It owns durable staging just as it owns durable object artifacts, but normal manifest/list code never consults `uploads/`.
+
+##### Key code
+
+```python
+atomic_write(directory / "parts" / f"{part.part_number:05d}.data", part.body)
+```
+
+##### Statement understanding
+
+The part number selects one stable filename and `atomic_write` replaces it completely. A retry cannot leave half old and half new bytes.
 
 ??? note "File diff: src/minis3/storage/disk.py"
     ```diff
@@ -362,11 +408,23 @@ Called after a domain mutation; turns in-memory state into durable artifacts and
 
 #### `src/minis3/store.py`
 
-Application service coordinating domain and persistence.
+##### What it is and why it appears
 
-Receives public calls, owns locking and orchestration, then delegates to domain, projection, and storage boundaries.
+The public service adds initiate, upload-part, and abort orchestration with an injectable clock and minimum part size.
 
-**Changed anchors:** `create_bucket`, `delete_bucket`, `set_bucket_versioning`, `put_object`, `get_object`, `head_object`, `delete_object`, `list_objects`, `list_object_versions`, `create_multipart_upload`, `upload_part`, `abort_multipart_upload`, `_bucket`
+##### Runtime role
+
+It validates public parameters under the same lock, allocates deterministic upload identity, and delegates private bytes to DiskStorage.
+
+##### Key code
+
+```python
+upload_id=f"u{sequence:08d}",
+```
+
+##### Statement understanding
+
+Upload IDs share the monotonic sequence discipline, making restart recovery and teaching traces deterministic instead of relying on random UUIDs.
 
 ??? note "File diff: src/minis3/store.py"
     ```diff
@@ -562,11 +620,17 @@ Receives public calls, owns locking and orchestration, then delegates to domain,
 
 #### `src/minis3/__init__.py`
 
-Supported public package surface.
+##### What it is and why it appears
 
-Reached by user imports; wiring errors appear as missing names before any runtime flow starts.
+Multipart values and failures join the supported package API.
 
-**Changed anchors:** configuration, export, or documentation change
+##### Runtime role
+
+Callers can hold upload receipts and catch `NoSuchUpload` without importing storage internals.
+
+##### Statement understanding
+
+The exports expose domain contracts, not the private disk layout.
 
 ??? note "File diff: src/minis3/__init__.py"
     ```diff
@@ -626,11 +690,23 @@ Reached by user imports; wiring errors appear as missing names before any runtim
 
 #### `tests/test_multipart.py`
 
-Executable proof of the stage behavior.
+##### What it is and why it appears
 
-Calls the learner-visible boundary and records the expected state or failure; start here only when verifying the mechanism.
+The first durable multipart test locks upload identity and legal part-number range.
 
-**Changed anchors:** `test_upload_identity_and_part_number_are_validated`
+##### Runtime role
+
+It enters through `MiniS3`, so failures cover service validation plus storage identity lookup.
+
+##### Key code
+
+```python
+store.upload_part("b", "wrong", upload.upload_id, 1, b"x")
+```
+
+##### Statement understanding
+
+An upload ID is not globally interchangeable: the addressed Bucket and Key must match its persisted metadata before any part is written.
 
 ??? note "File diff: tests/test_multipart.py"
     ```diff
@@ -674,27 +750,15 @@ Calls the learner-visible boundary and records the expected state or failure; st
 
 ### Verification evidence
 
-`uv run pytest -q $(cat journey/stages/10-multipart-staging/tests.txt)`
+Run `uv run pytest -q $(cat journey/stages/10-multipart-staging/tests.txt)`. It proves identity and range rejection while cumulative tests protect earlier object behavior. Completion visibility is deliberately deferred.
 
-This stage adds 1 executable case(s), anchored at `test_upload_identity_and_part_number_are_validated`. Run them after the mechanism walkthrough; the cumulative gate also reruns every earlier stage contract.
+### Durable takeaways
 
-### Concept check
+Staging is durable but private; upload identity includes Bucket and Key; same-number retries replace atomically; only Bucket manifest publication creates an object.
 
-Which invariant must remain true after this stage?
+### Explain it in your own words
 
-??? note "Answer"
-    An unfinished upload lives outside the visible object manifest.
-
-### Code-reading check
-
-Start at `the changed hunk` in `src/minis3/model.py`: what state or value enters this boundary, and which owner consumes the result next?
-
-??? note "Answer"
-    Constructed by bucket/service code and returned upward without owning I/O; inspect field values when state is correct but results look wrong.
-
-### Interview-ready summary
-
-An unfinished upload lives outside the visible object manifest.
+MiniS3 stores incomplete multipart work in a separate durable namespace. The service validates upload identity and part numbers, while DiskStorage atomically replaces numbered part files. Normal GET and List remain unchanged because no ObjectRecord is published yet.
 
 ### Textbook
 

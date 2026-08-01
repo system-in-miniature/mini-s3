@@ -2,7 +2,7 @@
 
 ### Goal
 
-Join buckets and storage through a locked service that supports versioned PUT, GET, HEAD, and DELETE.
+Join Bucket and DiskStorage behind one locked public service for bucket and object operations.
 
 ### Deliverable files / 交付文件
 
@@ -11,27 +11,50 @@ Join buckets and storage through a locked service that supports versioned PUT, G
 - `tests/test_storage.py`
 - `tests/test_versioning.py`
 
-### Mechanism walkthrough
+### The problem at this point
 
-#### Ownership and flow
+The domain can calculate a next Bucket and storage can publish it, but callers still have to coordinate both. Without a service owner, one code path could mutate memory without persistence while another could race halfway through a transition.
 
-`MiniS3` is the application boundary: it locks, resolves a bucket, delegates state transitions to `Bucket`, persists successful mutations, and returns protocol-free values.
+### Failure preview
 
-#### Failure and debugging
+The restart contract writes two versions, opens a fresh `MiniS3`, reads both bodies, then writes again and requires a new ID. It exposes two distinct bugs at once: state not published to disk, or the recovered sequence counter reusing an old identity.
 
-Follow one public call through `_bucket`, the aggregate operation, and `DiskStorage.persist_bucket`. If memory and restart results differ, the missing step is between mutation and publication.
+### Basic concepts
 
-### File-by-file diff walkthrough
+An application service coordinates existing owners; it does not absorb their responsibilities. Bucket still decides legal history, DiskStorage still decides publication and recovery, and `MiniS3` owns the public operation, lock, lookup, and ordering between them.
 
-Read by runtime responsibility, not patch storage order. Every block comes directly from the canonical `stage.patch`.
+The implementation mutates a deep-copied candidate, persists it, and only then swaps the in-memory Bucket reference. Thus a publication failure leaves the previously visible in-memory state intact.
+
+### Why this mechanism is necessary
+
+Locking only Bucket or only disk is insufficient because a public mutation spans both. One service lock serializes the read-check-mutate-publish sequence, while candidate publication avoids exposing uncommitted memory.
+
+### Runtime mental model
+
+`put_object` acquires the lock, resolves a Bucket, copies it, delegates PUT to the candidate, persists the candidate, swaps it into `_buckets`, and returns the Version. GET and HEAD read under the same lock; HEAD reuses GET because this protocol-free model returns the same metadata value.
+
+### File-by-file walkthrough
 
 #### `src/minis3/store.py`
 
-Application service coordinating domain and persistence.
+##### What it is and why it appears
 
-Receives public calls, owns locking and orchestration, then delegates to domain, projection, and storage boundaries.
+This is the public application boundary that coordinates locking, aggregate transitions, persistence, and recovery.
 
-**Changed anchors:** `MiniS3`, `__init__`, `create_bucket`, `delete_bucket`, `set_bucket_versioning`, `put_object`, `get_object`, `head_object`, `delete_object`, `_bucket`
+##### Runtime role
+
+Every public bucket/object call enters here. Successful mutations cross Bucket then DiskStorage; reads resolve the current in-memory aggregate.
+
+##### Key code
+
+```python
+self._storage.persist_bucket(candidate)
+self._buckets[bucket] = candidate
+```
+
+##### Statement understanding
+
+Publication occurs before the candidate becomes the process-visible Bucket. Reversing these lines would let a failed disk write leak state that disappears after restart.
 
 ??? note "File diff: src/minis3/store.py"
     ```diff
@@ -149,11 +172,17 @@ Receives public calls, owns locking and orchestration, then delegates to domain,
 
 #### `src/minis3/__init__.py`
 
-Supported public package surface.
+##### What it is and why it appears
 
-Reached by user imports; wiring errors appear as missing names before any runtime flow starts.
+The package now exports `MiniS3` and versioning state in addition to the value model.
 
-**Changed anchors:** configuration, export, or documentation change
+##### Runtime role
+
+It establishes the intended entry point; callers no longer need to assemble Bucket and DiskStorage themselves.
+
+##### Statement understanding
+
+Public export is API wiring, not proof of runtime behavior. The service tests below provide that evidence.
 
 ??? note "File diff: src/minis3/__init__.py"
     ```diff
@@ -172,11 +201,23 @@ Reached by user imports; wiring errors appear as missing names before any runtim
 
 #### `tests/test_storage.py`
 
-Executable proof of the stage behavior.
+##### What it is and why it appears
 
-Calls the learner-visible boundary and records the expected state or failure; start here only when verifying the mechanism.
+These contracts exercise persistence through the public service, including restart, crash injection, bucket deletion, and sequence recovery.
 
-**Changed anchors:** `CrashOnce`, `__init__`, `__call__`, `test_restart_restores_versions_bodies_and_counter`
+##### Runtime role
+
+They detect gaps between in-memory success and reopened state. This is where orchestration and storage meet.
+
+##### Key code
+
+```python
+assert reopened.get_object("b", "k", version_id=first.version_id).body == b"one"
+```
+
+##### Statement understanding
+
+Addressing the old version after constructing `reopened` proves both the version history and its bytes survived publication; checking only the latest value would be weaker.
 
 ??? note "File diff: tests/test_storage.py"
     ```diff
@@ -222,11 +263,23 @@ Calls the learner-visible boundary and records the expected state or failure; st
 
 #### `tests/test_versioning.py`
 
-Executable proof of the stage behavior.
+##### What it is and why it appears
 
-Calls the learner-visible boundary and records the expected state or failure; start here only when verifying the mechanism.
+This file locks the full public versioning state machine and DELETE meanings.
 
-**Changed anchors:** `test_versioning_state_machine_exhaustive`, `test_unversioned_delete_defensively_preserves_named_history`, `test_enabled_puts_stack_and_delete_marker_hides_history`, `test_specific_delete_removes_only_addressed_version`, `test_latest_marker_is_404_even_when_older_data_exists`, `test_nonempty_bucket_cannot_be_deleted`
+##### Runtime role
+
+It distinguishes unversioned deletion, marker creation, specific-version deletion, latest-marker 404 behavior, and retained named history.
+
+##### Key code
+
+```python
+assert bucket.get("k", historical.version_id) == historical
+```
+
+##### Statement understanding
+
+The defensive case proves an unversioned delete cannot erase a named version already present in recovered or externally constructed history.
 
 ??? note "File diff: tests/test_versioning.py"
     ```diff
@@ -349,27 +402,15 @@ Calls the learner-visible boundary and records the expected state or failure; st
 
 ### Verification evidence
 
-`uv run pytest -q $(cat journey/stages/04-object-service/tests.txt)`
+Run `uv run pytest -q $(cat journey/stages/04-object-service/tests.txt)`. Fifteen cases cover service orchestration and version behavior. They do not yet prove listing projections or injected crash outcomes around the manifest rename.
 
-This stage adds 15 executable case(s), anchored at `test_restart_restores_versions_bodies_and_counter`, `test_versioning_state_machine_exhaustive`, `test_unversioned_delete_defensively_preserves_named_history`, `test_enabled_puts_stack_and_delete_marker_hides_history`, `test_specific_delete_removes_only_addressed_version`, `test_latest_marker_is_404_even_when_older_data_exists`, `test_nonempty_bucket_cannot_be_deleted`. Run them after the mechanism walkthrough; the cumulative gate also reruns every earlier stage contract.
+### Durable takeaways
 
-### Concept check
+The service owns orchestration and locking; Bucket owns domain transitions; storage owns durability; persist-before-swap keeps memory aligned with committed state.
 
-Which invariant must remain true after this stage?
+### Explain it in your own words
 
-??? note "Answer"
-    Strong consistency comes from one mutation lock plus publish-before-swap candidate state.
-
-### Code-reading check
-
-Start at `MiniS3` in `src/minis3/store.py`: what state or value enters this boundary, and which owner consumes the result next?
-
-??? note "Answer"
-    Receives public calls, owns locking and orchestration, then delegates to domain, projection, and storage boundaries.
-
-### Interview-ready summary
-
-Strong consistency comes from one mutation lock plus publish-before-swap candidate state.
+`MiniS3` turns separate domain and storage components into one consistent public operation. It serializes the whole transition, publishes a candidate Bucket before exposing it, and therefore keeps current memory and restart-visible state on the same side of a failed write.
 
 ### Textbook
 

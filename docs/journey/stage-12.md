@@ -2,33 +2,53 @@
 
 ### Goal
 
-Prove both sides of a completion crash: keep retryable staging before publish, clean it after publish.
+Prove retryable staging before multipart publication and cleanup after publication.
 
 ### Deliverable files / 交付文件
 
 - `tests/test_storage.py`
 
-### Mechanism walkthrough
+### The problem at this point
 
-#### Ownership and flow
+Normal completion order is correct, but a crash can interrupt after assembly at either side of manifest publication. Recovery must not guess from the presence of staged files; it must correlate published object provenance with upload identity.
 
-This test-only stage correlates a published object's `multipart_upload_id` with private staging: retain staging before publish, clean it idempotently after publish.
+### Failure preview
 
-#### Failure and debugging
+The pre-publication test crashes completion at `before_manifest_publish`, reopens, and completes the same upload successfully. If recovery deletes all staging eagerly, the retry becomes impossible even though no object was committed.
 
-After restart, inspect manifest visibility and upload-directory presence as one pair. Either both absent/present in the wrong crash window exposes a recovery bug.
+### Basic concepts
 
-### File-by-file diff walkthrough
+Before publication, staging is the only durable owner of the requested completion and must remain. After publication, the object version's `multipart_upload_id` proves that this upload committed, so leftover staging is redundant debris and may be removed.
 
-Read by runtime responsibility, not patch storage order. Every block comes directly from the canonical `stage.patch`.
+### Why this mechanism is necessary
+
+Using directory existence alone cannot distinguish an unfinished upload from post-commit cleanup interrupted by a crash. Correlating published provenance with upload ID makes both cases deterministic.
+
+### Runtime mental model
+
+Each test prepares a durable upload and parts, injects one crash point, discards the crashing service, and reopens. The before case retries completion; the after case reads the object and verifies abort now reports `NoSuchUpload` because recovery cleaned staging.
+
+### File-by-file walkthrough
 
 #### `tests/test_storage.py`
 
-Executable proof of the stage behavior.
+##### What it is and why it appears
 
-Calls the learner-visible boundary and records the expected state or failure; start here only when verifying the mechanism.
+The storage recovery suite gains the two-sided multipart completion crash contract.
 
-**Changed anchors:** `test_multipart_complete_crash_before_publish_keeps_upload_not_object`, `test_multipart_complete_crash_after_publish_recovers_object_and_cleans_upload`
+##### Runtime role
+
+It uses fresh service instances to make published manifest and recovered staging—not stale memory—the only evidence.
+
+##### Key code
+
+```python
+assert reopened.get_object("b", "movie").body == b"abcx"
+```
+
+##### Statement understanding
+
+In the after-publish case, the visible complete object is authoritative even if cleanup did not run. Recovery must keep it and remove only the matching upload staging.
 
 ??? note "File diff: tests/test_storage.py"
     ```diff
@@ -112,27 +132,15 @@ Calls the learner-visible boundary and records the expected state or failure; st
 
 ### Verification evidence
 
-`uv run pytest -q $(cat journey/stages/12-multipart-recovery/tests.txt)`
+Run `uv run pytest -q $(cat journey/stages/12-multipart-recovery/tests.txt)`. Two tests prove both sides of completion publication and the cumulative suite guards ordinary crash behavior.
 
-This stage adds 2 executable case(s), anchored at `test_multipart_complete_crash_before_publish_keeps_upload_not_object`, `test_multipart_complete_crash_after_publish_recovers_object_and_cleans_upload`. Run them after the mechanism walkthrough; the cumulative gate also reruns every earlier stage contract.
+### Durable takeaways
 
-### Concept check
+Before commit, keep staging for retry. After commit, keep the object and remove matching staging. Published provenance disambiguates the two states.
 
-Which invariant must remain true after this stage?
+### Explain it in your own words
 
-??? note "Answer"
-    Recovery correlates a published object with its upload ID to make cleanup idempotent.
-
-### Code-reading check
-
-Start at `test_multipart_complete_crash_before_publish_keeps_upload_not_object` in `tests/test_storage.py`: what state or value enters this boundary, and which owner consumes the result next?
-
-??? note "Answer"
-    Calls the learner-visible boundary and records the expected state or failure; start here only when verifying the mechanism.
-
-### Interview-ready summary
-
-Recovery correlates a published object with its upload ID to make cleanup idempotent.
+Multipart recovery follows the same manifest commit point as normal objects, but uses upload provenance to clean correctly. A crash before publication leaves a retryable upload; a crash after publication leaves a complete object whose matching private staging is safe to discard.
 
 ### Textbook
 

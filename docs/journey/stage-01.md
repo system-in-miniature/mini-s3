@@ -2,7 +2,7 @@
 
 ### Goal
 
-Create an installable package and immutable values for bytes, ETags, opaque keys, and delete markers.
+Create an installable package and the immutable values that every later object operation will carry.
 
 ### Deliverable files / 交付文件
 
@@ -14,27 +14,51 @@ Create an installable package and immutable values for bytes, ETags, opaque keys
 - `tests/test_model.py`
 - `uv.lock`
 
-### Mechanism walkthrough
+### The problem at this point
 
-#### Ownership and flow
+The journey starts with no package and no vocabulary for an object. Before implementing PUT or GET, MiniS3 needs exact answers to four questions: what bytes make up a value, how that value is identified, how one version differs from a deletion, and whether a key such as `photos/2026/a.jpg` is a path or just a string.
 
-`model.py` owns immutable whole-object values: bytes enter `content_etag`, become a quoted fingerprint, and travel with `Version` inside an `ObjectRecord`; a `DeleteMarker` hides history without carrying a body.
+This stage creates those values without adding storage or service behavior. Later stages can change histories and persistence while continuing to pass the same immutable objects between boundaries.
 
-#### Failure and debugging
+### Failure preview
 
-Start at the value constructor and ETag assertion. A slash in `key` must remain untouched, mutation must raise, and delete markers must never acquire object bytes.
+The highest-signal contract uses `ObjectRecord(key="/a//b/")` and expects the exact same string back. If model code treats the key as a filesystem path, repeated or leading slashes may disappear before storage even exists. The test makes that corruption visible at the smallest possible boundary.
 
-### File-by-file diff walkthrough
+### Basic concepts
 
-Read by runtime responsibility, not patch storage order. Every block comes directly from the canonical `stage.patch`.
+An S3 object value is a complete byte string, not an editable file range. A normal ETag in this miniature is the quoted lowercase MD5 of those bytes. It is a content fingerprint used for comparison; it is not an access-control secret.
+
+A key is opaque. Slashes can be used by listing code to present a directory-like view later, but the model must preserve every character exactly. A `Version` carries bytes; a `DeleteMarker` carries identity and ordering only, because it hides older data rather than storing an empty object.
+
+### Why this mechanism is necessary
+
+If these meanings were left as loose dictionaries, later code could mutate a historical version, normalize a key, or accidentally attach bytes to a delete marker. That would make versioning and recovery ambiguous. Frozen value objects make invalid state harder to create and give every later layer one shared vocabulary.
+
+### Runtime mental model
+
+At this stage the flow is deliberately short: caller bytes enter `content_etag`, become an ETag, and are placed in a `Version`; an `ObjectRecord` associates an exact key with a newest-first tuple of versions. No class here owns I/O or mutation. It only defines values that Bucket, storage, and service code will own later.
+
+### File-by-file walkthrough
 
 #### `src/minis3/errors.py`
 
-Shared domain failure vocabulary.
+##### What it is and why it appears
 
-Constructed by bucket/service code and returned upward without owning I/O; inspect field values when state is correct but results look wrong.
+This file defines protocol-independent domain failures. Bucket and service code can raise a precise error without importing HTTP concepts.
 
-**Changed anchors:** `MiniS3Error`, `BucketAlreadyExists`, `NoSuchBucket`, `BucketNotEmpty`, `NoSuchKey`, `NoSuchVersion`, `InvalidContinuationToken`
+##### Runtime role
+
+Callers catch subclasses of `MiniS3Error` and may later translate them to S3-shaped responses. Keeping missing bucket, missing key, and missing version distinct prevents one broad exception from erasing useful semantics.
+
+##### Key code
+
+```python
+class NoSuchKey(MiniS3Error):
+```
+
+##### Statement understanding
+
+Inheritance says this is part of MiniS3's public failure vocabulary while remaining distinguishable from `NoSuchBucket` and `NoSuchVersion`.
 
 ??? note "File diff: src/minis3/errors.py"
     ```diff
@@ -78,11 +102,24 @@ Constructed by bucket/service code and returned upward without owning I/O; inspe
 
 #### `src/minis3/model.py`
 
-Immutable values carried through the system.
+##### What it is and why it appears
 
-Constructed by bucket/service code and returned upward without owning I/O; inspect field values when state is correct but results look wrong.
+This is the stage's central domain-value file. It defines whole-object versions, body-less delete markers, per-key history, and content-derived ETags.
 
-**Changed anchors:** `content_etag`, `Version`, `size`, `is_delete_marker`, `DeleteMarker`, `ObjectRecord`
+##### Runtime role
+
+Later Bucket code constructs these values, listing code projects them, and disk storage serializes them. The values themselves perform no I/O and own no global state.
+
+##### Key code
+
+```python
+digest = md5(body, usedforsecurity=False).hexdigest()
+return f'"{digest}"'
+```
+
+##### Statement understanding
+
+`usedforsecurity=False` documents that MD5 is used as the S3-style fingerprint, not as a security primitive. Quoting the hexadecimal digest is part of the externally visible ETag representation, so returning the bare digest would be a semantic bug.
 
 ??? note "File diff: src/minis3/model.py"
     ```diff
@@ -171,11 +208,17 @@ Constructed by bucket/service code and returned upward without owning I/O; inspe
 
 #### `src/minis3/__init__.py`
 
-Supported public package surface.
+##### What it is and why it appears
 
-Reached by user imports; wiring errors appear as missing names before any runtime flow starts.
+This package boundary exposes the names a learner or later service can import from `minis3` without knowing the internal module layout.
 
-**Changed anchors:** configuration, export, or documentation change
+##### Runtime role
+
+It performs wiring only. If a public name is missing here, import fails before any object flow begins; it does not own ETag or version behavior.
+
+##### Statement understanding
+
+The explicit imports are the first public API contract. Internal helpers stay internal until a later stage deliberately exports them.
 
 ??? note "File diff: src/minis3/__init__.py"
     ```diff
@@ -192,11 +235,23 @@ Reached by user imports; wiring errors appear as missing names before any runtim
 
 #### `tests/test_model.py`
 
-Executable proof of the stage behavior.
+##### What it is and why it appears
 
-Calls the learner-visible boundary and records the expected state or failure; start here only when verifying the mechanism.
+These tests record the three model invariants introduced today: quoted ETags, opaque keys with immutable values, and body-less delete markers.
 
-**Changed anchors:** `test_etag_is_quoted_lowercase_content_md5`, `test_keys_are_opaque_even_when_they_contain_slashes`, `test_delete_marker_has_no_object_body`
+##### Runtime role
+
+They call the learner-visible values directly. They prove value semantics only; they do not yet prove bucket transitions, disk persistence, or a public object service.
+
+##### Key code
+
+```python
+assert record.key == "/a//b/"
+```
+
+##### Statement understanding
+
+The deliberately unusual key catches path normalization. Passing this assertion means the model preserved the exact string, not that directory behavior exists.
 
 ??? note "File diff: tests/test_model.py"
     ```diff
@@ -245,11 +300,17 @@ Calls the learner-visible boundary and records the expected state or failure; st
 
 #### `README.md`
 
-Journey workspace orientation.
+##### What it is and why it appears
 
-Supports installation or orientation rather than the runtime data path; debug it when imports, builds, or commands fail before execution.
+This is the small learner-workspace entry point. It states that the repository is rebuilt in verified stages.
 
-**Changed anchors:** configuration, export, or documentation change
+##### Runtime role
+
+It has no runtime responsibility; it helps a learner recognize that this checkout is a staged reconstruction rather than the finished repository.
+
+##### Statement understanding
+
+The wording “one verified stage at a time” defines the workspace workflow, not an object-storage invariant.
 
 ??? note "File diff: README.md"
     ```diff
@@ -266,11 +327,17 @@ Supports installation or orientation rather than the runtime data path; debug it
 
 #### `pyproject.toml`
 
-Install and test configuration.
+##### What it is and why it appears
 
-Supports installation or orientation rather than the runtime data path; debug it when imports, builds, or commands fail before execution.
+This file makes `src/minis3` installable and tells pytest where source and tests live.
 
-**Changed anchors:** configuration, export, or documentation change
+##### Runtime role
+
+Build and test tools read it before Python imports MiniS3. A wrong package path looks like an import failure even when the model code itself is correct.
+
+##### Statement understanding
+
+`packages = ["src/minis3"]` connects the src-layout directory to the built package; `testpaths = ["tests"]` keeps test discovery bounded.
 
 ??? note "File diff: pyproject.toml"
     ```diff
@@ -308,11 +375,17 @@ Supports installation or orientation rather than the runtime data path; debug it
 
 #### `uv.lock`
 
-Reproducible dependency lock.
+##### What it is and why it appears
 
-Supports installation or orientation rather than the runtime data path; debug it when imports, builds, or commands fail before execution.
+The lockfile records the exact development dependency graph used to run this stage.
 
-**Changed anchors:** configuration, export, or documentation change
+##### Runtime role
+
+It affects environment reproduction, not object behavior. It should be debugged when dependency resolution differs between machines.
+
+##### Statement understanding
+
+The editable `minis3` entry connects the local package to the locked environment, while the pytest version is resolved reproducibly.
 
 ??? note "File diff: uv.lock"
     ```diff
@@ -405,27 +478,15 @@ Supports installation or orientation rather than the runtime data path; debug it
 
 ### Verification evidence
 
-`uv run pytest -q $(cat journey/stages/01-scaffold-object-model/tests.txt)`
+Run `uv run pytest -q $(cat journey/stages/01-scaffold-object-model/tests.txt)`. The three tests prove the three value invariants above. They do not prove storage, version transitions, or service behavior because none exists yet.
 
-This stage adds 3 executable case(s), anchored at `test_etag_is_quoted_lowercase_content_md5`, `test_keys_are_opaque_even_when_they_contain_slashes`, `test_delete_marker_has_no_object_body`. Run them after the mechanism walkthrough; the cumulative gate also reruns every earlier stage contract.
+### Durable takeaways
 
-### Concept check
+Keep four facts together: an object is whole bytes, its normal ETag is a quoted content fingerprint, its key is an opaque exact string, and a delete marker is not an empty object.
 
-Which invariant must remain true after this stage?
+### Explain it in your own words
 
-??? note "Answer"
-    S3 stores whole object values; a slash in a key is data, not a directory.
-
-### Code-reading check
-
-Start at `content_etag` in `src/minis3/model.py`: what state or value enters this boundary, and which owner consumes the result next?
-
-??? note "Answer"
-    Constructed by bucket/service code and returned upward without owning I/O; inspect field values when state is correct but results look wrong.
-
-### Interview-ready summary
-
-S3 stores whole object values; a slash in a key is data, not a directory.
+MiniS3 first establishes immutable object values so later state machines and storage code cannot disagree about what a key, data version, ETag, or deletion means. The important constraint is that slashes remain data and markers never carry a body; violating either rule corrupts later listing or version history.
 
 ### Textbook
 

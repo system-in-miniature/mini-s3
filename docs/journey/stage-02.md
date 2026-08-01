@@ -2,34 +2,58 @@
 
 ### Goal
 
-Introduce the bucket aggregate, legal versioning transitions, and an injectable monotonic sequence.
+Introduce the Bucket aggregate, legal versioning transitions, and deterministic identities.
 
 ### Deliverable files / 交付文件
 
 - `src/minis3/bucket.py`
 - `tests/test_bucket.py`
 
-### Mechanism walkthrough
+### The problem at this point
 
-#### Ownership and flow
+Stage 01 can describe one value but cannot decide what PUT or DELETE does to an existing history. Those decisions must live together; otherwise service, storage, and listing code could each implement a different versioning rule.
 
-`Bucket` owns per-key history and legal versioning transitions. An injected `SequenceCounter` turns each PUT or marker into deterministic public and internal identities.
+### Failure preview
 
-#### Failure and debugging
+The focused contract writes an unversioned value, enables versioning, writes again, suspends versioning, and then attempts to return to `UNVERSIONED`. If that final transition succeeds, named history can be silently reinterpreted as if versioning never existed. The expected `ValueError` locks the state machine before persistence complicates it.
 
-Inspect the bucket state before the branch, then compare `version_id`, `storage_id`, and record order after it. Illegal transitions should fail before mutating state.
+### Basic concepts
 
-### File-by-file diff walkthrough
+An aggregate is the owner of a related set of state transitions. Here one `Bucket` owns its versioning state and every per-key `ObjectRecord`. `UNVERSIONED` means versioning has never been enabled; `SUSPENDED` means it was enabled and new writes use the public `null` slot while named history remains.
 
-Read by runtime responsibility, not patch storage order. Every block comes directly from the canonical `stage.patch`.
+Public `version_id` and internal `storage_id` solve different problems. A suspended bucket may reuse public ID `null`, but immutable disk artifacts still need unique internal names. A monotonic injected sequence produces both forms reproducibly.
+
+### Why this mechanism is necessary
+
+Scattering branches across callers would allow illegal transitions and inconsistent replacement rules. Centralizing them in Bucket makes PUT, GET, and DELETE operate on one history model. Deterministic IDs also let restart recovery resume after the largest published sequence instead of relying on random values.
+
+### Runtime mental model
+
+A caller supplies a command and `SequenceCounter`. Bucket validates its state, obtains one sequence, constructs a new version or marker, and replaces the exact key's immutable `ObjectRecord`. Enabled writes prepend history; unversioned and suspended writes replace only the `null` slot.
+
+### File-by-file walkthrough
 
 #### `src/minis3/bucket.py`
 
-Aggregate that owns per-bucket state transitions.
+##### What it is and why it appears
 
-Called by `MiniS3`; turns one command plus the current record into the next in-memory history.
+This mutable aggregate is the single owner of legal versioning changes and per-key histories. Persistence remains outside it.
 
-**Changed anchors:** `VersioningState`, `SequenceCounter`, `__init__`, `__call__`, `ensure_at_least`, `Bucket`, `set_versioning`, `put`, `get`, `delete`
+##### Runtime role
+
+Service code will call `set_versioning`, `put`, `get`, and `delete`. Each method turns one current Bucket state into the next state or raises before mutation.
+
+##### Key code
+
+```python
+if self.versioning is VersioningState.ENABLED:
+    versions = (version, *old.versions)
+else:
+```
+
+##### Statement understanding
+
+Enabled PUT preserves every earlier version by prepending. The `else` branch deliberately replaces the public `null` slot while retaining named history; treating both branches alike would break suspended semantics.
 
 ??? note "File diff: src/minis3/bucket.py"
     ```diff
@@ -202,11 +226,24 @@ Called by `MiniS3`; turns one command plus the current record into the next in-m
 
 #### `tests/test_bucket.py`
 
-Executable proof of the stage behavior.
+##### What it is and why it appears
 
-Calls the learner-visible boundary and records the expected state or failure; start here only when verifying the mechanism.
+This contract exercises the aggregate before service and disk layers can hide the source of an error.
 
-**Changed anchors:** `test_bucket_owns_versioning_transitions_and_deterministic_ids`
+##### Runtime role
+
+It proves the same sequence produces `null/e00000001` and then `v00000002/e00000002`, and it locks the forbidden backward transition.
+
+##### Key code
+
+```python
+with pytest.raises(ValueError):
+    bucket.set_versioning(VersioningState.UNVERSIONED)
+```
+
+##### Statement understanding
+
+The failure is part of domain behavior, not merely validation style: once named versions can exist, “never versioned” is no longer a truthful state.
 
 ??? note "File diff: tests/test_bucket.py"
     ```diff
@@ -241,27 +278,15 @@ Calls the learner-visible boundary and records the expected state or failure; st
 
 ### Verification evidence
 
-`uv run pytest -q $(cat journey/stages/02-bucket-state/tests.txt)`
+Run `uv run pytest -q $(cat journey/stages/02-bucket-state/tests.txt)`. It proves the focused transition and identity contract, but not disk recovery or concurrent service calls.
 
-This stage adds 1 executable case(s), anchored at `test_bucket_owns_versioning_transitions_and_deterministic_ids`. Run them after the mechanism walkthrough; the cumulative gate also reruns every earlier stage contract.
+### Durable takeaways
 
-### Concept check
+Bucket owns history transitions; public version identity and internal artifact identity are separate; enabled and suspended are not interchangeable.
 
-Which invariant must remain true after this stage?
+### Explain it in your own words
 
-??? note "Answer"
-    Versioning can be enabled and suspended, but never reset to the never-enabled state.
-
-### Code-reading check
-
-Start at `VersioningState` in `src/minis3/bucket.py`: what state or value enters this boundary, and which owner consumes the result next?
-
-??? note "Answer"
-    Called by `MiniS3`; turns one command plus the current record into the next in-memory history.
-
-### Interview-ready summary
-
-Versioning can be enabled and suspended, but never reset to the never-enabled state.
+The Bucket aggregate prevents every caller from inventing its own versioning behavior. It uses one deterministic sequence to order changes, keeps named history when required, and refuses transitions that would make existing history impossible to interpret.
 
 ### Textbook
 

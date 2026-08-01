@@ -26,6 +26,23 @@ uv run python labs/lab_versioning.py
 脚本写入两个版本、创建删除标记，展示普通 GET 此时得到 `NoSuchKey`，然后按
 version ID 取回仍被保留的第一个版本。
 
+## 三种学习模式
+
+### 机制教程
+
+通过[机制教程](tutorial/index.md)按主题系统理解对象值、版本化、Listing、崩溃原子性、
+Multipart、条件请求与生命周期。
+
+### 自主重建
+
+通过[自主重建](journey/index.md)完成 15 个累积浏览课程。每个 Stage 先解释问题与失败
+场景，再逐文件理解关键语句。
+
+### Agent 带教
+
+按照 [Agent 带教使用教程](agent-guided.md)准备专用工作区中的 `stage-NN`，再由 Codex
+根据 `AGENTS.md` 进行互动带教。
+
 ## 阅读顺序
 
 先通过仓库导览理解代码布局，再读概念映射。运行五个 lab 后再读差异章节，

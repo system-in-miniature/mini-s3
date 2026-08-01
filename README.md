@@ -67,16 +67,21 @@ groups matching strings.
   time: current versioned data gains a marker, while eligible noncurrent data
   versions are physically removed.
 
-## Rebuild Journey
+## Three learning modes
 
-[Build MiniS3 through 15 cumulative stages](docs/journey/index.md). Each stage
-is a complete browser lesson: understand the mechanism and ownership flow,
-inspect every changed file separately, then run the focused verification and
-close with code-reading and interview checks. Tests are evidence at the end,
-not a required test-first teaching sequence.
+1. **[Mechanism Tutorial](docs/tutorial/index.md)** — learn the storage
+   mechanisms by topic.
+2. **[Self-Guided Rebuild](docs/journey/index.md)** — follow 15 complete browser
+   lessons that explain the problem, one failure preview, the concepts, every
+   changed file, and its critical statements.
+3. **[Agent-Guided Rebuild](docs/agent-guided.md)** — run
+   `python journey/tools/build_journey.py agent N`, open the prepared workspace
+   in Codex, and learn Stage N through interactive screening, implementation,
+   guided code reading, and parity verification.
 
-Use `python journey/tools/build_journey.py study N` when you also want the
-current stage displayed as uncommitted editor changes in a dedicated workspace.
+Tests are executable motivation and final evidence, not a required test-first
+teaching sequence. The Agent-Guided web page is only a usage guide; its actual
+teaching behavior comes from `AGENTS.md` plus the selected Stage context.
 
 ## Repository tour
 

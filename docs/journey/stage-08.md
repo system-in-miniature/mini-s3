@@ -2,33 +2,53 @@
 
 ### Goal
 
-Verify parent-directory durability and remove temporary or unreferenced crash debris on startup.
+Verify directory-entry durability and recovery cleanup for temporary and unreferenced crash debris.
 
 ### Deliverable files / 交付文件
 
 - `tests/test_storage.py`
 
-### Mechanism walkthrough
+### The problem at this point
 
-#### Ownership and flow
+The crash matrix proves which manifest is visible, but durability also depends on directory entries. Creating nested directories or renaming a file without fsyncing the right parent can make a correct-looking run disappear after power loss. Recovery must also remove debris without deleting referenced artifacts.
 
-This proof stage records directory fsync boundaries and creates interrupted-write debris, then checks that startup cleanup preserves referenced artifacts and removes temporary names.
+### Failure preview
 
-#### Failure and debugging
+The parent-chain contract records fsync calls while creating `one/two/three`. It expects calls for the existing root and each newly created directory's parent. If only the final directory is fsynced, one missing ancestor entry can make the whole subtree unreachable after restart.
 
-Match every created or renamed directory entry with its parent fsync. During recovery, compare each deletion candidate against manifest references before removing it.
+### Basic concepts
 
-### File-by-file diff walkthrough
+A directory stores name-to-inode mappings. Persisting file contents does not automatically persist creation or rename of that name. Cleanup classifies files by authority: temporary names and unreferenced artifacts may be removed; manifest-referenced artifacts must remain.
 
-Read by runtime responsibility, not patch storage order. Every block comes directly from the canonical `stage.patch`.
+### Why this mechanism is necessary
+
+Crash safety is an end-to-end ordering property, not merely a call to `fsync` somewhere. Recording the exact parent chain and exercising cleanup protects the subtle filesystem assumptions that ordinary object assertions cannot see.
+
+### Runtime mental model
+
+Tests replace `fsync_directory` with a recorder, perform real directory/storage creation, and assert the ordered parents. A separate restart case plants a stray temporary file, reopens storage, and requires cleanup while the published object remains readable.
+
+### File-by-file walkthrough
 
 #### `tests/test_storage.py`
 
-Executable proof of the stage behavior.
+##### What it is and why it appears
 
-Calls the learner-visible boundary and records the expected state or failure; start here only when verifying the mechanism.
+The storage suite now inspects durability calls and startup hygiene, not just logical object values.
 
-**Changed anchors:** `test_atomic_write_fsyncs_each_new_directory_parent`, `recording_fsync_directory`, `test_storage_and_bucket_directory_creation_fsync_parent_chains`, `test_recovery_removes_spurious_tmp_files`
+##### Runtime role
+
+Its recorder makes invisible filesystem obligations observable; its restart case verifies cleanup decisions against manifest authority.
+
+##### Key code
+
+```python
+assert calls == [tmp_path, tmp_path / "one", tmp_path / "one" / "two"]
+```
+
+##### Statement understanding
+
+Each new directory entry lives in its parent, so the expected list walks the ancestry rather than repeating the final path. This assertion locks the durability chain.
 
 ??? note "File diff: tests/test_storage.py"
     ```diff
@@ -108,27 +128,15 @@ Calls the learner-visible boundary and records the expected state or failure; st
 
 ### Verification evidence
 
-`uv run pytest -q $(cat journey/stages/08-fsync-recovery/tests.txt)`
+Run `uv run pytest -q $(cat journey/stages/08-fsync-recovery/tests.txt)`. Three cases prove parent-chain fsync behavior for atomic writes and Bucket creation plus safe removal of stray temporary files.
 
-This stage adds 3 executable case(s), anchored at `test_atomic_write_fsyncs_each_new_directory_parent`, `test_storage_and_bucket_directory_creation_fsync_parent_chains`, `test_recovery_removes_spurious_tmp_files`. Run them after the mechanism walkthrough; the cumulative gate also reruns every earlier stage contract.
+### Durable takeaways
 
-### Concept check
+File bytes, file names, and directory trees have separate durability obligations. Recovery removes what is not authoritative, never what the manifest still references.
 
-Which invariant must remain true after this stage?
+### Explain it in your own words
 
-??? note "Answer"
-    Atomic rename is not durable publication until the containing directory is fsynced.
-
-### Code-reading check
-
-Start at `test_atomic_write_fsyncs_each_new_directory_parent` in `tests/test_storage.py`: what state or value enters this boundary, and which owner consumes the result next?
-
-??? note "Answer"
-    Calls the learner-visible boundary and records the expected state or failure; start here only when verifying the mechanism.
-
-### Interview-ready summary
-
-Atomic rename is not durable publication until the containing directory is fsynced.
+MiniS3 makes publication survive power loss by fsyncing every parent whose directory entries changed. On startup it treats the manifest as authority, preserving referenced immutable artifacts and deleting temporary or orphaned debris left by interrupted work.
 
 ### Textbook
 

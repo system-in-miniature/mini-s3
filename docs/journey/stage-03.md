@@ -2,7 +2,7 @@
 
 ### Goal
 
-Give buckets a durable manifest and immutable object artifacts behind one storage owner.
+Give Bucket state a durable representation with immutable artifacts and a publish-last manifest.
 
 ### Deliverable files / 交付文件
 
@@ -11,52 +11,50 @@ Give buckets a durable manifest and immutable object artifacts behind one storag
 - `src/minis3/storage/disk.py`
 - `tests/test_storage_boundary.py`
 
-### Mechanism walkthrough
+### The problem at this point
 
-#### Ownership and flow
+Stage 02 owns correct in-memory histories, but a process exit loses all of them. Writing one mutable JSON file directly is not enough: a crash can leave half a file or bytes whose directory entry was never made durable.
 
-`DiskStorage` writes immutable data/metadata artifacts first and publishes `manifest.json` last. `atomic_write` makes rename the visibility point and fsync makes directory entries durable.
+### Failure preview
 
-#### Failure and debugging
+The storage contract writes a bucket, creates a new `DiskStorage` over the same directory, and expects the exact body, ETag, version, and maximum sequence back. A missing fsync or publish order may pass an in-process read yet fail this restart observation.
 
-Trace artifact path, temporary name, rename, and parent fsync in order. On restart, compare manifest references with recovered files; unreferenced artifacts must not become visible.
+### Basic concepts
 
-### File-by-file diff walkthrough
+Atomic visibility and durability are separate. `os.replace` makes readers observe either the old complete name or the new complete name. File `fsync` persists file bytes; parent-directory `fsync` persists the name change.
 
-Read by runtime responsibility, not patch storage order. Every block comes directly from the canonical `stage.patch`.
+MiniS3 stores immutable data/metadata artifacts and a small mutable `manifest.json`. The manifest is the authority: only artifact IDs named by a successfully published manifest are visible after restart.
 
-#### `src/minis3/storage/__init__.py`
+### Why this mechanism is necessary
 
-Storage adapter boundary exports.
+Updating one large mutable state file makes every object write rewrite shared state and enlarges the crash surface. Immutable artifacts can be written safely first. Publishing their references last gives recovery one unambiguous commit record and lets it discard orphaned work.
 
-Called after a domain mutation; turns in-memory state into durable artifacts and reconstructs it on startup.
+### Runtime mental model
 
-**Changed anchors:** configuration, export, or documentation change
+`DiskStorage.persist_bucket` writes every missing immutable artifact, then calls `atomic_write` for the manifest. `atomic_write` writes a temporary file, flushes and fsyncs it, replaces the final name, and fsyncs the parent. Startup loads only manifest references and cleans everything else.
 
-??? note "File diff: src/minis3/storage/__init__.py"
-    ```diff
-    diff --git a/src/minis3/storage/__init__.py b/src/minis3/storage/__init__.py
-    new file mode 100644
-    index 0000000..673ad9e
-    --- /dev/null
-    +++ b/src/minis3/storage/__init__.py
-    @@ -0,0 +1,7 @@
-    +"""Durable storage boundary for manifest-based atomic publication."""
-    +
-    +from .atomic import InjectedCrash
-    +from .disk import DiskStorage
-    +
-    +__all__ = ["DiskStorage", "InjectedCrash"]
-    +
-    ```
+### File-by-file walkthrough
 
 #### `src/minis3/storage/atomic.py`
 
-Reusable write/fsync/rename durability primitive.
+##### What it is and why it appears
 
-Called after a domain mutation; turns in-memory state into durable artifacts and reconstructs it on startup.
+This file owns reusable filesystem publication primitives rather than S3 domain decisions.
 
-**Changed anchors:** `InjectedCrash`, `fsync_directory`, `durable_mkdir`, `atomic_write`
+##### Runtime role
+
+DiskStorage calls it whenever a file or directory entry must survive a crash. It is the lowest layer at which visibility and durability ordering can be inspected.
+
+##### Key code
+
+```python
+os.replace(temporary, path)
+fsync_directory(path.parent)
+```
+
+##### Statement understanding
+
+Replace changes which complete file the final name refers to; the following directory fsync makes that rename durable. Reversing or omitting the second line can leave a rename visible now but absent after power loss.
 
 ??? note "File diff: src/minis3/storage/atomic.py"
     ```diff
@@ -127,11 +125,25 @@ Called after a domain mutation; turns in-memory state into durable artifacts and
 
 #### `src/minis3/storage/disk.py`
 
-Disk layout, publication, and recovery owner.
+##### What it is and why it appears
 
-Called after a domain mutation; turns in-memory state into durable artifacts and reconstructs it on startup.
+This is the sole owner of disk layout, manifest publication, and restart recovery for buckets.
 
-**Changed anchors:** `_encoded_name`, `_object_directory`, `DiskStorage`, `__init__`, `load_buckets`, `create_bucket`, `delete_bucket`, `persist_bucket`, `_bucket_directory`, `_manifest_bytes`, `_write_artifact`, `_load_bucket`, `_load_artifact`, `_clean_bucket`
+##### Runtime role
+
+It translates Bucket histories into immutable `.data`/`.json` artifacts plus manifest references, and reconstructs Buckets on startup.
+
+##### Key code
+
+```python
+self._inject("before_manifest_publish")
+atomic_write(directory / "manifest.json", self._manifest_bytes(bucket))
+self._inject("after_manifest_publish")
+```
+
+##### Statement understanding
+
+The manifest write sits between two named crash points because it is the visibility boundary. Artifacts before it are harmless until referenced; after it, recovery must treat the new state as committed.
 
 ??? note "File diff: src/minis3/storage/disk.py"
     ```diff
@@ -370,13 +382,56 @@ Called after a domain mutation; turns in-memory state into durable artifacts and
     +                path.rmdir()
     ```
 
+#### `src/minis3/storage/__init__.py`
+
+##### What it is and why it appears
+
+This package boundary exports the durable adapter and the deliberate crash type used by later recovery experiments.
+
+##### Runtime role
+
+It provides stable imports while keeping layout helpers internal.
+
+##### Statement understanding
+
+Exporting `DiskStorage` names the storage owner; exporting `InjectedCrash` makes crash boundaries testable without exposing every helper.
+
+??? note "File diff: src/minis3/storage/__init__.py"
+    ```diff
+    diff --git a/src/minis3/storage/__init__.py b/src/minis3/storage/__init__.py
+    new file mode 100644
+    index 0000000..673ad9e
+    --- /dev/null
+    +++ b/src/minis3/storage/__init__.py
+    @@ -0,0 +1,7 @@
+    +"""Durable storage boundary for manifest-based atomic publication."""
+    +
+    +from .atomic import InjectedCrash
+    +from .disk import DiskStorage
+    +
+    +__all__ = ["DiskStorage", "InjectedCrash"]
+    +
+    ```
+
 #### `tests/test_storage_boundary.py`
 
-Executable proof of the stage behavior.
+##### What it is and why it appears
 
-Calls the learner-visible boundary and records the expected state or failure; start here only when verifying the mechanism.
+This first storage contract proves one complete bucket can cross a process-like restart boundary.
 
-**Changed anchors:** `test_disk_storage_publishes_and_recovers_one_complete_bucket`
+##### Runtime role
+
+It persists state, constructs a fresh adapter, and compares recovered values and sequence metadata. It is broader than a serialization unit test but narrower than the public MiniS3 service.
+
+##### Key code
+
+```python
+recovered, maximum_sequence = DiskStorage(tmp_path).load_buckets()
+```
+
+##### Statement understanding
+
+Using a new adapter is essential: reading the same in-memory Bucket would not prove bytes were published or recoverable. Returning `maximum` also prevents future sequence reuse.
 
 ??? note "File diff: tests/test_storage_boundary.py"
     ```diff
@@ -408,27 +463,15 @@ Calls the learner-visible boundary and records the expected state or failure; st
 
 ### Verification evidence
 
-`uv run pytest -q $(cat journey/stages/03-durable-storage-boundary/tests.txt)`
+Run `uv run pytest -q $(cat journey/stages/03-durable-storage-boundary/tests.txt)`. It proves a clean publish/restart path. Stages 07 and 08 will separately prove crash points and directory-fsync cleanup.
 
-This stage adds 1 executable case(s), anchored at `test_disk_storage_publishes_and_recovers_one_complete_bucket`. Run them after the mechanism walkthrough; the cumulative gate also reruns every earlier stage contract.
+### Durable takeaways
 
-### Concept check
+Rename provides atomic visibility; fsync provides durability; the manifest is the commit record; immutable artifacts are not visible merely because they exist.
 
-Which invariant must remain true after this stage?
+### Explain it in your own words
 
-??? note "Answer"
-    A manifest names visible immutable artifacts; publication order defines visibility.
-
-### Code-reading check
-
-Start at `InjectedCrash` in `src/minis3/storage/atomic.py`: what state or value enters this boundary, and which owner consumes the result next?
-
-??? note "Answer"
-    Called after a domain mutation; turns in-memory state into durable artifacts and reconstructs it on startup.
-
-### Interview-ready summary
-
-A manifest names visible immutable artifacts; publication order defines visibility.
+MiniS3 writes immutable object artifacts first and atomically publishes a manifest last. Recovery trusts that manifest, so a crash can leave extra files but cannot expose a half-published object. The rename is the visibility point and parent fsync makes that decision survive restart.
 
 ### Textbook
 

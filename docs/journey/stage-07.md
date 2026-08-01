@@ -2,33 +2,53 @@
 
 ### Goal
 
-Pin the manifest rename as the linearization point by crashing immediately before and after it.
+Prove the manifest rename is the single visibility boundary by crashing immediately before and after it.
 
 ### Deliverable files / 交付文件
 
 - `tests/test_storage.py`
 
-### Mechanism walkthrough
+### The problem at this point
 
-#### Ownership and flow
+Stage 03 described publish-last storage, and clean restarts pass. That is not yet evidence that crashes expose only complete old or complete new states. The claim must be observed at each named crash boundary.
 
-This stage changes tests, not production code. Fault injection brackets manifest replacement to prove the old/new visibility split around one linearization point.
+### Failure preview
 
-#### Failure and debugging
+One test injects `before_manifest_publish` after new artifacts are durable. Reopening must still return the old object and remove the unreferenced new artifact. If artifact existence alone controls visibility, the new value leaks despite the manifest never committing it.
 
-Reopen storage after each injected crash and inspect only published state. Seeing partial new state means publication order or recovery trust boundaries are wrong.
+### Basic concepts
 
-### File-by-file diff walkthrough
+A linearization point is the instant a concurrent or recovering observer treats an operation as having taken effect. A crash matrix probes both sides: before the point the old state wins; after the point the complete new state wins. There is no legal half-state.
 
-Read by runtime responsibility, not patch storage order. Every block comes directly from the canonical `stage.patch`.
+### Why this mechanism is necessary
+
+Documentation and happy-path tests cannot prove crash atomicity. Deliberate process-like interruption turns publication order into executable evidence and prevents a future refactor from moving visibility to artifact creation accidentally.
+
+### Runtime mental model
+
+The test prepares old state, installs `CrashOnce`, attempts a mutation, catches `InjectedCrash`, and constructs a fresh service. It then checks visible data and disk debris. The production code does not change in this stage; the new value is confidence in the existing boundary.
+
+### File-by-file walkthrough
 
 #### `tests/test_storage.py`
 
-Executable proof of the stage behavior.
+##### What it is and why it appears
 
-Calls the learner-visible boundary and records the expected state or failure; start here only when verifying the mechanism.
+The storage integration suite gains a parameterized crash matrix around artifact and manifest publication.
 
-**Changed anchors:** `test_crash_before_manifest_publish_leaves_old_state`, `test_crash_before_manifest_publication_matrix_leaves_old_state`, `test_crash_after_manifest_publish_exposes_complete_new_state`
+##### Runtime role
+
+It observes the system only after reopening, which discards misleading in-process memory and exercises recovery cleanup.
+
+##### Key code
+
+```python
+crash_injector=CrashOnce("before_manifest_publish"),
+```
+
+##### Statement understanding
+
+The named hook fixes the exact interruption boundary. Assertions after a fresh open can therefore distinguish “artifacts durable” from “state published.”
 
 ??? note "File diff: tests/test_storage.py"
     ```diff
@@ -110,27 +130,15 @@ Calls the learner-visible boundary and records the expected state or failure; st
 
 ### Verification evidence
 
-`uv run pytest -q $(cat journey/stages/07-publication-crash-matrix/tests.txt)`
+Run `uv run pytest -q $(cat journey/stages/07-publication-crash-matrix/tests.txt)`. Five added cases cover multiple pre-publication points plus the post-publication side and cleanup.
 
-This stage adds 5 executable case(s), anchored at `test_crash_before_manifest_publish_leaves_old_state`, `test_crash_before_manifest_publication_matrix_leaves_old_state`, `test_crash_after_manifest_publish_exposes_complete_new_state`. Run them after the mechanism walkthrough; the cumulative gate also reruns every earlier stage contract.
+### Durable takeaways
 
-### Concept check
+Artifact durability does not equal visibility. The manifest rename is the commit point: before it recovery selects old state, after it recovery selects complete new state.
 
-Which invariant must remain true after this stage?
+### Explain it in your own words
 
-??? note "Answer"
-    Before rename, recovery sees the old state; after rename, it sees the complete new state.
-
-### Code-reading check
-
-Start at `test_crash_before_manifest_publish_leaves_old_state` in `tests/test_storage.py`: what state or value enters this boundary, and which owner consumes the result next?
-
-??? note "Answer"
-    Calls the learner-visible boundary and records the expected state or failure; start here only when verifying the mechanism.
-
-### Interview-ready summary
-
-Before rename, recovery sees the old state; after rename, it sees the complete new state.
+The crash matrix proves atomicity by killing the operation on both sides of one named boundary and reopening from disk. Only the manifest makes immutable artifacts visible, so unreferenced files before publication are debris, while a published manifest after rename commits the complete new value.
 
 ### Textbook
 

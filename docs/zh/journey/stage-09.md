@@ -2,34 +2,57 @@
 
 ### 目标
 
-建模上传身份、暂存 Part、完成清单、尺寸规则与组合 ETag。
+在存储编排前建模 Multipart 上传身份、暂存 Part、有序完成规则与组合 ETag。
 
 ### 交付文件
 
 - `src/minis3/errors.py`
 - `src/minis3/multipart.py`
+- `tests/test_multipart_domain.py`
 
-### 机制走读
+### 当前遇到的问题
 
-#### 所有权与数据流
+Whole-object PUT 无法表示客户端把大内容拆成可独立重试的 Part。完成操作也不能只相信 Part 编号列表：顺序、ETag、是否存在和非末 Part 最小尺寸都会改变最终对象。
 
-`multipart.py` 拥有 Upload/Part 值和纯完成校验：客户端清单选择暂存 Part，校验顺序与尺寸，再生成组合 ETag。
+### 先看会坏在哪里
 
-#### 失败与排查
+领域契约提供暂存 Part 与客户端完成清单。调换两个条目必须得到 `InvalidPartOrder`；Part 正确但 ETag 错误必须得到 `InvalidPart`。没有这些检查，完成操作可能静默拼装客户端未授权的字节。
 
-组装前对照客户端身份与暂存回执；乱序、缺失 Part、ETag 不匹配和非末尾 Part 过小必须分别失败。
+### 基本概念
 
-### 逐文件 Diff 走读
+`MultipartUpload` 标识一次私有暂存会话。`StagedPart` 拥有字节并派生 receipt（Part 编号、ETag、size）。完成清单是客户端对“哪些暂存 Part 按什么顺序组成对象”的声明。
 
-按运行时职责阅读，而不是按补丁存储顺序阅读。每个代码块都直接来自 canonical `stage.patch`。
+Multipart ETag 不是组装后 Body 的 MD5。MiniS3 把每个带引号 Part MD5 解码成二进制，拼接摘要，再对拼接结果哈希，最后附加 Part 数量 `-N`。
+
+### 为什么需要这个机制
+
+验证属于任何存储适配器都要遵守的领域规则。保持纯函数能避免磁盘布局和服务锁掩盖错误，也保证无效清单不会开始发布。
+
+### 运行时心智模型
+
+`validate_completion` 规范化客户端条目、要求 Part 编号严格递增、解析每个暂存 Part、比较 ETag、检查所有非末 Part 尺寸，最后返回选中 Part 与组合 ETag。它不执行 I/O 和变更。
+
+### 逐文件走读
 
 #### `src/minis3/errors.py`
 
-共享的领域失败词汇。
+##### 是什么，为什么现在需要
 
-由 Bucket/服务代码构造并向上返回，不拥有 I/O；状态正确但结果异常时检查这些字段。
+公开失败词汇增加缺上传、无效 Part、顺序无效和 Part 太小。
 
-**变化锚点:** `NoSuchUpload`, `InvalidPart`, `InvalidPartOrder`, `EntityTooSmall`
+##### 在运行时做什么
+
+领域验证和后续服务/存储共享这些精确类型，使调用方能区分上传身份错误与无效完成请求。
+
+##### 关键代码
+
+```python
+class EntityTooSmall(MiniS3Error):
+```
+
+##### 关键语句理解
+
+Part 尺寸错误不是普通 `ValueError`，而是公开边界含义稳定的 S3 风格完成失败。
 
 ??? note "文件差异：src/minis3/errors.py"
     ```diff
@@ -60,11 +83,23 @@
 
 #### `src/minis3/multipart.py`
 
-Multipart 领域值与完成规则。
+##### 是什么，为什么现在需要
 
-由 `MiniS3` 作为策略函数调用；接收显式值并返回由服务执行的决策。
+这里拥有 Multipart 领域值与纯完成验证器。
 
-**变化锚点:** `MultipartUpload`, `MultipartPart`, `StagedPart`, `etag`, `size`, `receipt`, `_entry_identity`, `validate_completion`
+##### 在运行时做什么
+
+存储层会持久化这些值，服务层会调用验证器，但两者都不用重复顺序、receipt 或 ETag 规则。
+
+##### 关键代码
+
+```python
+return tuple(selected), f'"{composite}-{len(selected)}"'
+```
+
+##### 关键语句理解
+
+返回值把已验证顺序和派生组合指纹绑定在一起；`-N` 记录 Part 数，也让 Multipart ETag 与普通 ETag 可区分。
 
 ??? note "文件差异：src/minis3/multipart.py"
     ```diff
@@ -185,11 +220,23 @@ Multipart 领域值与完成规则。
 
 #### `tests/test_multipart_domain.py`
 
-本阶段行为的可执行证明。
+##### 是什么，为什么现在需要
 
-调用学习者可见边界并记录预期状态或失败；验证机制时再从这里进入。
+这个聚焦契约在加入持久暂存以前就让完成规则可见。
 
-**变化锚点:** `test_completion_validation_orders_parts_and_hashes_binary_digests`
+##### 在运行时做什么
+
+它提供显式暂存 Part 与清单，证明可接受顺序/组合 ETag 和主要拒绝路径。
+
+##### 关键代码
+
+```python
+def test_completion_validation_orders_parts_and_hashes_binary_digests() -> None:
+```
+
+##### 关键语句理解
+
+测试名锁定两个独立义务：客户端顺序有语义，组合哈希使用二进制摘要而不是十六进制文本拼接。
 
 ??? note "文件差异：tests/test_multipart_domain.py"
     ```diff
@@ -243,27 +290,15 @@ Multipart 领域值与完成规则。
 
 ### 验证证据
 
-`uv run pytest -q $(cat journey/stages/09-multipart-domain/tests.txt)`
+运行 `uv run pytest -q $(cat journey/stages/09-multipart-domain/tests.txt)`。它只证明纯完成验证；暂存字节尚未持久，也尚不可见。
 
-本阶段新增 1 个可执行用例，入口为 `test_completion_validation_orders_parts_and_hashes_binary_digests`。它们在机制走读之后运行，并与此前 Stage 的用例一起守住累计行为。
+### 需要真正记住的内容
 
-### 概念检查
+Multipart 有独立身份和 receipt；客户端选择有序清单；每个非末 Part 遵守尺寸规则；组合 ETag 是二进制摘要的摘要。
 
-本阶段完成后，哪条不变量必须保持成立？
+### 用自己的话讲清楚
 
-??? note "答案"
-    只有完成时才能知道最后一个 Part，因此最小尺寸也在完成时校验。
-
-### 代码阅读检查
-
-从 `src/minis3/multipart.py` 的 `MultipartUpload` 开始：进入这个边界的状态或值是什么，结果又交给哪个所有者？
-
-??? note "答案"
-    由 `MiniS3` 作为策略函数调用；接收显式值并返回由服务执行的决策。
-
-### 面试表达
-
-只有完成时才能知道最后一个 Part，因此最小尺寸也在完成时校验。
+Multipart 完成不是简单拼接。MiniS3 先验证客户端有序 receipt 与持久暂存 Part、尺寸规则完全一致，再派生组合 ETag；只有验证后的有序结果才能在后续发布成一个对象。
 
 ### 教材
 

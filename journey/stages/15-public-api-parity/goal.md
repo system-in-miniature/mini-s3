@@ -6,45 +6,66 @@
 
 ### Goal
 
-Expose the complete teaching API and prove the reconstructed source and Journey-owned tests equal main byte for byte.
-
-### Hands-on task
-
-Starting from stage-14, Finalize `minis3.__init__` exports and run the complete cumulative test contract. Keep all behavior inside the listed source-like boundaries; do not copy the patch first.
+Expose the complete teaching API and prove the stage-built source and Journey tests match main byte for byte.
 
 ### Deliverable files / 交付文件
 
 - `src/minis3/__init__.py`
 
-### Mechanism walkthrough
+### The problem at this point
 
-#### Ownership and flow
+All mechanisms exist, but accumulated imports can still expose accidental names or omit intended ones. Passing behavioral tests also does not by itself prove the Journey reconstructs the exact maintained source and test corpus.
 
-`minis3.__init__` is the supported adapter surface; the Journey builder then applies every patch and compares final `src/minis3` plus Journey-owned tests byte for byte with main. Site-only documentation tests stay outside this rebuild contract.
+### Failure preview
 
-#### Failure and debugging
+The parity command rebuilds every patch into a fresh tree and compares bytes with main. One missing export line or stale stage test makes the check fail even if a narrow pytest selection remains green. This catches drift between the learning path and finished repository.
 
-An import failure belongs to export wiring; a final parity failure names missing, extra, or changed files and must be fixed in the stage chain rather than hidden in generated commits.
+### Basic concepts
 
-### Self-check
+A public API is an intentional compatibility boundary, not every name currently importable from a module. `__all__` records that choice. Source parity and behavioral evidence are complementary: tests prove selected semantics; byte comparison proves the reconstruction artifact is the maintained artifact.
 
-1. Where is this stage's visibility or state transition owned?
+### Why this mechanism is necessary
 
-    ??? note "Answer"
-        A rebuild journey stays trustworthy only when CI guards both behavior and final-source parity.
+A course can slowly become a detached toy while its examples still pass. Closing with exact exports and byte parity makes source alignment an enforceable property rather than a README claim.
 
-2. Which test would fail first if the new boundary were bypassed?
+### Runtime mental model
 
-    ??? note "Answer"
-        Read `tests.txt`, identify the narrowest new node, and name the public call it exercises.
+User imports resolve through `src/minis3/__init__.py`. Separately, `build_journey.py --check` starts from the empty Journey root, applies all 15 canonical patches, gathers Journey-owned tests, and compares reconstructed bytes to the current main tree without moving refs.
 
-### Pass command
+### File-by-file walkthrough
 
-`uv run pytest -q $(cat journey/stages/15-public-api-parity/tests.txt)`
+<!-- journey-file: src/minis3/__init__.py -->
+#### `src/minis3/__init__.py`
 
-### The real S3 lesson
+##### What it is and why it appears
 
-A rebuild journey stays trustworthy only when CI guards both behavior and final-source parity.
+The package root receives its final explicit export list for values, services, policies, results, and public failures.
+
+##### Runtime role
+
+It is the stable learner-facing import boundary. Internal storage helpers and implementation-only functions remain absent.
+
+##### Key code
+
+```python
+__all__ = [
+```
+
+##### Statement understanding
+
+The list converts an implicit collection of imports into a deliberate contract. Adding an internal helper elsewhere no longer makes it public accidentally.
+
+### Verification evidence
+
+Run `uv run pytest -q $(cat journey/stages/15-public-api-parity/tests.txt)` for the cumulative suite, then `python journey/tools/build_journey.py --check` for byte-for-byte source and Journey-test parity. Stage 15 adds no new behavior case because its deliverable is the public surface and reconstruction proof.
+
+### Durable takeaways
+
+An import surface, passing tests, and byte parity prove different things. Completion requires all three to agree with the intended course boundary.
+
+### Explain it in your own words
+
+The final Stage makes the learning journey auditable. `__all__` states which concepts are supported publicly, cumulative tests prove their behavior, and the parity rebuild proves the sequence of stages reconstructs the same source and tests maintained on main.
 
 ### Textbook
 
@@ -54,45 +75,66 @@ A rebuild journey stays trustworthy only when CI guards both behavior and final-
 
 ### 目标
 
-公开完整教学 API，并证明重建后的源码与 Journey 所有的测试逐字节等于 main。
-
-### 动手任务
-
-从stage-14开始，完成 `minis3.__init__` 导出，并运行完整累计测试契约。 行为必须留在下列源码同构边界中；不要先复制补丁。
+公开完整教学 API，并证明按 Stage 构建的源码与 Journey 测试逐字节等于 main。
 
 ### 交付文件
 
 - `src/minis3/__init__.py`
 
-### 机制走读
+### 当前遇到的问题
 
-#### 所有权与数据流
+所有机制都已存在，但累积 import 仍可能意外公开内部名称，或漏掉预期名称。行为测试通过也不能单独证明 Journey 重建的是当前维护的精确源码与测试集合。
 
-`minis3.__init__` 是受支持的适配器接口；Journey Builder 随后应用全部 Patch，并把最终 `src/minis3` 与 Journey 所有的测试和 main 逐字节比较。仅服务网站的文档测试不属于重建契约。
+### 先看会坏在哪里
 
-#### 失败与排查
+Parity 命令在全新树中重放每个 patch，再与 main 比较字节。即使窄范围 pytest 仍绿，只要漏一条 export 或 Stage 测试过期，检查就会失败。这直接捕获学习路径与完成仓库之间的漂移。
 
-导入失败属于导出接线问题；最终 Parity 失败会列出缺失、多余或变化文件，必须修复 Stage 链，不能藏在生成 Commit 中。
+### 基本概念
 
-### 自查
+公开 API 是有意选择的兼容边界，不是模块里当前能 import 的全部名称。`__all__` 记录这个选择。源码 parity 与行为证据互补：测试证明选定语义，字节比较证明重建 Artifact 就是维护中的 Artifact。
 
-1. 本阶段的可见性或状态迁移由谁负责？
+### 为什么需要这个机制
 
-    ??? note "答案"
-        只有 CI 同时守护行为与最终源码一致性，重建旅程才可信。
+课程可能逐渐变成脱离源码的 toy，同时自己的示例仍然通过。用精确 export 与字节 parity 收官，能把源码对齐变成可执行属性，而不是 README 声明。
 
-2. 如果绕过新边界，哪个测试会最先失败？
+### 运行时心智模型
 
-    ??? note "答案"
-        阅读 `tests.txt`，找出最窄的新节点，并说出它覆盖的公开调用。
+用户 import 通过 `src/minis3/__init__.py` 解析。另一边，`build_journey.py --check` 从空 Journey 根开始应用 15 个 canonical patch，收集 Journey 自有测试，再把重建字节与当前 main 比较，不移动 refs。
 
-### 通关命令
+### 逐文件走读
 
-`uv run pytest -q $(cat journey/stages/15-public-api-parity/tests.txt)`
+<!-- journey-file: src/minis3/__init__.py -->
+#### `src/minis3/__init__.py`
 
-### 对应真实 S3 的一课
+##### 是什么，为什么现在需要
 
-只有 CI 同时守护行为与最终源码一致性，重建旅程才可信。
+包根得到最终显式导出列表，覆盖值、服务、策略、结果与公开失败。
+
+##### 在运行时做什么
+
+它是稳定的学习者导入边界；内部存储 helper 和实现函数继续不公开。
+
+##### 关键代码
+
+```python
+__all__ = [
+```
+
+##### 关键语句理解
+
+这份列表把隐式 imports 集合变成有意契约；以后在内部增加 helper，也不会意外变成公开 API。
+
+### 验证证据
+
+运行 `uv run pytest -q $(cat journey/stages/15-public-api-parity/tests.txt)` 执行累计套件，再运行 `python journey/tools/build_journey.py --check` 做源码与 Journey 测试逐字节 parity。Stage 15 不新增行为用例，因为交付物就是公开面与重建证明。
+
+### 需要真正记住的内容
+
+Import 面、测试通过和字节 parity 各自证明不同内容；完成要求三者都与预期课程边界一致。
+
+### 用自己的话讲清楚
+
+最终 Stage 让学习旅程可审计：`__all__` 声明哪些概念受公开支持，累计测试证明行为，parity 重建证明整段 Stage 序列得到的就是 main 维护的源码与测试。
 
 ### 教材
 

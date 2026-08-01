@@ -2,7 +2,7 @@
 
 ### 目标
 
-从扁平 Key 推导 contents 与 common prefixes，并加入绑定查询的 opaque 分页 token。
+从扁平 Key 推导当前 contents 与 common prefixes，并提供绑定查询的 opaque 分页 token。
 
 ### 交付文件
 
@@ -11,27 +11,49 @@
 - `src/minis3/store.py`
 - `tests/test_listing.py`
 
-### 机制走读
+### 当前遇到的问题
 
-#### 所有权与数据流
+版本 Listing 已能展示历史，但普通对象 Listing 仍不知道怎样处理 prefix、delimiter 和分页。把含斜杠 Key 当成真实目录会违背 Stage 01，并制造 S3 根本不存储的状态。
 
-`list_objects` 排序可见扁平 Key，读取时推导公共前缀，在同一页预算中统计前缀与对象，并把不透明游标绑定到原查询。
+### 先看会坏在哪里
 
-#### 失败与排查
+Delimiter 契约存入 `a.txt`、`raw` 和多个 `photos/...` Key。根目录用 `/` Listing 时必须返回两个 contents 和唯一的 `photos/` common prefix。如果实现遍历目录或返回所有 photo Key，公开投影就错了。
 
-分页前先观察排序后的候选流；Key 缺失通常来自删除标记过滤，页面重复或偏移通常来自游标或前缀计数。
+### 基本概念
 
-### 逐文件 Diff 走读
+`prefix` 按字符串开头过滤。`delimiter` 在剩余后缀第一次出现的位置分组出 `common_prefix`；它是计算视图，不是存储的文件夹。对象和 common prefix 都占结果槽位，所以分页必须共同计数。
 
-按运行时职责阅读，而不是按补丁存储顺序阅读。每个代码块都直接来自 canonical `stage.patch`。
+Continuation token 是不透明游标。MiniS3 把 offset 与 prefix、delimiter 一起编码，避免把一个查询的 token 用到另一个查询后悄悄跳过不同结果。
+
+### 为什么需要这个机制
+
+暴露裸 offset 会泄漏实现并允许查询错配；把 common prefix 当对象则会混淆 HEAD/GET 与删除。单一纯投影既保持扁平存储，又提供熟悉的目录式浏览。
+
+### 运行时心智模型
+
+服务锁住 Bucket 快照并调用 `list_objects`。函数选择每个 Key 的当前可见数据，应用 prefix/delimiter 投影，对组合结果排序，解码绑定查询的 offset，截取一页，并在仍有结果时生成下一 token。
+
+### 逐文件走读
 
 #### `src/minis3/listing.py`
 
-读取侧投影与分页逻辑。
+##### 是什么，为什么现在需要
 
-由服务读取路径调用；把存储历史转换成排序、分页的响应值，不修改状态。
+读取侧现在除版本历史外，还拥有当前对象 Listing、delimiter 分组与分页 token。
 
-**变化锚点:** `ListedObject`, `ListObjectsResult`, `is_truncated`, `_encode_token`, `_decode_token`, `list_objects`, `list_object_versions`
+##### 在运行时做什么
+
+它不修改 Bucket records，返回不可变 `contents`、`common_prefixes` 与 `next_token`。
+
+##### 关键代码
+
+```python
+return urlsafe_b64encode(payload).decode().rstrip("=")
+```
+
+##### 关键语句理解
+
+编码隐藏游标表示；payload 还带查询形状，因此解码时能拒绝属于其他 prefix 或 delimiter 的游标。
 
 ??? note "文件差异：src/minis3/listing.py"
     ```diff
@@ -182,11 +204,23 @@
 
 #### `src/minis3/store.py`
 
-协调领域逻辑与持久化的应用服务。
+##### 是什么，为什么现在需要
 
-接收公开调用，拥有加锁与编排，再委托给领域、投影和存储边界。
+服务增加当前 Listing 的公开带锁入口。
 
-**变化锚点:** `list_objects`
+##### 在运行时做什么
+
+它提供一致 records 快照，并把全部只读投影规则委托给 `listing.py`。
+
+##### 关键代码
+
+```python
+with self._lock:
+```
+
+##### 关键语句理解
+
+纯投影也需要稳定输入。锁防止并发 PUT/DELETE 在分页构造中途改变 Key 集合。
 
 ??? note "文件差异：src/minis3/store.py"
     ```diff
@@ -313,11 +347,17 @@
 
 #### `src/minis3/__init__.py`
 
-受支持的包级公开接口。
+##### 是什么，为什么现在需要
 
-由用户导入触达；接线错误会在运行时流程开始前表现为名称缺失。
+包把当前 Listing 响应类型加入累积公开 API。
 
-**变化锚点:** 配置、导出或文档变化
+##### 在运行时做什么
+
+调用方只需依赖一个受支持导入面；它不计算前缀或 token。
+
+##### 关键语句理解
+
+显式 `__all__` 开始记录累积的公开名称，避免意外导出全部内部 helper。
 
 ??? note "文件差异：src/minis3/__init__.py"
     ```diff
@@ -375,11 +415,23 @@
 
 #### `tests/test_listing.py`
 
-本阶段行为的可执行证明。
+##### 是什么，为什么现在需要
 
-调用学习者可见边界并记录预期状态或失败；验证机制时再从这里进入。
+五条契约覆盖目录幻觉、组合分页、Marker 隐藏、版本展开和无效 token。
 
-**变化锚点:** `_populated_store`, `test_delimiter_derives_common_prefixes_from_flat_keys`, `test_pagination_counts_contents_and_prefixes_and_token_is_opaque`, `test_current_listing_hides_key_behind_delete_marker`, `test_version_listing_flattens_versions_and_marks_latest`, `test_malformed_or_query_mismatched_tokens_are_rejected`
+##### 在运行时做什么
+
+它们通过 `MiniS3` 建立状态并观察公开结果，把模型语义连接到最终读取视图。
+
+##### 关键代码
+
+```python
+assert root.common_prefixes == ("photos/",)
+```
+
+##### 关键语句理解
+
+多个扁平 Key 在根视图中折叠成一个投影前缀；这个 tuple 不表示存储了 `photos/` 对象或目录。
 
 ??? note "文件差异：tests/test_listing.py"
     ```diff
@@ -486,27 +538,15 @@
 
 ### 验证证据
 
-`uv run pytest -q $(cat journey/stages/06-directory-illusion/tests.txt)`
+运行 `uv run pytest -q $(cat journey/stages/06-directory-illusion/tests.txt)`。五个新用例证明投影与 token 行为，所有早期历史测试继续累计执行。
 
-本阶段新增 5 个可执行用例，入口为 `test_delimiter_derives_common_prefixes_from_flat_keys`、`test_pagination_counts_contents_and_prefixes_and_token_is_opaque`、`test_current_listing_hides_key_behind_delete_marker`、`test_version_listing_flattens_versions_and_marks_latest`、`test_malformed_or_query_mismatched_tokens_are_rejected`。它们在机制走读之后运行，并与此前 Stage 的用例一起守住累计行为。
+### 需要真正记住的内容
 
-### 概念检查
+Key 始终扁平；目录只是读取幻觉；contents 与 prefixes 共享页容量；continuation token 属于一个精确查询。
 
-本阶段完成后，哪条不变量必须保持成立？
+### 用自己的话讲清楚
 
-??? note "答案"
-    S3 目录是 delimiter 投影；对象与公共前缀共享同一页额度。
-
-### 代码阅读检查
-
-从 `src/minis3/listing.py` 的 `ListedObject` 开始：进入这个边界的状态或值是什么，结果又交给哪个所有者？
-
-??? note "答案"
-    由服务读取路径调用；把存储历史转换成排序、分页的响应值，不修改状态。
-
-### 面试表达
-
-S3 目录是 delimiter 投影；对象与公共前缀共享同一页额度。
+MiniS3 通过在 delimiter 处对扁平字符串分组来展示类似目录的 Listing，从未创建文件夹。分页针对组合投影结果，opaque token 又绑定 prefix 与 delimiter，因此不能换一套查询语义继续使用。
 
 ### 教材
 

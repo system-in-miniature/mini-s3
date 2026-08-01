@@ -28,13 +28,14 @@ Each `## English` and `## 中文` body must contain these headings in order:
 ### Goal / 目标
 ### Deliverable files / 交付文件
 ### The problem at this point / 当前遇到的问题
+### Failure preview / 先看会坏在哪里
 ### Basic concepts / 基本概念
 ### Why this mechanism is necessary / 为什么需要这个机制
 ### Runtime mental model / 运行时心智模型
 ### File-by-file walkthrough / 逐文件走读
 ### Verification evidence / 验证证据
 ### Durable takeaways / 需要真正记住的内容
-### Interview-ready summary / 面试表达
+### Explain it in your own words / 用自己的话讲清楚
 ### Textbook / 教材
 ```
 
@@ -95,7 +96,7 @@ The authored lessons must cover these stage-specific mental models and critical 
 
 - [ ] **Step 1: Replace generic mechanism assertions with required authored-section assertions**
 
-Add localized heading tables and assert the headings exist in order for all 15 cards. The English sequence begins with `### The problem at this point`; the Chinese sequence begins with `### 当前遇到的问题`.
+Add localized heading tables and assert the headings exist in order for all 15 cards. The English sequence begins with `### The problem at this point`, followed by `### Failure preview`; the Chinese sequence begins with `### 当前遇到的问题`, followed by `### 先看会坏在哪里`.
 
 - [ ] **Step 2: Add exact authored-file coverage tests**
 
@@ -200,7 +201,7 @@ git commit -m "feat: render authored Journey explanations"
 
 - [ ] **Step 1: Author Stage 01 in both languages**
 
-Explain bytes versus metadata, content-derived quoted ETags, opaque keys, immutable records, and delete markers before file reading. Walk through every patch file and explain the MD5 expression, frozen dataclasses, body-less marker, public exports, tests, and packaging artifacts.
+Preview the opaque-key contract, then explain bytes versus metadata, content-derived quoted ETags, immutable records, and delete markers before file reading. Walk through every patch file and explain the MD5 expression, frozen dataclasses, body-less marker, public exports, tests, and packaging artifacts.
 
 - [ ] **Step 2: Author Stage 02 in both languages**
 
@@ -317,7 +318,7 @@ Expected: all renderer tests pass for all 15 bilingual stages.
 
 - [ ] **Step 1: Update the Journey README**
 
-State that each page explains the current problem, concepts, necessity, runtime flow, key file slices, full reference diffs, and verification in that order. Explicitly state that the browser course does not require live Q&A and does not use test-first as its default narrative.
+State that each page explains the current problem, one high-signal failure preview, concepts, necessity, runtime flow, key file slices, full reference diffs, verification, and a learner-owned mechanism explanation in that order. Explicitly state that the preview is executable motivation rather than a full TDD narrative, the browser course does not require live Q&A, and it is not framed as interview preparation.
 
 - [ ] **Step 2: Regenerate all browser pages**
 
@@ -390,3 +391,42 @@ Expected: only intentional implementation artifacts are committed; no generated 
 - [ ] **Step 5: Report acceptance evidence**
 
 Report the local URL, exact test/parity/build results, representative pages inspected, commit hashes, and any intentionally preserved process. Do not claim completion if any stage lacks authored bilingual explanations or any parity/build check fails.
+
+## Task 8: Publish the three learning modes and Agent-Guided CLI entry
+
+**Files:**
+- Create: `AGENTS.md`
+- Create: `docs/agent-guided.md`
+- Create: `docs/zh/agent-guided.md`
+- Modify: `journey/tools/build_journey.py`
+- Modify: `journey/tools/tests/test_learning_workspace.py`
+- Modify: `tests/test_docs_homepage.py`
+- Modify: `README.md`
+- Modify: `README.zh-CN.md`
+- Modify: `docs/index.md`
+- Modify: `docs/zh/index.md`
+- Modify: `mkdocs.yml`
+
+- [ ] **Step 1: Add a failing `agent N` workspace contract**
+
+Require a clean Stage N-1 baseline, ignored root `AGENTS.md`, `.journey/stage.md`, `.journey/reference.patch`, `.journey/tests.txt`, the exact check command, and a clean Git status.
+
+- [ ] **Step 2: Implement `agent N`**
+
+Copy agent-facing support into the dedicated workspace without adding it to learner parity. Print the CLI command, start prompt, and verification command.
+
+- [ ] **Step 3: Add the Agent-Guided teaching contract**
+
+Use quick misconception screening and metacognitive calibration, implement in coherent slices, explain exact 5-15 line code anchors before asking, cover every modified file, and close with the learner's own mechanism explanation rather than interview framing.
+
+- [ ] **Step 4: Publish the three names**
+
+Use **Mechanism Tutorial**, **Self-Guided Rebuild**, and **Agent-Guided Rebuild** in English, with **机制教程**, **自主重建**, and **Agent 带教** in Chinese.
+
+- [ ] **Step 5: Keep Agent web content usage-only**
+
+The two Agent-Guided pages contain preparation, CLI startup, continuation, verification, overwrite, and custom-workspace instructions only. Stage teaching remains in agent/runtime sources.
+
+- [ ] **Step 6: Verify all three modes**
+
+Run the CLI/workspace tests, homepage mode tests, full suite, Journey parity, strict MkDocs build, and local browser acceptance.

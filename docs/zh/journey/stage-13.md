@@ -2,7 +2,7 @@
 
 ### 目标
 
-把 ETag 变成缓存校验器与串行化的 compare-and-swap 前置条件。
+把 ETag 用作缓存校验器，以及读取和变更的串行 compare-and-swap 前置条件。
 
 ### 交付文件
 
@@ -12,27 +12,50 @@
 - `src/minis3/store.py`
 - `tests/test_conditional.py`
 
-### 机制走读
+### 当前遇到的问题
 
-#### 所有权与数据流
+系统已有 ETag，但调用方还不能要求“只在我看到的值仍是当前值时操作”。旧写入者可能覆盖新值，缓存也无法在不下载 Body 的情况下询问副本是否仍然有效。
 
-纯辅助函数评估 ETag 语法；`MiniS3` 用同一把锁覆盖读取当前可见 ETag、检查前置条件和发布变更。
+### 先看会坏在哪里
 
-#### 失败与排查
+并发契约让两个写入者携带相同初始 ETag。只能有一个通过 `If-Match`；第二个必须看到变化后的当前 ETag 并失败。如果检查在变更锁外，两者都可能校验旧状态并同时获胜。
 
-区分匹配语义问题与串行化问题；若两个条件写者都成功，说明比较与变更没有处于同一临界区。
+### 基本概念
 
-### 逐文件 Diff 走读
+GET 的 `If-None-Match` 是缓存校验：匹配表示 representation 未修改（304 语义）。`If-Match` 是前置条件：不匹配表示请求不能作用于当前状态（412 语义）。
 
-按运行时职责阅读，而不是按补丁存储顺序阅读。每个代码块都直接来自 canonical `stage.patch`。
+Compare-and-swap 表示“只有当前身份仍等于我观察到的身份才修改”。正确性依赖在同一串行临界区内完成检查和变更，而不只是比较字符串。
+
+### 为什么需要这个机制
+
+缺少前置条件时，read-modify-write 客户端会丢失更新。缺少不同的 304/412 失败，调用方无法区分缓存命中和变更被拒绝。集中匹配 helper 还能统一 wildcard 与逗号列表规则。
+
+### 运行时心智模型
+
+服务获得锁，解析当前或指定版本 ETag，执行 `require_if_match`/`require_if_none_match`，之后才读取或变更。成功 PUT 会在下一名等待写入者检查前改变 ETag。
+
+### 逐文件走读
 
 #### `src/minis3/conditional.py`
 
-ETag 前置条件匹配规则。
+##### 是什么，为什么现在需要
 
-由 `MiniS3` 作为策略函数调用；接收显式值并返回由服务执行的决策。
+这个纯策略模块解析 ETag 条件并抛出正确语义失败。
 
-**变化锚点:** `etag_matches`, `require_if_match`, `require_if_none_match`
+##### 在运行时做什么
+
+Store 提供当前 ETag；helper 决定匹配、前置条件失败或未修改，不拥有锁和状态。
+
+##### 关键代码
+
+```python
+if condition is not None and not etag_matches(condition, current_etag):
+    raise PreconditionFailed(condition)
+```
+
+##### 关键语句理解
+
+条件缺失表示不加 guard；条件存在但不匹配必须在变更前停止。只返回可能被调用方忽略的 `False` 会削弱契约。
 
 ??? note "文件差异：src/minis3/conditional.py"
     ```diff
@@ -81,11 +104,23 @@ ETag 前置条件匹配规则。
 
 #### `src/minis3/errors.py`
 
-共享的领域失败词汇。
+##### 是什么，为什么现在需要
 
-由 Bucket/服务代码构造并向上返回，不拥有 I/O；状态正确但结果异常时检查这些字段。
+失败词汇增加前置条件失败与未修改两个不同结果。
 
-**变化锚点:** `PreconditionFailed`, `NotModified`
+##### 在运行时做什么
+
+协议适配器以后可分别映射 412 与 304，而领域服务无需嵌入 HTTP。
+
+##### 关键代码
+
+```python
+class NotModified(MiniS3Error):
+```
+
+##### 关键语句理解
+
+Not-modified 是校验器的控制流证据，不能和针对旧状态的变更拒绝混成同一错误。
 
 ??? note "文件差异：src/minis3/errors.py"
     ```diff
@@ -109,11 +144,23 @@ ETag 前置条件匹配规则。
 
 #### `src/minis3/store.py`
 
-协调领域逻辑与持久化的应用服务。
+##### 是什么，为什么现在需要
 
-接收公开调用，拥有加锁与编排，再委托给领域、投影和存储边界。
+公开 GET、PUT、DELETE 接受条件参数，并在已有锁内计算。
 
-**变化锚点:** `put_object`, `_current_etag`, `_addressed_etag`, `_bucket`
+##### 在运行时做什么
+
+它拥有当前 ETag 查找、前置条件决定与后续 Bucket 变更/发布之间的原子性。
+
+##### 关键代码
+
+```python
+require_if_match(self._current_etag(candidate, key), if_match)
+```
+
+##### 关键语句理解
+
+检查在服务锁内读取候选快照；从这行到变更之间，不会有其他写入者改变当前可见 ETag。
 
 ??? note "文件差异：src/minis3/store.py"
     ```diff
@@ -229,11 +276,17 @@ ETag 前置条件匹配规则。
 
 #### `src/minis3/__init__.py`
 
-受支持的包级公开接口。
+##### 是什么，为什么现在需要
 
-由用户导入触达；接线错误会在运行时流程开始前表现为名称缺失。
+条件请求失败成为受支持 API。
 
-**变化锚点:** 配置、导出或文档变化
+##### 在运行时做什么
+
+调用方从包根捕获语义结果，匹配 helper 继续作为内部策略。
+
+##### 关键语句理解
+
+公开结果类型但不公开解析内部细节，可以保持 API 较小。
 
 ??? note "文件差异：src/minis3/__init__.py"
     ```diff
@@ -250,11 +303,23 @@ ETag 前置条件匹配规则。
 
 #### `tests/test_conditional.py`
 
-本阶段行为的可执行证明。
+##### 是什么，为什么现在需要
 
-调用学习者可见边界并记录预期状态或失败；验证机制时再从这里进入。
+四条契约覆盖 GET 校验、变更 guard、wildcard 和双写者 CAS 竞争。
 
-**变化锚点:** `test_get_if_none_match_has_304_semantics_and_if_match_has_412`, `test_put_and_delete_if_match_compare_against_current_visible_etag`, `test_if_match_wildcard_requires_a_current_visible_object`, `test_two_conditional_writers_have_exactly_one_winner`, `writer`
+##### 在运行时做什么
+
+线程测试证明顺序 helper 单测无法证明的串行化行为。
+
+##### 关键代码
+
+```python
+assert sorted(outcomes) == ["412", "stored"]
+```
+
+##### 关键语句理解
+
+一个 `stored` 与一个 `412` 是外部可见 CAS 保证；两个 stored 会证明检查与变更并不原子。
 
 ??? note "文件差异：tests/test_conditional.py"
     ```diff
@@ -349,27 +414,15 @@ ETag 前置条件匹配规则。
 
 ### 验证证据
 
-`uv run pytest -q $(cat journey/stages/13-conditional-cas/tests.txt)`
+运行 `uv run pytest -q $(cat journey/stages/13-conditional-cas/tests.txt)`。用例证明匹配形式、失败含义、变更 guard 和单赢家并发。
 
-本阶段新增 4 个可执行用例，入口为 `test_get_if_none_match_has_304_semantics_and_if_match_has_412`、`test_put_and_delete_if_match_compare_against_current_visible_etag`、`test_if_match_wildcard_requires_a_current_visible_object`、`test_two_conditional_writers_have_exactly_one_winner`。它们在机制走读之后运行，并与此前 Stage 的用例一起守住累计行为。
+### 需要真正记住的内容
 
-### 概念检查
+ETag 比较只有在检查与变更共享同一把锁时才成为安全并发控制；304 校验与 412 拒绝是不同结果。
 
-本阶段完成后，哪条不变量必须保持成立？
+### 用自己的话讲清楚
 
-??? note "答案"
-    比较与发布必须处于同一临界区，否则两个写者都可能成功。
-
-### 代码阅读检查
-
-从 `src/minis3/conditional.py` 的 `etag_matches` 开始：进入这个边界的状态或值是什么，结果又交给哪个所有者？
-
-??? note "答案"
-    由 `MiniS3` 作为策略函数调用；接收显式值并返回由服务执行的决策。
-
-### 面试表达
-
-比较与发布必须处于同一临界区，否则两个写者都可能成功。
+条件请求让调用方只对自己观察过的精确值采取行动。MiniS3 在服务变更锁内计算 ETag guard，所以一名写入者提交后，所有旧竞争者会面对新的当前 ETag 失败，而不是覆盖它。
 
 ### 教材
 

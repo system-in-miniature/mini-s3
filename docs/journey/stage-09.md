@@ -2,7 +2,7 @@
 
 ### Goal
 
-Model upload identity, staged parts, completion manifests, size rules, and composite ETags.
+Model multipart upload identity, staged parts, ordered completion rules, and composite ETags before storage orchestration.
 
 ### Deliverable files / 交付文件
 
@@ -10,27 +10,49 @@ Model upload identity, staged parts, completion manifests, size rules, and compo
 - `src/minis3/multipart.py`
 - `tests/test_multipart_domain.py`
 
-### Mechanism walkthrough
+### The problem at this point
 
-#### Ownership and flow
+Whole-object PUT cannot represent a client uploading large content in independently retryable parts. Completion also cannot trust a list of part numbers alone: order, ETags, existence, and minimum nonfinal size all affect the final object.
 
-`multipart.py` owns upload/part values and pure completion validation: client entries select staged parts, enforce ordering and size rules, then produce a composite ETag.
+### Failure preview
 
-#### Failure and debugging
+The domain contract supplies staged parts and a client completion manifest. Swapping two entries must raise `InvalidPartOrder`; naming the right part with the wrong ETag must raise `InvalidPart`. Without these checks, completion can silently assemble bytes the client did not authorize.
 
-Compare client identities with staged receipts before assembly. Wrong order, missing parts, mismatched ETags, and undersized non-final parts must fail independently.
+### Basic concepts
 
-### File-by-file diff walkthrough
+`MultipartUpload` identifies one private staging session. `StagedPart` owns bytes and derives its receipt (`part_number`, ETag, size). The completion manifest is the client's ordered claim about which staged parts should form the object.
 
-Read by runtime responsibility, not patch storage order. Every block comes directly from the canonical `stage.patch`.
+A multipart ETag is not the MD5 of assembled bytes. MiniS3 decodes each quoted part MD5 to binary, concatenates those digests, hashes the concatenation, then appends `-N` for the number of parts.
+
+### Why this mechanism is necessary
+
+Validation is a domain rule shared by any future storage adapter. Keeping it pure prevents disk layout and service locking from obscuring errors, and ensures an invalid manifest cannot begin publication.
+
+### Runtime mental model
+
+`validate_completion` normalizes each client entry, enforces strictly increasing part numbers, resolves each staged part, compares ETags, checks every nonfinal part size, then returns the selected parts and composite ETag. It performs no I/O and mutation.
+
+### File-by-file walkthrough
 
 #### `src/minis3/errors.py`
 
-Shared domain failure vocabulary.
+##### What it is and why it appears
 
-Constructed by bucket/service code and returned upward without owning I/O; inspect field values when state is correct but results look wrong.
+The public failure vocabulary gains missing-upload, invalid-part, invalid-order, and too-small-part meanings.
 
-**Changed anchors:** `NoSuchUpload`, `InvalidPart`, `InvalidPartOrder`, `EntityTooSmall`
+##### Runtime role
+
+Domain validation and later service/storage code raise the same precise types, allowing callers to distinguish retryable identity errors from invalid completion requests.
+
+##### Key code
+
+```python
+class EntityTooSmall(MiniS3Error):
+```
+
+##### Statement understanding
+
+Part size is not a generic `ValueError`; it is an S3-shaped completion failure with stable meaning at the public boundary.
 
 ??? note "File diff: src/minis3/errors.py"
     ```diff
@@ -61,11 +83,23 @@ Constructed by bucket/service code and returned upward without owning I/O; inspe
 
 #### `src/minis3/multipart.py`
 
-Multipart values and completion rules.
+##### What it is and why it appears
 
-Called by `MiniS3` as a policy function; receives explicit values and returns a decision for the service to apply.
+This file owns multipart values and the pure completion validator.
 
-**Changed anchors:** `MultipartUpload`, `MultipartPart`, `StagedPart`, `etag`, `size`, `receipt`, `_entry_identity`, `validate_completion`
+##### Runtime role
+
+Storage will persist these values and the service will call the validator, but neither needs to reimplement ordering, receipt, or ETag rules.
+
+##### Key code
+
+```python
+return tuple(selected), f'"{composite}-{len(selected)}"'
+```
+
+##### Statement understanding
+
+The return keeps validated order and its derived composite fingerprint together. The `-N` suffix records part count and distinguishes multipart ETags from normal whole-body ETags.
 
 ??? note "File diff: src/minis3/multipart.py"
     ```diff
@@ -186,11 +220,23 @@ Called by `MiniS3` as a policy function; receives explicit values and returns a 
 
 #### `tests/test_multipart_domain.py`
 
-Executable proof of the stage behavior.
+##### What it is and why it appears
 
-Calls the learner-visible boundary and records the expected state or failure; start here only when verifying the mechanism.
+This focused contract makes completion rules visible before durable staging is added.
 
-**Changed anchors:** `test_completion_validation_orders_parts_and_hashes_binary_digests`
+##### Runtime role
+
+It supplies explicit staged parts and manifests, proving both accepted order/composite ETag and the major rejection paths.
+
+##### Key code
+
+```python
+def test_completion_validation_orders_parts_and_hashes_binary_digests() -> None:
+```
+
+##### Statement understanding
+
+The test name captures two independent obligations: client order is semantic, and composite hashing uses binary digests rather than concatenated hexadecimal text.
 
 ??? note "File diff: tests/test_multipart_domain.py"
     ```diff
@@ -244,27 +290,15 @@ Calls the learner-visible boundary and records the expected state or failure; st
 
 ### Verification evidence
 
-`uv run pytest -q $(cat journey/stages/09-multipart-domain/tests.txt)`
+Run `uv run pytest -q $(cat journey/stages/09-multipart-domain/tests.txt)`. It proves pure completion validation only; no staged bytes are durable or visible yet.
 
-This stage adds 1 executable case(s), anchored at `test_completion_validation_orders_parts_and_hashes_binary_digests`. Run them after the mechanism walkthrough; the cumulative gate also reruns every earlier stage contract.
+### Durable takeaways
 
-### Concept check
+Multipart has its own identity and receipts; the client chooses an ordered manifest; every nonfinal part obeys size rules; composite ETag is a digest of binary digests.
 
-Which invariant must remain true after this stage?
+### Explain it in your own words
 
-??? note "Answer"
-    Minimum size is checked at completion because only then is the final part known.
-
-### Code-reading check
-
-Start at `MultipartUpload` in `src/minis3/multipart.py`: what state or value enters this boundary, and which owner consumes the result next?
-
-??? note "Answer"
-    Called by `MiniS3` as a policy function; receives explicit values and returns a decision for the service to apply.
-
-### Interview-ready summary
-
-Minimum size is checked at completion because only then is the final part known.
+Multipart completion is not simple concatenation. MiniS3 first verifies that the client's ordered receipts exactly match durable staged parts and size rules, then derives the composite ETag. Only a validated ordered result may later be published as one object.
 
 ### Textbook
 

@@ -2,7 +2,7 @@
 
 ### 目标
 
-持久化不可见上传，并原子替换 Part，而不创建对象记录。
+持久化私有 Multipart 上传并原子替换 Part，同时不发布对象。
 
 ### 交付文件
 
@@ -13,27 +13,49 @@
 - `src/minis3/store.py`
 - `tests/test_multipart.py`
 
-### 机制走读
+### 当前遇到的问题
 
-#### 所有权与数据流
+Stage 09 只能验证抽象暂存 Part；真实客户端需要 upload ID 和 Part 字节跨重试、重启保存。这些字节在完成发布一个完整对象以前，必须对普通 GET/List 不可见。
 
-`MiniS3` 创建确定性 Upload 身份，`DiskStorage` 则把 Upload 元数据和原子替换的 Part 字节放在对象 Manifest 之外的私有 `uploads/` 路径。
+### 先看会坏在哪里
 
-#### 失败与排查
+第一条集成契约为 Key `right` 创建上传，再尝试用 Key `wrong` 和 Part 编号 `0`、`10001` 上传。每次都必须在写暂存前失败，否则 upload ID 会跨 Key 混用或产生非法 Part 文件。
 
-写 Part 前同时解析 Bucket、Key 与 Upload ID；若未完成上传出现在 GET/Listing 中，检查暂存内容是否误入可见 Manifest。
+### 基本概念
 
-### 逐文件 Diff 走读
+Staging 是持久私有状态，不是部分可见对象。每次上传由 `(bucket, key, upload_id)` 标识，并拥有自己的 `parts/` 目录；重复上传相同 Part 编号会原子替换这个暂存槽。
 
-按运行时职责阅读，而不是按补丁存储顺序阅读。每个代码块都直接来自 canonical `stage.patch`。
+对象模型增加创建时间和可选 `multipart_upload_id` 来源，供未来完成后的版本记录。这些字段不会让 Staging 可见；只有 Bucket Manifest 引用的 `ObjectRecord` 才能做到。
+
+### 为什么需要这个机制
+
+只在内存保存 Part 会让重试和重启不可靠；直接写入对象历史又会暴露不完整值。独立持久命名空间既保存工作，又维持前面建立的单一发布边界。
+
+### 运行时心智模型
+
+服务分配确定性 upload ID，让 DiskStorage 创建 `uploads/<id>/upload.json` 和 `parts/`。`upload_part` 校验编号与上传身份，再原子写一个编号 `.data` 文件。Abort 只删除这次私有上传目录。
+
+### 逐文件走读
 
 #### `src/minis3/model.py`
 
-贯穿系统的不可变领域值。
+##### 是什么，为什么现在需要
 
-由 Bucket/服务代码构造并向上返回，不拥有 I/O；状态正确但结果异常时检查这些字段。
+Version 和 Marker 增加时间戳；数据版本还可记录完成它的 Multipart upload。
 
-**变化锚点:** 配置、导出或文档变化
+##### 在运行时做什么
+
+后续生命周期和恢复会使用这些字段；它们仍是已发布历史上的不可变元数据。
+
+##### 关键代码
+
+```python
+multipart_upload_id: str | None = None
+```
+
+##### 关键语句理解
+
+`None` 表示普通 PUT；Multipart 完成版本可保留来源，但不会让上传过程本身变成可见历史。
 
 ??? note "文件差异：src/minis3/model.py"
     ```diff
@@ -67,11 +89,23 @@
 
 #### `src/minis3/bucket.py`
 
-拥有 Bucket 内部状态迁移的聚合。
+##### 是什么，为什么现在需要
 
-由 `MiniS3` 调用；把一次命令和当前记录转换为下一份内存历史。
+Bucket PUT 接受可选的外部 ETag、时间戳与 Multipart 来源，同时保留普通 PUT 默认值。
 
-**变化锚点:** `put`
+##### 在运行时做什么
+
+完成操作会复用同一版本迁移，而不是发明第二条发布路径。
+
+##### 关键代码
+
+```python
+etag=content_etag(body) if etag is None else etag,
+```
+
+##### 关键语句理解
+
+普通 PUT 仍计算 whole-body ETag；Multipart 完成可以传入验证后的组合 ETag。按组装 Body 重算会得到错误语义。
 
 ??? note "文件差异：src/minis3/bucket.py"
     ```diff
@@ -132,11 +166,23 @@
 
 #### `src/minis3/storage/disk.py`
 
-磁盘布局、发布与恢复的所有者。
+##### 是什么，为什么现在需要
 
-在领域变更后调用；把内存状态变成持久 Artifact，并在启动时重建。
+DiskStorage 增加私有上传布局、原子 Part 写入、身份校验、删除和重启恢复。
 
-**变化锚点:** `create_multipart_upload`, `write_multipart_part`, `load_multipart_upload`, `remove_multipart_upload`, `_bucket_directory`, `_upload_directory`, `_manifest_bytes`, `_recover_uploads`
+##### 在运行时做什么
+
+它像管理对象 Artifact 一样管理持久 Staging，但普通 Manifest/List 从不读取 `uploads/`。
+
+##### 关键代码
+
+```python
+atomic_write(directory / "parts" / f"{part.part_number:05d}.data", part.body)
+```
+
+##### 关键语句理解
+
+Part 编号选择稳定文件名，`atomic_write` 完整替换它；重试不会留下半旧半新的字节。
 
 ??? note "文件差异：src/minis3/storage/disk.py"
     ```diff
@@ -362,11 +408,23 @@
 
 #### `src/minis3/store.py`
 
-协调领域逻辑与持久化的应用服务。
+##### 是什么，为什么现在需要
 
-接收公开调用，拥有加锁与编排，再委托给领域、投影和存储边界。
+公开服务增加 initiate、upload-part、abort 编排，以及可注入 clock 和最小 Part 大小。
 
-**变化锚点:** `create_bucket`, `delete_bucket`, `set_bucket_versioning`, `put_object`, `get_object`, `head_object`, `delete_object`, `list_objects`, `list_object_versions`, `create_multipart_upload`, `upload_part`, `abort_multipart_upload`, `_bucket`
+##### 在运行时做什么
+
+它在同一把锁下校验公开参数、分配确定性上传身份，再把私有字节委托给 DiskStorage。
+
+##### 关键代码
+
+```python
+upload_id=f"u{sequence:08d}",
+```
+
+##### 关键语句理解
+
+Upload ID 延续单调序列纪律，使重启恢复和学习追踪可复现，而不是依赖随机 UUID。
 
 ??? note "文件差异：src/minis3/store.py"
     ```diff
@@ -562,11 +620,17 @@
 
 #### `src/minis3/__init__.py`
 
-受支持的包级公开接口。
+##### 是什么，为什么现在需要
 
-由用户导入触达；接线错误会在运行时流程开始前表现为名称缺失。
+Multipart 值与失败加入受支持包级 API。
 
-**变化锚点:** 配置、导出或文档变化
+##### 在运行时做什么
+
+调用方可以持有 receipt 并捕获 `NoSuchUpload`，无需导入存储内部实现。
+
+##### 关键语句理解
+
+公开的是领域契约，不是私有磁盘布局。
 
 ??? note "文件差异：src/minis3/__init__.py"
     ```diff
@@ -626,11 +690,23 @@
 
 #### `tests/test_multipart.py`
 
-本阶段行为的可执行证明。
+##### 是什么，为什么现在需要
 
-调用学习者可见边界并记录预期状态或失败；验证机制时再从这里进入。
+第一条持久 Multipart 测试锁定上传身份和合法 Part 编号范围。
 
-**变化锚点:** `test_upload_identity_and_part_number_are_validated`
+##### 在运行时做什么
+
+它通过 `MiniS3` 进入，因此失败同时覆盖服务校验与存储身份查找。
+
+##### 关键代码
+
+```python
+store.upload_part("b", "wrong", upload.upload_id, 1, b"x")
+```
+
+##### 关键语句理解
+
+Upload ID 不能全局互换：寻址的 Bucket 与 Key 必须和持久元数据匹配，之后才能写 Part。
 
 ??? note "文件差异：tests/test_multipart.py"
     ```diff
@@ -674,27 +750,15 @@
 
 ### 验证证据
 
-`uv run pytest -q $(cat journey/stages/10-multipart-staging/tests.txt)`
+运行 `uv run pytest -q $(cat journey/stages/10-multipart-staging/tests.txt)`。它证明身份与范围拒绝，累计测试守住早期对象行为；完成可见性刻意留到下一阶段。
 
-本阶段新增 1 个可执行用例，入口为 `test_upload_identity_and_part_number_are_validated`。它们在机制走读之后运行，并与此前 Stage 的用例一起守住累计行为。
+### 需要真正记住的内容
 
-### 概念检查
+Staging 持久但私有；上传身份包含 Bucket 和 Key；同编号重试原子替换；只有 Bucket Manifest 发布才能创建对象。
 
-本阶段完成后，哪条不变量必须保持成立？
+### 用自己的话讲清楚
 
-??? note "答案"
-    未完成上传位于可见对象 manifest 之外。
-
-### 代码阅读检查
-
-从 `src/minis3/model.py` 的 `the changed hunk` 开始：进入这个边界的状态或值是什么，结果又交给哪个所有者？
-
-??? note "答案"
-    由 Bucket/服务代码构造并向上返回，不拥有 I/O；状态正确但结果异常时检查这些字段。
-
-### 面试表达
-
-未完成上传位于可见对象 manifest 之外。
+MiniS3 把未完成 Multipart 工作保存在独立持久命名空间。服务校验上传身份和 Part 编号，DiskStorage 原子替换编号 Part 文件；由于尚未发布 ObjectRecord，普通 GET/List 完全不受影响。
 
 ### 教材
 

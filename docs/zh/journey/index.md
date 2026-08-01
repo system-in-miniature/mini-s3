@@ -1,8 +1,10 @@
-# MiniS3 Journey
+# 自主重建
 
-每个 Stage 都是一节可独立浏览的完整课：先理解 S3 问题与机制，再按运行时职责逐文件阅读 Diff，最后用测试、自查题与面试表达完成闭环。
+每个 Stage 都是一节可独立浏览的完整课：先理解当前问题、基本概念与必要性，再逐文件读懂关键语句，最后用验证证据和自己的话完成理解闭环。
 
-如果希望在编辑器里聚焦当前增量，运行 `python journey/tools/build_journey.py study N`，再打开 `../MiniS3-journey-workspace`。Agent 导师可以增强互动，但不是完成课程的前提。
+这是三种学习模式中的浏览器自主学习路径。按主题学习请进入[机制教程](../tutorial/index.md)；需要 CLI 互动请查看 [Agent 带教使用教程](../agent-guided.md)。
+
+如果希望在编辑器里聚焦当前增量，运行 `python journey/tools/build_journey.py study N`，再打开 `../MiniS3-journey-workspace`。
 
 | Stage | 主题 | 新增测试 | 教材章节 |
 |---:|---|---:|---:|

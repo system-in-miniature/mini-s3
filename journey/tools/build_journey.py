@@ -18,12 +18,22 @@ import tempfile
 ROOT = Path(__file__).resolve().parents[2]
 STAGES_ROOT = ROOT / "journey" / "stages"
 DEFAULT_LEARNING_WORKSPACE = ROOT.parent / "MiniS3-journey-workspace"
+AGENT_CONTRACT = ROOT / "AGENTS.md"
 STAGE_PATTERN = re.compile(r"^(?P<number>\d{2})-(?P<slug>[a-z0-9-]+)$")
 DIFF_HEADER = re.compile(r"^diff --git a/(.+) b/(.+)$")
 DELIVERY_HEADING = "### Deliverable files / 交付文件"
 DELIVERY_ITEM = re.compile(r"^- `([^`]+)`$")
 WORKSPACE_CONFIG_KEY = "journey.learningWorkspace"
 PARITY_EXCLUSIONS = {"tests": {"test_docs_homepage.py"}}
+WORKSPACE_EXCLUDES = (
+    ".venv/",
+    ".pytest_cache/",
+    ".ruff_cache/",
+    "__pycache__/",
+    "*.pyc",
+    "AGENTS.md",
+    ".journey/",
+)
 
 
 class JourneyError(RuntimeError):
@@ -273,6 +283,17 @@ def publish_refs(worktree: Path, stages: list[Stage], commits: list[str]) -> Non
         run(["git", "tag", "--force", stage.label, commit], cwd=ROOT)
 
 
+def ensure_workspace_excludes(git_directory: Path) -> None:
+    exclude = git_directory / "info" / "exclude"
+    existing = exclude.read_text().splitlines() if exclude.exists() else []
+    merged = [*existing]
+    for pattern in WORKSPACE_EXCLUDES:
+        if pattern not in merged:
+            merged.append(pattern)
+    exclude.parent.mkdir(parents=True, exist_ok=True)
+    exclude.write_text("\n".join(merged) + "\n")
+
+
 def initialize_learning_workspace(workspace: Path) -> bool:
     workspace = workspace.resolve()
     git_directory = workspace / ".git"
@@ -285,6 +306,7 @@ def initialize_learning_workspace(workspace: Path) -> bool:
             raise JourneyError(
                 f"refusing to use an unmarked Git repository: {workspace}"
             )
+        ensure_workspace_excludes(git_directory)
         return False
 
     if workspace.exists() and any(workspace.iterdir()):
@@ -299,9 +321,7 @@ def initialize_learning_workspace(workspace: Path) -> bool:
         cwd=workspace,
     )
     run(["git", "config", WORKSPACE_CONFIG_KEY, "true"], cwd=workspace)
-    (git_directory / "info" / "exclude").write_text(
-        ".venv/\n.pytest_cache/\n.ruff_cache/\n__pycache__/\n*.pyc\n"
-    )
+    ensure_workspace_excludes(git_directory)
     print(f"[workspace] initialized dedicated Git repository: {workspace}")
     return True
 
@@ -344,6 +364,8 @@ def rebuild_baseline(
     if has_head(workspace):
         run(["git", "reset", "--hard", "HEAD"], cwd=workspace)
     run(["git", "clean", "-fd"], cwd=workspace)
+    (workspace / "AGENTS.md").unlink(missing_ok=True)
+    shutil.rmtree(workspace / ".journey", ignore_errors=True)
     if run(["git", "ls-files"], cwd=workspace).stdout.strip():
         run(["git", "rm", "-r", "-q", "--ignore-unmatch", "--", "."], cwd=workspace)
 
@@ -399,6 +421,34 @@ def attempt(stage: Stage, stages: list[Stage], workspace: Path, *, yes: bool) ->
         ]
     )
     print(f"Pass: {pass_command}")
+
+
+def agent(stage: Stage, stages: list[Stage], workspace: Path, *, yes: bool) -> None:
+    """Prepare a clean baseline plus ignored, agent-facing Stage context."""
+
+    rebuild_baseline(workspace, stage, stages, yes=yes)
+    support = workspace / ".journey"
+    support.mkdir()
+    shutil.copyfile(AGENT_CONTRACT, workspace / "AGENTS.md")
+    shutil.copyfile(stage.goal, support / "stage.md")
+    shutil.copyfile(stage.patch, support / "reference.patch")
+    shutil.copyfile(stage.tests, support / "tests.txt")
+    (support / "stage-number.txt").write_text(f"{stage.number:02d}\n")
+    check_command = shlex.join(
+        [
+            sys.executable,
+            str(Path(__file__).resolve()),
+            "check",
+            str(stage.number),
+            "--workspace",
+            str(workspace.resolve()),
+        ]
+    )
+    (support / "check-command.txt").write_text(check_command + "\n")
+    print(f"[agent {stage.label}] READY — clean baseline plus tutor context")
+    print(f"Open CLI: cd {shlex.quote(str(workspace.resolve()))} && codex")
+    print(f"Start prompt: 开始 Stage {stage.number:02d}")
+    print(f"Pass: {check_command}")
 
 
 def index_tree(
@@ -574,6 +624,7 @@ def main() -> int:
             "Learner modes:\n"
             "  study N    show stage N as uncommitted editor-native changes\n"
             "  attempt N  reset to stage N-1 so you can implement stage N\n"
+            "  agent N    prepare stage N for interactive CLI tutoring\n"
             "  check N    run stage N tests and compare with its reference tree"
         ),
     )
@@ -609,6 +660,18 @@ def main() -> int:
         help="skip the overwrite confirmation",
     )
 
+    agent_parser = subparsers.add_parser(
+        "agent",
+        help="prepare stage N with AGENTS.md and private tutor context",
+    )
+    agent_parser.add_argument("stage", type=int, metavar="N")
+    add_workspace_argument(agent_parser)
+    agent_parser.add_argument(
+        "--yes",
+        action="store_true",
+        help="skip the overwrite confirmation",
+    )
+
     check_parser = subparsers.add_parser(
         "check",
         help="run stage N tests and require parity with its reference tree",
@@ -627,6 +690,8 @@ def main() -> int:
                 study(stage, stages, arguments.workspace, yes=arguments.yes)
             elif arguments.command == "attempt":
                 attempt(stage, stages, arguments.workspace, yes=arguments.yes)
+            elif arguments.command == "agent":
+                agent(stage, stages, arguments.workspace, yes=arguments.yes)
             else:
                 check_learning_workspace(stage, stages, arguments.workspace)
     except JourneyError as exc:

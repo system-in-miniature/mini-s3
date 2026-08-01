@@ -2,33 +2,53 @@
 
 ### 目标
 
-在 manifest rename 前后注入崩溃，钉死其线性化点。
+在 Manifest rename 前后立即崩溃，证明它是唯一可见性边界。
 
 ### 交付文件
 
 - `tests/test_storage.py`
 
-### 机制走读
+### 当前遇到的问题
 
-#### 所有权与数据流
+Stage 03 描述了最后发布的存储，正常重启也通过了，但这还不能证明崩溃只会暴露完整旧状态或完整新状态。必须在每个命名崩溃边界实际观察。
 
-本阶段只修改测试，不修改生产代码；故障注入包围 Manifest 替换，以证明单一线性化点两侧的旧/新可见性分界。
+### 先看会坏在哪里
 
-#### 失败与排查
+一条测试在新 Artifact 已持久化后注入 `before_manifest_publish`。重开后必须仍返回旧对象并删除未引用的新 Artifact。如果 Artifact 只要存在就算可见，新值会在 Manifest 从未提交时泄漏。
 
-每次注入崩溃后重新打开存储，只观察已发布状态；若看到部分新状态，说明发布顺序或恢复信任边界错误。
+### 基本概念
 
-### 逐文件 Diff 走读
+线性化点是并发或恢复观察者认为操作已经生效的瞬间。崩溃矩阵探测它两侧：点之前旧状态获胜，点之后完整新状态获胜，不允许半状态。
 
-按运行时职责阅读，而不是按补丁存储顺序阅读。每个代码块都直接来自 canonical `stage.patch`。
+### 为什么需要这个机制
+
+文档和 happy path 无法证明崩溃原子性。故意中断把发布顺序变成可执行证据，也防止未来重构误把可见性移动到 Artifact 创建时。
+
+### 运行时心智模型
+
+测试准备旧状态、安装 `CrashOnce`、尝试变更、捕获 `InjectedCrash`，再创建全新服务。随后检查可见数据与磁盘残留。本 Stage 不改生产代码，新增的是对现有边界的可信证据。
+
+### 逐文件走读
 
 #### `tests/test_storage.py`
 
-本阶段行为的可执行证明。
+##### 是什么，为什么现在需要
 
-调用学习者可见边界并记录预期状态或失败；验证机制时再从这里进入。
+存储集成套件加入围绕 Artifact 与 Manifest 发布的参数化崩溃矩阵。
 
-**变化锚点:** `test_crash_before_manifest_publish_leaves_old_state`, `test_crash_before_manifest_publication_matrix_leaves_old_state`, `test_crash_after_manifest_publish_exposes_complete_new_state`
+##### 在运行时做什么
+
+它只在重开后观察系统，丢弃可能误导人的进程内内存，并实际运行恢复清理。
+
+##### 关键代码
+
+```python
+crash_injector=CrashOnce("before_manifest_publish"),
+```
+
+##### 关键语句理解
+
+命名 hook 固定精确中断边界；全新实例上的断言因而能区分“Artifact 已持久化”和“状态已发布”。
 
 ??? note "文件差异：tests/test_storage.py"
     ```diff
@@ -110,27 +130,15 @@
 
 ### 验证证据
 
-`uv run pytest -q $(cat journey/stages/07-publication-crash-matrix/tests.txt)`
+运行 `uv run pytest -q $(cat journey/stages/07-publication-crash-matrix/tests.txt)`。五个新增用例覆盖多个发布前点、发布后侧与清理。
 
-本阶段新增 5 个可执行用例，入口为 `test_crash_before_manifest_publish_leaves_old_state`、`test_crash_before_manifest_publication_matrix_leaves_old_state`、`test_crash_after_manifest_publish_exposes_complete_new_state`。它们在机制走读之后运行，并与此前 Stage 的用例一起守住累计行为。
+### 需要真正记住的内容
 
-### 概念检查
+Artifact 持久化不等于可见。Manifest rename 是提交点：此前恢复选择旧状态，此后恢复选择完整新状态。
 
-本阶段完成后，哪条不变量必须保持成立？
+### 用自己的话讲清楚
 
-??? note "答案"
-    rename 前恢复到旧状态；rename 后看到完整新状态。
-
-### 代码阅读检查
-
-从 `tests/test_storage.py` 的 `test_crash_before_manifest_publish_leaves_old_state` 开始：进入这个边界的状态或值是什么，结果又交给哪个所有者？
-
-??? note "答案"
-    调用学习者可见边界并记录预期状态或失败；验证机制时再从这里进入。
-
-### 面试表达
-
-rename 前恢复到旧状态；rename 后看到完整新状态。
+崩溃矩阵通过在线性化点两侧中断并从磁盘重开来证明原子性。只有 Manifest 能让不可变 Artifact 可见，所以发布前未引用文件只是残留，rename 后已发布 Manifest 则提交完整新值。
 
 ### 教材
 

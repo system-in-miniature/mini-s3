@@ -2,7 +2,7 @@
 
 ### 目标
 
-建立可安装包，以及表示字节、ETag、不透明 Key 和删除标记的不可变值。
+建立可安装的 Python 包，以及后续所有对象操作都会传递的不可变领域值。
 
 ### 交付文件
 
@@ -14,27 +14,51 @@
 - `tests/test_model.py`
 - `uv.lock`
 
-### 机制走读
+### 当前遇到的问题
 
-#### 所有权与数据流
+旅程开始时既没有包，也没有“对象”的准确词汇。在实现 PUT/GET 以前，MiniS3 必须先回答四件事：对象值由哪些字节组成、如何标识这份值、普通版本与删除有什么区别，以及 `photos/2026/a.jpg` 这样的 Key 究竟是路径还是普通字符串。
 
-`model.py` 拥有不可变完整对象值：字节进入 `content_etag` 形成带引号指纹，再随 `Version` 进入 `ObjectRecord`；`DeleteMarker` 只遮蔽历史，不携带 Body。
+本阶段只建立这些值，不引入存储和服务行为。后续阶段可以增加历史与持久化，同时继续在边界之间传递同一套不可变对象。
 
-#### 失败与排查
+### 先看会坏在哪里
 
-从值构造器与 ETag 断言开始排查。`key` 中的斜杠必须原样保留，对象必须不可变，删除标记不能意外获得对象字节。
+最直观的契约会创建 `ObjectRecord(key="/a//b/")`，并要求读取时得到完全相同的字符串。如果模型把 Key 当文件系统路径，开头或重复斜杠可能在存储出现以前就被吞掉。这个测试在最小边界上直接暴露数据被改写的问题。
 
-### 逐文件 Diff 走读
+### 基本概念
 
-按运行时职责阅读，而不是按补丁存储顺序阅读。每个代码块都直接来自 canonical `stage.patch`。
+S3 对象值是一整段字节，不是可局部编辑的文件。本项目里的普通 ETag 是对象字节的带引号小写 MD5；它用于比较内容，不是访问控制密钥。
+
+Key 是不透明字符串。后面的 Listing 可以利用斜杠展示类似目录的结果，但模型必须逐字符保留 Key。`Version` 携带 Body；`DeleteMarker` 只携带身份和顺序，因为它的作用是遮蔽旧数据，而不是保存一个空对象。
+
+### 为什么需要这个机制
+
+如果用松散字典表达这些含义，后续代码可能修改历史版本、规范化 Key，或者误给删除标记附加 Body，版本化和恢复就会变得含糊。冻结的领域值限制了非法状态，也让 Bucket、存储和服务共享同一种语言。
+
+### 运行时心智模型
+
+当前流程很短：调用方的 bytes 进入 `content_etag` 得到 ETag，再进入 `Version`；`ObjectRecord` 把精确 Key 与按新到旧排列的版本元组关联起来。这里没有任何类负责 I/O 或全局变更，它们只是后续边界要使用的值。
+
+### 逐文件走读
 
 #### `src/minis3/errors.py`
 
-共享的领域失败词汇。
+##### 是什么，为什么现在需要
 
-由 Bucket/服务代码构造并向上返回，不拥有 I/O；状态正确但结果异常时检查这些字段。
+这里定义与 HTTP 无关的领域错误。Bucket 和服务代码可以准确表达失败，而不依赖传输协议。
 
-**变化锚点:** `MiniS3Error`, `BucketAlreadyExists`, `NoSuchBucket`, `BucketNotEmpty`, `NoSuchKey`, `NoSuchVersion`, `InvalidContinuationToken`
+##### 在运行时做什么
+
+调用方可以捕获 `MiniS3Error` 的具体子类，再映射成协议响应。缺 Bucket、缺 Key、缺具体版本必须分开，否则会丢失语义。
+
+##### 关键代码
+
+```python
+class NoSuchKey(MiniS3Error):
+```
+
+##### 关键语句理解
+
+继承关系表示它属于 MiniS3 的公开失败词汇，同时仍可与 `NoSuchBucket`、`NoSuchVersion` 区分。
 
 ??? note "文件差异：src/minis3/errors.py"
     ```diff
@@ -78,11 +102,24 @@
 
 #### `src/minis3/model.py`
 
-贯穿系统的不可变领域值。
+##### 是什么，为什么现在需要
 
-由 Bucket/服务代码构造并向上返回，不拥有 I/O；状态正确但结果异常时检查这些字段。
+这是本阶段的核心领域值文件，定义完整对象版本、无 Body 删除标记、Key 的历史和内容 ETag。
 
-**变化锚点:** `content_etag`, `Version`, `size`, `is_delete_marker`, `DeleteMarker`, `ObjectRecord`
+##### 在运行时做什么
+
+后续 Bucket 构造这些值，Listing 投影它们，磁盘层序列化它们；这些值自身不执行 I/O，也不拥有全局状态。
+
+##### 关键代码
+
+```python
+digest = md5(body, usedforsecurity=False).hexdigest()
+return f'"{digest}"'
+```
+
+##### 关键语句理解
+
+`usedforsecurity=False` 明确 MD5 在这里是 S3 风格指纹，不是安全算法。外层引号属于 ETag 的公开表示，返回裸摘要会造成语义错误。
 
 ??? note "文件差异：src/minis3/model.py"
     ```diff
@@ -171,11 +208,17 @@
 
 #### `src/minis3/__init__.py`
 
-受支持的包级公开接口。
+##### 是什么，为什么现在需要
 
-由用户导入触达；接线错误会在运行时流程开始前表现为名称缺失。
+这是包级公开边界，让学习者和后续服务可以从 `minis3` 导入稳定名称，而不必知道内部模块布局。
 
-**变化锚点:** 配置、导出或文档变化
+##### 在运行时做什么
+
+它只负责接线。名称漏导出会在对象流程开始前表现为 import 失败，但它不拥有 ETag 或版本行为。
+
+##### 关键语句理解
+
+显式导入组成第一版公开 API；内部辅助函数只有在后续阶段明确加入时才成为公开能力。
 
 ??? note "文件差异：src/minis3/__init__.py"
     ```diff
@@ -192,11 +235,23 @@
 
 #### `tests/test_model.py`
 
-本阶段行为的可执行证明。
+##### 是什么，为什么现在需要
 
-调用学习者可见边界并记录预期状态或失败；验证机制时再从这里进入。
+三个测试分别固定带引号 ETag、含斜杠的不透明 Key 与不可变性、无 Body 删除标记。
 
-**变化锚点:** `test_etag_is_quoted_lowercase_content_md5`, `test_keys_are_opaque_even_when_they_contain_slashes`, `test_delete_marker_has_no_object_body`
+##### 在运行时做什么
+
+它们直接调用学习者可见的领域值，只证明值语义；目前还不能证明 Bucket 迁移、磁盘持久化或对象服务。
+
+##### 关键代码
+
+```python
+assert record.key == "/a//b/"
+```
+
+##### 关键语句理解
+
+故意使用异常形状的 Key 是为了捕获路径规范化。断言通过只证明字符串被原样保存，不代表系统真的存在目录。
 
 ??? note "文件差异：tests/test_model.py"
     ```diff
@@ -245,11 +300,17 @@
 
 #### `README.md`
 
-Journey 工作区入口说明。
+##### 是什么，为什么现在需要
 
-支撑安装或入口说明，不属于运行时数据流；导入、构建或命令执行前失败时从这里排查。
+这是学习工作区的短入口，说明仓库会按可验证 Stage 重建。
 
-**变化锚点:** 配置、导出或文档变化
+##### 在运行时做什么
+
+它不参与运行时，只帮助学习者识别这是阶段式重建工作区，而不是完成品源码。
+
+##### 关键语句理解
+
+“one verified stage at a time” 描述学习流程，不是对象存储不变量。
 
 ??? note "文件差异：README.md"
     ```diff
@@ -266,11 +327,17 @@ Journey 工作区入口说明。
 
 #### `pyproject.toml`
 
-安装与测试配置。
+##### 是什么，为什么现在需要
 
-支撑安装或入口说明，不属于运行时数据流；导入、构建或命令执行前失败时从这里排查。
+它让 `src/minis3` 可安装，并告诉 pytest 源码与测试的位置。
 
-**变化锚点:** 配置、导出或文档变化
+##### 在运行时做什么
+
+构建与测试工具先读取它，再导入 MiniS3。包路径配置错误时，即使模型代码正确也会表现为 import 失败。
+
+##### 关键语句理解
+
+`packages = ["src/minis3"]` 把 src-layout 目录接到构建产物；`testpaths = ["tests"]` 限定测试发现范围。
 
 ??? note "文件差异：pyproject.toml"
     ```diff
@@ -308,11 +375,17 @@ Journey 工作区入口说明。
 
 #### `uv.lock`
 
-可复现依赖锁。
+##### 是什么，为什么现在需要
 
-支撑安装或入口说明，不属于运行时数据流；导入、构建或命令执行前失败时从这里排查。
+锁文件记录运行本阶段时的精确开发依赖图。
 
-**变化锚点:** 配置、导出或文档变化
+##### 在运行时做什么
+
+它影响环境复现，不影响对象语义；不同机器解析出不同依赖时再从这里排查。
+
+##### 关键语句理解
+
+editable 的 `minis3` 条目把本地包接入锁定环境，pytest 版本也因此可复现。
 
 ??? note "文件差异：uv.lock"
     ```diff
@@ -405,27 +478,15 @@ Journey 工作区入口说明。
 
 ### 验证证据
 
-`uv run pytest -q $(cat journey/stages/01-scaffold-object-model/tests.txt)`
+运行 `uv run pytest -q $(cat journey/stages/01-scaffold-object-model/tests.txt)`。三个测试分别证明上述三个值不变量；它们不证明尚不存在的存储、版本迁移或服务行为。
 
-本阶段新增 3 个可执行用例，入口为 `test_etag_is_quoted_lowercase_content_md5`、`test_keys_are_opaque_even_when_they_contain_slashes`、`test_delete_marker_has_no_object_body`。它们在机制走读之后运行，并与此前 Stage 的用例一起守住累计行为。
+### 需要真正记住的内容
 
-### 概念检查
+把四件事连起来：对象是完整字节；普通 ETag 是带引号内容指纹；Key 是精确的不透明字符串；删除标记不是空对象。
 
-本阶段完成后，哪条不变量必须保持成立？
+### 用自己的话讲清楚
 
-??? note "答案"
-    S3 保存完整对象值；Key 中的斜杠只是数据，不是目录。
-
-### 代码阅读检查
-
-从 `src/minis3/model.py` 的 `content_etag` 开始：进入这个边界的状态或值是什么，结果又交给哪个所有者？
-
-??? note "答案"
-    由 Bucket/服务代码构造并向上返回，不拥有 I/O；状态正确但结果异常时检查这些字段。
-
-### 面试表达
-
-S3 保存完整对象值；Key 中的斜杠只是数据，不是目录。
+MiniS3 先建立不可变对象值，避免后续状态机和存储层对 Key、数据版本、ETag 与删除产生不同理解。关键约束是斜杠仍属于数据、Marker 永远没有 Body；破坏任一约束都会污染后续 Listing 或版本历史。
 
 ### 教材
 

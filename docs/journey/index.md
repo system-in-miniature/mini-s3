@@ -1,8 +1,10 @@
-# MiniS3 Journey
+# Self-Guided Rebuild
 
-Each Stage is a complete independent-browser lesson: understand the S3 problem and mechanism, read every changed file by runtime responsibility, then close with verification, checks, and interview language.
+Each Stage is a complete independent-browser lesson: understand the current problem, concepts, and necessity; read each changed file and its critical statements; then close with evidence and your own explanation.
 
-For an editor-focused diff, run `python journey/tools/build_journey.py study N` and open `../MiniS3-journey-workspace`. An agent tutor adds interaction but is not required to complete the course.
+This is the browser-based path among MiniS3's three learning modes. Use the [Mechanism Tutorial](../tutorial/index.md) for topic-oriented study, or the [Agent-Guided usage guide](../agent-guided.md) for interactive CLI teaching.
+
+For an editor-focused diff, run `python journey/tools/build_journey.py study N` and open `../MiniS3-journey-workspace`.
 
 | Stage | Topic | New tests | Book chapter |
 |---:|---|---:|---:|
