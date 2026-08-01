@@ -36,6 +36,8 @@ class Version:
     sequence: int
     body: bytes
     etag: str
+    created_at: float = 0.0
+    multipart_upload_id: str | None = None
 
     @property
     def size(self) -> int:
@@ -57,6 +59,7 @@ class DeleteMarker:
     version_id: str
     storage_id: str
     sequence: int
+    created_at: float = 0.0
 
     @property
     def is_delete_marker(self) -> bool:
@@ -72,4 +75,3 @@ class ObjectRecord:
 
     key: str
     versions: tuple[ObjectVersion, ...] = ()
-

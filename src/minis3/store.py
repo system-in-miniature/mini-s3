@@ -1,9 +1,4 @@
-"""Public service facade joining buckets, object state, and list projections.
-
-This initial service boundary deliberately resembles an SDK rather than an HTTP
-server. A future thin protocol adapter can translate these domain values and
-errors without taking ownership of storage semantics.
-"""
+"""Public service facade joining buckets, object state, and list projections."""
 
 from __future__ import annotations
 
@@ -11,16 +6,21 @@ from collections.abc import Callable
 from copy import deepcopy
 from pathlib import Path
 from threading import RLock
+from time import time
 
 from .bucket import Bucket, SequenceCounter, VersioningState
 from .errors import BucketAlreadyExists, BucketNotEmpty, NoSuchBucket
-from .listing import (
-    ListObjectsResult,
-    ListObjectVersionsResult,
-    list_object_versions,
-    list_objects,
-)
+from .listing import ListObjectsResult, ListObjectVersionsResult, list_object_versions, list_objects
 from .model import ObjectVersion, Version
+from .multipart import (
+    MAX_PART_NUMBER,
+    MIN_PART_SIZE,
+    CompletionEntry,
+    MultipartPart,
+    MultipartUpload,
+    StagedPart,
+    validate_completion,
+)
 from .storage import DiskStorage
 
 
@@ -33,15 +33,22 @@ class MiniS3:
         *,
         counter: Callable[[], int] | None = None,
         crash_injector: Callable[[str], None] | None = None,
+        clock: Callable[[], float] | None = None,
+        minimum_part_size: int = MIN_PART_SIZE,
     ) -> None:
+        if minimum_part_size < 1:
+            raise ValueError("minimum_part_size must be positive")
         self.root = Path(root)
         self._counter = counter or SequenceCounter()
+        self._clock = clock or time
+        self.minimum_part_size = minimum_part_size
         self._storage = DiskStorage(root, crash_injector=crash_injector)
         self._buckets, maximum_sequence = self._storage.load_buckets()
         ensure = getattr(self._counter, "ensure_at_least", None)
         if ensure is not None:
             ensure(maximum_sequence + 1)
         self._lock = RLock()
+
 
     def create_bucket(self, name: str) -> None:
         with self._lock:
@@ -51,6 +58,7 @@ class MiniS3:
             self._storage.create_bucket(bucket)
             self._buckets[name] = bucket
 
+
     def delete_bucket(self, name: str) -> None:
         with self._lock:
             bucket = self._bucket(name)
@@ -58,6 +66,7 @@ class MiniS3:
                 raise BucketNotEmpty(name)
             self._storage.delete_bucket(name)
             del self._buckets[name]
+
 
     def set_bucket_versioning(
         self, name: str, state: VersioningState | str
@@ -68,6 +77,7 @@ class MiniS3:
             self._storage.persist_bucket(candidate)
             self._buckets[name] = candidate
 
+
     def put_object(self, bucket: str, key: str, body: bytes) -> Version:
         with self._lock:
             candidate = deepcopy(self._bucket(bucket))
@@ -76,11 +86,13 @@ class MiniS3:
             self._buckets[bucket] = candidate
             return result
 
+
     def get_object(
         self, bucket: str, key: str, *, version_id: str | None = None
     ) -> Version:
         with self._lock:
             return self._bucket(bucket).get(key, version_id)
+
 
     def head_object(
         self, bucket: str, key: str, *, version_id: str | None = None
@@ -88,6 +100,7 @@ class MiniS3:
         """Return object metadata; M1 reuses the immutable Version value."""
 
         return self.get_object(bucket, key, version_id=version_id)
+
 
     def delete_object(
         self, bucket: str, key: str, *, version_id: str | None = None
@@ -98,6 +111,7 @@ class MiniS3:
             self._storage.persist_bucket(candidate)
             self._buckets[bucket] = candidate
             return result
+
 
     def list_objects(
         self,
@@ -117,14 +131,65 @@ class MiniS3:
                 continuation_token=continuation_token,
             )
 
+
     def list_object_versions(
         self, bucket: str, *, prefix: str = ""
     ) -> ListObjectVersionsResult:
         with self._lock:
             return list_object_versions(self._bucket(bucket).records, prefix=prefix)
 
+
+    def create_multipart_upload(
+        self, bucket: str, key: str
+    ) -> MultipartUpload:
+        """Initiate durable staging without adding a visible object record."""
+
+        with self._lock:
+            self._bucket(bucket)
+            sequence = self._counter()
+            upload = MultipartUpload(
+                bucket=bucket,
+                key=key,
+                upload_id=f"u{sequence:08d}",
+                sequence=sequence,
+                initiated_at=self._clock(),
+            )
+            self._storage.create_multipart_upload(upload)
+            return upload
+
+
+    def upload_part(
+        self,
+        bucket: str,
+        key: str,
+        upload_id: str,
+        part_number: int,
+        body: bytes,
+    ) -> MultipartPart:
+        """Durably add/replace a part; final-part size is decided at complete."""
+
+        if not 1 <= part_number <= MAX_PART_NUMBER:
+            raise ValueError(f"part_number must be between 1 and {MAX_PART_NUMBER}")
+        with self._lock:
+            self._bucket(bucket)
+            part = StagedPart(part_number, bytes(body))
+            self._storage.write_multipart_part(bucket, key, upload_id, part)
+            return part.receipt
+
+
+    def abort_multipart_upload(
+        self, bucket: str, key: str, upload_id: str
+    ) -> None:
+        """Discard one incomplete upload without affecting any object."""
+
+        with self._lock:
+            self._bucket(bucket)
+            self._storage.remove_multipart_upload(bucket, key, upload_id)
+
+
     def _bucket(self, name: str) -> Bucket:
         try:
             return self._buckets[name]
         except KeyError as exc:
             raise NoSuchBucket(name) from exc
+
