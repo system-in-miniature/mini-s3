@@ -1,0 +1,109 @@
+"""Versioning is the central state-machine contract of M1."""
+
+from pathlib import Path
+import pytest
+from minis3 import BucketNotEmpty, MiniS3, NoSuchKey, NoSuchVersion, SequenceCounter, VersioningState
+from minis3.bucket import Bucket
+
+
+@pytest.mark.parametrize(
+    ("initial", "requested", "allowed"),
+    [
+        (VersioningState.UNVERSIONED, VersioningState.UNVERSIONED, True),
+        (VersioningState.UNVERSIONED, VersioningState.ENABLED, True),
+        (VersioningState.UNVERSIONED, VersioningState.SUSPENDED, False),
+        (VersioningState.ENABLED, VersioningState.UNVERSIONED, False),
+        (VersioningState.ENABLED, VersioningState.ENABLED, True),
+        (VersioningState.ENABLED, VersioningState.SUSPENDED, True),
+        (VersioningState.SUSPENDED, VersioningState.UNVERSIONED, False),
+        (VersioningState.SUSPENDED, VersioningState.ENABLED, True),
+        (VersioningState.SUSPENDED, VersioningState.SUSPENDED, True),
+    ],
+)
+def test_versioning_state_machine_exhaustive(
+    initial: VersioningState,
+    requested: VersioningState,
+    allowed: bool,
+) -> None:
+    bucket = Bucket("b", versioning=initial)
+
+    if allowed:
+        bucket.set_versioning(requested)
+        assert bucket.versioning is requested
+    else:
+        with pytest.raises(ValueError):
+            bucket.set_versioning(requested)
+        assert bucket.versioning is initial
+
+
+def test_unversioned_delete_defensively_preserves_named_history() -> None:
+    bucket = Bucket("b")
+    bucket.set_versioning(VersioningState.ENABLED)
+    historical = bucket.put("k", b"named", SequenceCounter())
+    bucket.versioning = VersioningState.UNVERSIONED
+
+    bucket.delete("k", SequenceCounter(10))
+
+    assert bucket.get("k", historical.version_id) == historical
+
+
+def test_enabled_puts_stack_and_delete_marker_hides_history(tmp_path: Path) -> None:
+    store = MiniS3(tmp_path, counter=SequenceCounter())
+    store.create_bucket("photos")
+    null = store.put_object("photos", "cat.jpg", b"before")
+    store.set_bucket_versioning("photos", VersioningState.ENABLED)
+    first = store.put_object("photos", "cat.jpg", b"one")
+    second = store.put_object("photos", "cat.jpg", b"two")
+    marker = store.delete_object("photos", "cat.jpg")
+
+    assert [null.version_id, first.version_id, second.version_id] == [
+        "null",
+        "v00000002",
+        "v00000003",
+    ]
+    assert marker is not None and marker.version_id == "v00000004"
+    with pytest.raises(NoSuchKey):
+        store.get_object("photos", "cat.jpg")
+    assert store.get_object(
+        "photos", "cat.jpg", version_id=second.version_id
+    ).body == b"two"
+    assert store.head_object(
+        "photos", "cat.jpg", version_id=first.version_id
+    ).etag == first.etag
+
+
+def test_specific_delete_removes_only_addressed_version(tmp_path: Path) -> None:
+    store = MiniS3(tmp_path, counter=SequenceCounter())
+    store.create_bucket("b")
+    store.set_bucket_versioning("b", "enabled")
+    store.put_object("b", "k", b"old")
+    new = store.put_object("b", "k", b"new")
+
+    removed = store.delete_object("b", "k", version_id=new.version_id)
+
+    assert removed == new
+    assert store.get_object("b", "k").body == b"old"
+    with pytest.raises(NoSuchVersion):
+        store.get_object("b", "k", version_id=new.version_id)
+
+
+def test_latest_marker_is_404_even_when_older_data_exists(tmp_path: Path) -> None:
+    store = MiniS3(tmp_path)
+    store.create_bucket("b")
+    store.set_bucket_versioning("b", "enabled")
+    old = store.put_object("b", "k", b"still here")
+    marker = store.delete_object("b", "k")
+
+    with pytest.raises(NoSuchKey):
+        store.head_object("b", "k")
+    assert store.get_object("b", "k", version_id=old.version_id).body == b"still here"
+    assert store.delete_object("b", "k", version_id=marker.version_id) == marker
+    assert store.get_object("b", "k").body == b"still here"
+
+
+def test_nonempty_bucket_cannot_be_deleted(tmp_path: Path) -> None:
+    store = MiniS3(tmp_path)
+    store.create_bucket("b")
+    store.put_object("b", "k", b"value")
+    with pytest.raises(BucketNotEmpty):
+        store.delete_bucket("b")
