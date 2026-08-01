@@ -43,3 +43,11 @@ class InvalidPartOrder(MiniS3Error):
 
 class EntityTooSmall(MiniS3Error):
     """A non-final multipart part is below the configured minimum size."""
+
+
+class PreconditionFailed(MiniS3Error):
+    """An If-Match condition failed (the S3-shaped HTTP 412 outcome)."""
+
+
+class NotModified(MiniS3Error):
+    """An If-None-Match condition matched (the HTTP 304 control outcome)."""

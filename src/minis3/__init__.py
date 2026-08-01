@@ -7,3 +7,4 @@ from .storage import InjectedCrash
 from .listing import ListedObject, ListedVersion, ListObjectsResult, ListObjectVersionsResult
 from .errors import EntityTooSmall, InvalidPart, InvalidPartOrder, NoSuchUpload
 from .multipart import MIN_PART_SIZE, MultipartPart, MultipartUpload
+from .errors import NotModified, PreconditionFailed

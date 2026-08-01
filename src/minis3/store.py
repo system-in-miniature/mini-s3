@@ -8,8 +8,9 @@ from pathlib import Path
 from threading import RLock
 from time import time
 
+from .conditional import require_if_match, require_if_none_match
 from .bucket import Bucket, SequenceCounter, VersioningState
-from .errors import BucketAlreadyExists, BucketNotEmpty, NoSuchBucket
+from .errors import BucketAlreadyExists, BucketNotEmpty, NoSuchBucket, NoSuchKey, NoSuchVersion
 from .listing import ListObjectsResult, ListObjectVersionsResult, list_object_versions, list_objects
 from .model import ObjectVersion, Version
 from .multipart import (
@@ -78,20 +79,39 @@ class MiniS3:
             self._buckets[name] = candidate
 
 
-    def put_object(self, bucket: str, key: str, body: bytes) -> Version:
+    def put_object(
+        self,
+        bucket: str,
+        key: str,
+        body: bytes,
+        *,
+        if_match: str | None = None,
+    ) -> Version:
         with self._lock:
             candidate = deepcopy(self._bucket(bucket))
-            result = candidate.put(key, body, self._counter)
+            require_if_match(self._current_etag(candidate, key), if_match)
+            result = candidate.put(
+                key, body, self._counter, now=self._clock()
+            )
             self._storage.persist_bucket(candidate)
             self._buckets[bucket] = candidate
             return result
 
 
     def get_object(
-        self, bucket: str, key: str, *, version_id: str | None = None
+        self,
+        bucket: str,
+        key: str,
+        *,
+        version_id: str | None = None,
+        if_match: str | None = None,
+        if_none_match: str | None = None,
     ) -> Version:
         with self._lock:
-            return self._bucket(bucket).get(key, version_id)
+            result = self._bucket(bucket).get(key, version_id)
+            require_if_match(result.etag, if_match)
+            require_if_none_match(result.etag, if_none_match)
+            return result
 
 
     def head_object(
@@ -103,11 +123,21 @@ class MiniS3:
 
 
     def delete_object(
-        self, bucket: str, key: str, *, version_id: str | None = None
+        self,
+        bucket: str,
+        key: str,
+        *,
+        version_id: str | None = None,
+        if_match: str | None = None,
     ) -> ObjectVersion | None:
         with self._lock:
             candidate = deepcopy(self._bucket(bucket))
-            result = candidate.delete(key, self._counter, version_id)
+            require_if_match(
+                self._addressed_etag(candidate, key, version_id), if_match
+            )
+            result = candidate.delete(
+                key, self._counter, version_id, now=self._clock()
+            )
             self._storage.persist_bucket(candidate)
             self._buckets[bucket] = candidate
             return result
@@ -218,6 +248,24 @@ class MiniS3:
         with self._lock:
             self._bucket(bucket)
             self._storage.remove_multipart_upload(bucket, key, upload_id)
+
+
+    @staticmethod
+    def _current_etag(bucket: Bucket, key: str) -> str | None:
+        try:
+            return bucket.get(key).etag
+        except NoSuchKey:
+            return None
+
+
+    @staticmethod
+    def _addressed_etag(
+        bucket: Bucket, key: str, version_id: str | None
+    ) -> str | None:
+        try:
+            return bucket.get(key, version_id).etag
+        except (NoSuchKey, NoSuchVersion):
+            return None
 
 
     def _bucket(self, name: str) -> Bucket:
