@@ -1,10 +1,34 @@
 """Public API for the MiniS3 teaching implementation."""
-from .errors import BucketAlreadyExists, BucketNotEmpty, InvalidContinuationToken, MiniS3Error, NoSuchBucket, NoSuchKey, NoSuchVersion
+
+from .errors import (
+    BucketAlreadyExists,
+    BucketNotEmpty,
+    EntityTooSmall,
+    InvalidContinuationToken,
+    InvalidPart,
+    InvalidPartOrder,
+    MiniS3Error,
+    NoSuchBucket,
+    NoSuchKey,
+    NoSuchUpload,
+    NoSuchVersion,
+    NotModified,
+    PreconditionFailed,
+)
 from .bucket import SequenceCounter, VersioningState
+from .listing import (
+    ListedObject,
+    ListedVersion,
+    ListObjectsResult,
+    ListObjectVersionsResult,
+)
 from .model import DeleteMarker, ObjectRecord, Version, content_etag
+from .lifecycle import (
+    ExpirationRule,
+    LifecycleAction,
+    LifecycleActionKind,
+    evaluate_expiration,
+)
+from .multipart import MIN_PART_SIZE, MultipartPart, MultipartUpload
 from .store import MiniS3
 from .storage import InjectedCrash
-from .listing import ListedObject, ListedVersion, ListObjectsResult, ListObjectVersionsResult
-from .errors import EntityTooSmall, InvalidPart, InvalidPartOrder, NoSuchUpload
-from .multipart import MIN_PART_SIZE, MultipartPart, MultipartUpload
-from .errors import NotModified, PreconditionFailed

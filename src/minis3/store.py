@@ -1,4 +1,9 @@
-"""Public service facade joining buckets, object state, and list projections."""
+"""Public service facade joining buckets, object state, and list projections.
+
+This initial service boundary deliberately resembles an SDK rather than an HTTP
+server. A future thin protocol adapter can translate these domain values and
+errors without taking ownership of storage semantics.
+"""
 
 from __future__ import annotations
 
@@ -8,10 +13,27 @@ from pathlib import Path
 from threading import RLock
 from time import time
 
-from .conditional import require_if_match, require_if_none_match
 from .bucket import Bucket, SequenceCounter, VersioningState
-from .errors import BucketAlreadyExists, BucketNotEmpty, NoSuchBucket, NoSuchKey, NoSuchVersion
-from .listing import ListObjectsResult, ListObjectVersionsResult, list_object_versions, list_objects
+from .conditional import require_if_match, require_if_none_match
+from .errors import (
+    BucketAlreadyExists,
+    BucketNotEmpty,
+    NoSuchBucket,
+    NoSuchKey,
+    NoSuchVersion,
+)
+from .lifecycle import (
+    ExpirationRule,
+    LifecycleAction,
+    LifecycleActionKind,
+    evaluate_expiration,
+)
+from .listing import (
+    ListObjectsResult,
+    ListObjectVersionsResult,
+    list_object_versions,
+    list_objects,
+)
 from .model import ObjectVersion, Version
 from .multipart import (
     MAX_PART_NUMBER,
@@ -50,7 +72,6 @@ class MiniS3:
             ensure(maximum_sequence + 1)
         self._lock = RLock()
 
-
     def create_bucket(self, name: str) -> None:
         with self._lock:
             if name in self._buckets:
@@ -58,7 +79,6 @@ class MiniS3:
             bucket = Bucket(name)
             self._storage.create_bucket(bucket)
             self._buckets[name] = bucket
-
 
     def delete_bucket(self, name: str) -> None:
         with self._lock:
@@ -68,7 +88,6 @@ class MiniS3:
             self._storage.delete_bucket(name)
             del self._buckets[name]
 
-
     def set_bucket_versioning(
         self, name: str, state: VersioningState | str
     ) -> None:
@@ -77,7 +96,6 @@ class MiniS3:
             candidate.set_versioning(state)
             self._storage.persist_bucket(candidate)
             self._buckets[name] = candidate
-
 
     def put_object(
         self,
@@ -97,7 +115,6 @@ class MiniS3:
             self._buckets[bucket] = candidate
             return result
 
-
     def get_object(
         self,
         bucket: str,
@@ -113,14 +130,12 @@ class MiniS3:
             require_if_none_match(result.etag, if_none_match)
             return result
 
-
     def head_object(
         self, bucket: str, key: str, *, version_id: str | None = None
     ) -> Version:
         """Return object metadata; M1 reuses the immutable Version value."""
 
         return self.get_object(bucket, key, version_id=version_id)
-
 
     def delete_object(
         self,
@@ -142,7 +157,6 @@ class MiniS3:
             self._buckets[bucket] = candidate
             return result
 
-
     def list_objects(
         self,
         bucket: str,
@@ -161,13 +175,11 @@ class MiniS3:
                 continuation_token=continuation_token,
             )
 
-
     def list_object_versions(
         self, bucket: str, *, prefix: str = ""
     ) -> ListObjectVersionsResult:
         with self._lock:
             return list_object_versions(self._bucket(bucket).records, prefix=prefix)
-
 
     def create_multipart_upload(
         self, bucket: str, key: str
@@ -187,7 +199,6 @@ class MiniS3:
             self._storage.create_multipart_upload(upload)
             return upload
 
-
     def upload_part(
         self,
         bucket: str,
@@ -205,7 +216,6 @@ class MiniS3:
             part = StagedPart(part_number, bytes(body))
             self._storage.write_multipart_part(bucket, key, upload_id, part)
             return part.receipt
-
 
     def complete_multipart_upload(
         self,
@@ -239,7 +249,6 @@ class MiniS3:
             self._storage.remove_multipart_upload(bucket, key, upload_id)
             return result
 
-
     def abort_multipart_upload(
         self, bucket: str, key: str, upload_id: str
     ) -> None:
@@ -249,6 +258,37 @@ class MiniS3:
             self._bucket(bucket)
             self._storage.remove_multipart_upload(bucket, key, upload_id)
 
+    def lifecycle_tick(
+        self,
+        bucket: str,
+        rules: list[ExpirationRule] | tuple[ExpirationRule, ...],
+    ) -> tuple[LifecycleAction, ...]:
+        """Evaluate at the injected time and atomically apply selected actions."""
+
+        with self._lock:
+            candidate = deepcopy(self._bucket(bucket))
+            now = self._clock()
+            actions = evaluate_expiration(
+                candidate.records, rules, now=now
+            )
+            for action in actions:
+                if action.kind is LifecycleActionKind.EXPIRE_CURRENT:
+                    current = candidate.records[action.key].versions[0]
+                    if current.version_id == action.version_id:
+                        candidate.delete(
+                            action.key, self._counter, now=now
+                        )
+                else:
+                    candidate.delete(
+                        action.key,
+                        self._counter,
+                        action.version_id,
+                        now=now,
+                    )
+            if actions:
+                self._storage.persist_bucket(candidate)
+                self._buckets[bucket] = candidate
+            return actions
 
     @staticmethod
     def _current_etag(bucket: Bucket, key: str) -> str | None:
@@ -256,7 +296,6 @@ class MiniS3:
             return bucket.get(key).etag
         except NoSuchKey:
             return None
-
 
     @staticmethod
     def _addressed_etag(
@@ -267,10 +306,8 @@ class MiniS3:
         except (NoSuchKey, NoSuchVersion):
             return None
 
-
     def _bucket(self, name: str) -> Bucket:
         try:
             return self._buckets[name]
         except KeyError as exc:
             raise NoSuchBucket(name) from exc
-
