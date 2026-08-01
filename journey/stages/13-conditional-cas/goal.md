@@ -20,11 +20,11 @@ Use ETags as cache validators and serialized compare-and-swap preconditions for 
 
 ETags exist but callers cannot make an operation conditional on the value they observed. A stale writer can overwrite a newer value, and a cache cannot ask whether its copy is still current without downloading the body again.
 
-### Failure preview
+### Test contract
+
+#### See the failure first
 
 The concurrency contract starts two writers with the same initial ETag. Exactly one may pass `If-Match`; the second must see the changed current ETag and fail. If the check occurs outside the mutation lock, both can validate stale state and both appear to win.
-
-### Test contract
 
 <!-- journey-file: tests/test_conditional.py -->
 #### `tests/test_conditional.py`
@@ -176,11 +176,11 @@ Conditional requests let a caller act on the exact value it observed. MiniS3 eva
 
 系统已有 ETag，但调用方还不能要求“只在我看到的值仍是当前值时操作”。旧写入者可能覆盖新值，缓存也无法在不下载 Body 的情况下询问副本是否仍然有效。
 
-### 先看会坏在哪里
+### 测试契约
+
+#### 先看会坏在哪里
 
 并发契约让两个写入者携带相同初始 ETag。只能有一个通过 `If-Match`；第二个必须看到变化后的当前 ETag 并失败。如果检查在变更锁外，两者都可能校验旧状态并同时获胜。
-
-### 测试契约
 
 <!-- journey-file: tests/test_conditional.py -->
 #### `tests/test_conditional.py`

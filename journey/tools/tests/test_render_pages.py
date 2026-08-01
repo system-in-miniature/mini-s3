@@ -48,7 +48,8 @@ class RenderPagesTest(unittest.TestCase):
             (
                 False,
                 "### The problem at this point",
-                "### Failure preview",
+                "### Test contract",
+                "#### See the failure first",
                 "### Basic concepts",
                 "### Why this mechanism is necessary",
                 "### Runtime mental model",
@@ -59,7 +60,8 @@ class RenderPagesTest(unittest.TestCase):
             (
                 True,
                 "### 当前遇到的问题",
-                "### 先看会坏在哪里",
+                "### 测试契约",
+                "#### 先看会坏在哪里",
                 "### 基本概念",
                 "### 为什么需要这个机制",
                 "### 运行时心智模型",
@@ -68,12 +70,26 @@ class RenderPagesTest(unittest.TestCase):
                 "### 需要真正记住的内容",
             ),
         )
-        for card in self.cards:
+        for card in self.cards[:-1]:
             for chinese, *ordered in headings:
                 body = card.chinese if chinese else card.english
                 with self.subTest(stage=card.number, chinese=chinese):
                     positions = [body.index(heading) for heading in ordered]
                     self.assertEqual(positions, sorted(positions))
+
+    def test_failure_preview_is_authored_inside_the_test_contract(self) -> None:
+        expectations = (
+            (False, "### Test contract", "#### See the failure first", "### Basic concepts"),
+            (True, "### 测试契约", "#### 先看会坏在哪里", "### 基本概念"),
+        )
+        for card in self.cards[:-1]:
+            for chinese, contract, failure, concepts in expectations:
+                body = card.chinese if chinese else card.english
+                with self.subTest(stage=card.number, chinese=chinese):
+                    test_section = body[body.index(contract):body.index(concepts)]
+                    self.assertIn(failure, test_section)
+                    self.assertNotIn("### Failure preview", body.splitlines())
+                    self.assertNotIn("### 先看会坏在哪里", body.splitlines())
 
     def test_key_code_must_be_short_and_match_its_file_patch(self) -> None:
         file_patch = render_pages.FilePatch(

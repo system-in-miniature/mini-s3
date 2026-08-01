@@ -17,11 +17,11 @@ Introduce the Bucket aggregate, legal versioning transitions, and deterministic 
 
 Stage 01 can describe one value but cannot decide what PUT or DELETE does to an existing history. Those decisions must live together; otherwise service, storage, and listing code could each implement a different versioning rule.
 
-### Failure preview
+### Test contract
+
+#### See the failure first
 
 Once a bucket has produced named history, returning to `UNVERSIONED` makes the model claim that versioning never existed. Later code could then replace or discard that history under the wrong rules, and persistence would make the corruption durable.
-
-### Test contract
 
 <!-- journey-file: tests/test_bucket.py -->
 #### `tests/test_bucket.py`
@@ -115,11 +115,11 @@ The Bucket aggregate prevents every caller from inventing its own versioning beh
 
 Stage 01 只能描述一份值，还不能决定已有历史上的 PUT 或 DELETE 应该做什么。这些规则必须由同一个边界拥有，否则服务、存储和 Listing 可能各自实现不同的版本化语义。
 
-### 先看会坏在哪里
+### 测试契约
+
+#### 先看会坏在哪里
 
 Bucket 一旦产生过具名历史，再回到 `UNVERSIONED` 就等于宣称“版本化从未存在”。后续代码可能因此按错误规则替换或丢弃具名历史，引入持久化后还会把这种破坏落盘。
-
-### 测试契约
 
 <!-- journey-file: tests/test_bucket.py -->
 #### `tests/test_bucket.py`

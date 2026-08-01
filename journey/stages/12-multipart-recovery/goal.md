@@ -16,11 +16,11 @@ Prove retryable staging before multipart publication and cleanup after publicati
 
 Normal completion order is correct, but a crash can interrupt after assembly at either side of manifest publication. Recovery must not guess from the presence of staged files; it must correlate published object provenance with upload identity.
 
-### Failure preview
+### Test contract
+
+#### See the failure first
 
 The pre-publication test crashes completion at `before_manifest_publish`, reopens, and completes the same upload successfully. If recovery deletes all staging eagerly, the retry becomes impossible even though no object was committed.
-
-### Test contract
 
 <!-- journey-file: tests/test_storage.py -->
 #### `tests/test_storage.py`
@@ -87,11 +87,11 @@ Multipart recovery follows the same manifest commit point as normal objects, but
 
 正常完成顺序正确，但崩溃可能发生在组装后、Manifest 发布的任一侧。恢复不能根据暂存文件是否存在来猜测，必须把已发布对象来源与 upload 身份关联起来。
 
-### 先看会坏在哪里
+### 测试契约
+
+#### 先看会坏在哪里
 
 发布前测试在 `before_manifest_publish` 崩溃，重开后使用同一个 upload 成功完成。如果恢复一律删除 Staging，即使对象从未提交也无法重试。
-
-### 测试契约
 
 <!-- journey-file: tests/test_storage.py -->
 #### `tests/test_storage.py`

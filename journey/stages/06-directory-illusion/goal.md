@@ -19,11 +19,11 @@ Derive current contents and common prefixes from flat keys, with query-bound opa
 
 Version listing can expose history, but normal object listing still has no answer for prefix, delimiter, or pagination. Treating slash-containing keys as real directories would contradict Stage 01 and create state that S3 does not store.
 
-### Failure preview
+### Test contract
+
+#### See the failure first
 
 The delimiter contract stores `a.txt`, `raw`, and several `photos/...` keys. Listing the root with delimiter `/` must return two contents plus exactly one `photos/` common prefix. If the implementation walks directories or returns every photo key, the externally visible projection is wrong.
-
-### Test contract
 
 <!-- journey-file: tests/test_listing.py -->
 #### `tests/test_listing.py`
@@ -152,11 +152,11 @@ MiniS3 produces directory-like listing by grouping flat strings at a delimiter. 
 
 版本 Listing 已能展示历史，但普通对象 Listing 仍不知道怎样处理 prefix、delimiter 和分页。把含斜杠 Key 当成真实目录会违背 Stage 01，并制造 S3 根本不存储的状态。
 
-### 先看会坏在哪里
+### 测试契约
+
+#### 先看会坏在哪里
 
 Delimiter 契约存入 `a.txt`、`raw` 和多个 `photos/...` Key。根目录用 `/` Listing 时必须返回两个 contents 和唯一的 `photos/` common prefix。如果实现遍历目录或返回所有 photo Key，公开投影就错了。
-
-### 测试契约
 
 <!-- journey-file: tests/test_listing.py -->
 #### `tests/test_listing.py`

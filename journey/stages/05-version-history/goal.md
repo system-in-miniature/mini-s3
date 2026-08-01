@@ -19,11 +19,11 @@ Project complete histories without collapsing null versions, named versions, and
 
 GET returns one addressed data version, so it cannot explain the history hidden behind the latest value or marker. Administrative and recovery views need every retained entry plus enough metadata to distinguish their meanings.
 
-### Failure preview
+### Test contract
+
+#### See the failure first
 
 The suspended-delete contract creates named history, writes a `null` value, then deletes without a version ID. The expected history contains a new `null` marker and the older named versions, but not the replaced `null` data. A flat “all values” list would report the wrong state.
-
-### Test contract
 
 <!-- journey-file: tests/test_versioning.py -->
 #### `tests/test_versioning.py`
@@ -150,11 +150,11 @@ Version listing is a pure view over Bucket-owned history. It preserves entries t
 
 GET 只返回一份被寻址的数据版本，无法解释最新值或 Marker 背后隐藏的历史。管理和恢复视图需要看到全部保留项，并有足够字段区分它们的含义。
 
-### 先看会坏在哪里
+### 测试契约
+
+#### 先看会坏在哪里
 
 暂停删除契约先创建具名历史，再写 `null` 值，最后不带版本 ID 删除。预期历史包含新的 `null` Marker 和旧具名版本，但不再包含被替换的 `null` 数据。简单“列出全部值”会报告错误状态。
-
-### 测试契约
 
 <!-- journey-file: tests/test_versioning.py -->
 #### `tests/test_versioning.py`

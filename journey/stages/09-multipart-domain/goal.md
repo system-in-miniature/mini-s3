@@ -18,11 +18,11 @@ Model multipart upload identity, staged parts, ordered completion rules, and com
 
 Whole-object PUT cannot represent a client uploading large content in independently retryable parts. Completion also cannot trust a list of part numbers alone: order, ETags, existence, and minimum nonfinal size all affect the final object.
 
-### Failure preview
+### Test contract
+
+#### See the failure first
 
 The domain contract supplies staged parts and a client completion manifest. Swapping two entries must raise `InvalidPartOrder`; naming the right part with the wrong ETag must raise `InvalidPart`. Without these checks, completion can silently assemble bytes the client did not authorize.
-
-### Test contract
 
 <!-- journey-file: tests/test_multipart_domain.py -->
 #### `tests/test_multipart_domain.py`
@@ -135,11 +135,11 @@ Multipart completion is not simple concatenation. MiniS3 first verifies that the
 
 Whole-object PUT 无法表示客户端把大内容拆成可独立重试的 Part。完成操作也不能只相信 Part 编号列表：顺序、ETag、是否存在和非末 Part 最小尺寸都会改变最终对象。
 
-### 先看会坏在哪里
+### 测试契约
+
+#### 先看会坏在哪里
 
 领域契约提供暂存 Part 与客户端完成清单。调换两个条目必须得到 `InvalidPartOrder`；Part 正确但 ETag 错误必须得到 `InvalidPart`。没有这些检查，完成操作可能静默拼装客户端未授权的字节。
-
-### 测试契约
 
 <!-- journey-file: tests/test_multipart_domain.py -->
 #### `tests/test_multipart_domain.py`

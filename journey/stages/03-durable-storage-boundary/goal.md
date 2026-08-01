@@ -19,11 +19,11 @@ Give Bucket state a durable representation with immutable artifacts and a publis
 
 Stage 02 owns correct in-memory histories, but a process exit loses all of them. Writing one mutable JSON file directly is not enough: a crash can leave half a file or bytes whose directory entry was never made durable.
 
-### Failure preview
+### Test contract
+
+#### See the failure first
 
 The storage contract writes a bucket, creates a new `DiskStorage` over the same directory, and expects the exact body, ETag, version, and maximum sequence back. A missing fsync or publish order may pass an in-process read yet fail this restart observation.
-
-### Test contract
 
 <!-- journey-file: tests/test_storage_boundary.py -->
 #### `tests/test_storage_boundary.py`
@@ -155,11 +155,11 @@ MiniS3 writes immutable object artifacts first and atomically publishes a manife
 
 Stage 02 已有正确内存历史，但进程退出就会全部消失。直接覆盖一个可变 JSON 也不够：崩溃可能留下半份文件，或者留下尚未持久化的目录项。
 
-### 先看会坏在哪里
+### 测试契约
+
+#### 先看会坏在哪里
 
 存储契约写入 Bucket 后，用同一目录创建全新的 `DiskStorage`，要求恢复完全相同的 Body、ETag、版本和最大序列。缺少 fsync 或发布顺序错误可能在进程内读取时看不出来，却会在这次重启观察中失败。
-
-### 测试契约
 
 <!-- journey-file: tests/test_storage_boundary.py -->
 #### `tests/test_storage_boundary.py`

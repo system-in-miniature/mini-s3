@@ -16,11 +16,11 @@ Prove the manifest rename is the single visibility boundary by crashing immediat
 
 Stage 03 described publish-last storage, and clean restarts pass. That is not yet evidence that crashes expose only complete old or complete new states. The claim must be observed at each named crash boundary.
 
-### Failure preview
+### Test contract
+
+#### See the failure first
 
 One test injects `before_manifest_publish` after new artifacts are durable. Reopening must still return the old object and remove the unreferenced new artifact. If artifact existence alone controls visibility, the new value leaks despite the manifest never committing it.
-
-### Test contract
 
 <!-- journey-file: tests/test_storage.py -->
 #### `tests/test_storage.py`
@@ -87,11 +87,11 @@ The crash matrix proves atomicity by killing the operation on both sides of one 
 
 Stage 03 描述了最后发布的存储，正常重启也通过了，但这还不能证明崩溃只会暴露完整旧状态或完整新状态。必须在每个命名崩溃边界实际观察。
 
-### 先看会坏在哪里
+### 测试契约
+
+#### 先看会坏在哪里
 
 一条测试在新 Artifact 已持久化后注入 `before_manifest_publish`。重开后必须仍返回旧对象并删除未引用的新 Artifact。如果 Artifact 只要存在就算可见，新值会在 Manifest 从未提交时泄漏。
-
-### 测试契约
 
 <!-- journey-file: tests/test_storage.py -->
 #### `tests/test_storage.py`

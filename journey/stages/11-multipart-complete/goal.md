@@ -17,11 +17,11 @@ Validate an ordered completion manifest, assemble staged bytes, and publish exac
 
 Parts are durable but intentionally invisible. Completion must turn selected private parts into one normal version without exposing intermediate bytes, accepting stale receipts, or deleting retryable staging before publication succeeds.
 
-### Failure preview
+### Test contract
+
+#### See the failure first
 
 The main contract uploads two parts and confirms List is empty before completion. After completion it requires body `abcend`, a two-part composite ETag different from the whole-body ETag, and exactly one visible key. Any early ObjectRecord or wrong ETag is immediately visible.
-
-### Test contract
 
 <!-- journey-file: tests/test_multipart.py -->
 #### `tests/test_multipart.py`
@@ -114,11 +114,11 @@ MiniS3 treats completion as the bridge from private staged parts to one ordinary
 
 Part 已经持久但刻意不可见。完成操作必须把选中的私有 Part 变成一个普通版本，同时不能暴露中间字节、接受过期 receipt，或者在发布成功前删除可重试 Staging。
 
-### 先看会坏在哪里
+### 测试契约
+
+#### 先看会坏在哪里
 
 主契约上传两个 Part，并在完成前确认 List 为空。完成后要求 Body 为 `abcend`、ETag 是不同于 whole-body ETag 的两 Part 组合 ETag，并且只出现一个可见 Key。提前创建 ObjectRecord 或算错 ETag 都会直接暴露。
-
-### 测试契约
 
 <!-- journey-file: tests/test_multipart.py -->
 #### `tests/test_multipart.py`

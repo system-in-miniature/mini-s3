@@ -16,11 +16,11 @@ Verify directory-entry durability and recovery cleanup for temporary and unrefer
 
 The crash matrix proves which manifest is visible, but durability also depends on directory entries. Creating nested directories or renaming a file without fsyncing the right parent can make a correct-looking run disappear after power loss. Recovery must also remove debris without deleting referenced artifacts.
 
-### Failure preview
+### Test contract
+
+#### See the failure first
 
 The parent-chain contract records fsync calls while creating `one/two/three`. It expects calls for the existing root and each newly created directory's parent. If only the final directory is fsynced, one missing ancestor entry can make the whole subtree unreachable after restart.
-
-### Test contract
 
 <!-- journey-file: tests/test_storage.py -->
 #### `tests/test_storage.py`
@@ -87,11 +87,11 @@ MiniS3 makes publication survive power loss by fsyncing every parent whose direc
 
 崩溃矩阵证明了哪个 Manifest 可见，但持久性还依赖目录项。创建嵌套目录或 rename 后没有 fsync 正确父目录，当前看似正确的运行可能在掉电后消失。恢复还必须清理残留，同时不能删除被引用 Artifact。
 
-### 先看会坏在哪里
+### 测试契约
+
+#### 先看会坏在哪里
 
 父链契约在创建 `one/two/three` 时记录 fsync，要求现有根目录和每个新目录的父级都出现。若只 fsync 最后一层，一个缺失的祖先目录项就可能让整棵子树在重启后不可达。
-
-### 测试契约
 
 <!-- journey-file: tests/test_storage.py -->
 #### `tests/test_storage.py`

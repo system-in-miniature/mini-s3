@@ -19,11 +19,11 @@ Separate pure expiration decisions from an explicit mutation tick driven by an i
 
 Versions now carry creation times, but nothing expires them. Hiding time reads inside policy or background threads would make boundary behavior nondeterministic and combine “what should happen” with “apply it now.”
 
-### Failure preview
+### Test contract
+
+#### See the failure first
 
 The pure-boundary contract evaluates the same history at time `9.999` and `10.0`. No action is allowed before the threshold; the action appears exactly at it. A hidden wall clock or strict `>` comparison makes this boundary flaky or one tick late.
-
-### Test contract
 
 <!-- journey-file: tests/test_lifecycle.py -->
 #### `tests/test_lifecycle.py`
@@ -152,11 +152,11 @@ MiniS3 separates lifecycle policy from execution. A pure function decides action
 
 Version 已有创建时间，但没有任何机制让它们过期。把时间读取藏进策略或后台线程，会让边界行为不确定，并把“应该发生什么”和“现在执行”混在一起。
 
-### 先看会坏在哪里
+### 测试契约
+
+#### 先看会坏在哪里
 
 纯边界契约在时间 `9.999` 与 `10.0` 对同一历史求值。阈值前不能有 action，到达时必须出现。隐藏 wall clock 或使用严格 `>` 会让边界 flaky 或晚一个 tick。
-
-### 测试契约
 
 <!-- journey-file: tests/test_lifecycle.py -->
 #### `tests/test_lifecycle.py`

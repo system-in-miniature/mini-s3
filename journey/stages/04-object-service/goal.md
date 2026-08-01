@@ -19,11 +19,11 @@ Join Bucket and DiskStorage behind one locked public service for bucket and obje
 
 The domain can calculate a next Bucket and storage can publish it, but callers still have to coordinate both. Without a service owner, one code path could mutate memory without persistence while another could race halfway through a transition.
 
-### Failure preview
+### Test contract
+
+#### See the failure first
 
 The restart contract writes two versions, opens a fresh `MiniS3`, reads both bodies, then writes again and requires a new ID. It exposes two distinct bugs at once: state not published to disk, or the recovered sequence counter reusing an old identity.
-
-### Test contract
 
 <!-- journey-file: tests/test_storage.py -->
 #### `tests/test_storage.py`
@@ -153,11 +153,11 @@ The service owns orchestration and locking; Bucket owns domain transitions; stor
 
 领域层能计算下一份 Bucket，存储层也能发布它，但调用方仍需自己协调两者。缺少服务所有者时，一条路径可能只改内存不持久化，另一条路径可能在状态迁移中途与它竞争。
 
-### 先看会坏在哪里
+### 测试契约
+
+#### 先看会坏在哪里
 
 重启契约写入两个版本，再打开全新的 `MiniS3` 读取两份 Body，随后继续写入并要求新 ID。它同时暴露两类错误：状态没有真正发布到磁盘，或者恢复后的序列计数器复用了旧身份。
-
-### 测试契约
 
 <!-- journey-file: tests/test_storage.py -->
 #### `tests/test_storage.py`

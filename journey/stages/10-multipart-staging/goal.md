@@ -21,11 +21,11 @@ Persist private multipart uploads and atomically replace parts without publishin
 
 Stage 09 validates abstract staged parts, but a real client needs upload IDs and part bytes to survive retries and restarts. Those bytes must remain invisible to normal GET/List until completion publishes exactly one object.
 
-### Failure preview
+### Test contract
+
+#### See the failure first
 
 The first integration contract creates an upload for key `right`, then tries to upload through key `wrong` and through part numbers `0` and `10001`. Each request must fail before writing staging. Otherwise an upload ID can be confused across keys or create invalid part files.
-
-### Test contract
 
 <!-- journey-file: tests/test_multipart.py -->
 #### `tests/test_multipart.py`
@@ -198,11 +198,11 @@ MiniS3 stores incomplete multipart work in a separate durable namespace. The ser
 
 Stage 09 只能验证抽象暂存 Part；真实客户端需要 upload ID 和 Part 字节跨重试、重启保存。这些字节在完成发布一个完整对象以前，必须对普通 GET/List 不可见。
 
-### 先看会坏在哪里
+### 测试契约
+
+#### 先看会坏在哪里
 
 第一条集成契约为 Key `right` 创建上传，再尝试用 Key `wrong` 和 Part 编号 `0`、`10001` 上传。每次都必须在写暂存前失败，否则 upload ID 会跨 Key 混用或产生非法 Part 文件。
-
-### 测试契约
 
 <!-- journey-file: tests/test_multipart.py -->
 #### `tests/test_multipart.py`

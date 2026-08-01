@@ -24,11 +24,11 @@ The journey starts with no package and no vocabulary for an object. Before imple
 
 This stage creates those values without adding storage or service behavior. Later stages can change histories and persistence while continuing to pass the same immutable objects between boundaries.
 
-### Failure preview
+### Test contract
+
+#### See the failure first
 
 The highest-signal contract uses `ObjectRecord(key="/a//b/")` and expects the exact same string back. If model code treats the key as a filesystem path, repeated or leading slashes may disappear before storage even exists. The test makes that corruption visible at the smallest possible boundary.
-
-### Test contract
 
 <!-- journey-file: tests/test_model.py -->
 #### `tests/test_model.py`
@@ -208,11 +208,11 @@ MiniS3 first establishes immutable object values so later state machines and sto
 
 本阶段只建立这些值，不引入存储和服务行为。后续阶段可以增加历史与持久化，同时继续在边界之间传递同一套不可变对象。
 
-### 先看会坏在哪里
+### 测试契约
+
+#### 先看会坏在哪里
 
 最直观的契约会创建 `ObjectRecord(key="/a//b/")`，并要求读取时得到完全相同的字符串。如果模型把 Key 当文件系统路径，开头或重复斜杠可能在存储出现以前就被吞掉。这个测试在最小边界上直接暴露数据被改写的问题。
-
-### 测试契约
 
 <!-- journey-file: tests/test_model.py -->
 #### `tests/test_model.py`
