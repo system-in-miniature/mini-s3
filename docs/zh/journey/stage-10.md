@@ -60,21 +60,21 @@ Stage 09 只能验证抽象暂存 Part；真实客户端需要 upload ID 和 Par
     +        store.upload_part("b", "right", upload.upload_id, 10_001, b"x")
     ```
 
-**是什么，为什么现在需要**
+**测试锁定什么**
 
 第一条持久 Multipart 测试锁定上传身份和合法 Part 编号范围。
 
-**在运行时做什么**
+**如何构造反例**
 
 它通过 `MiniS3` 进入，因此失败同时覆盖服务校验与存储身份查找。
 
-**关键代码**
+**关键测试语句**
 
 ```python
 store.upload_part("b", "wrong", upload.upload_id, 1, b"x")
 ```
 
-**关键语句理解**
+**失败意味着什么**
 
 Upload ID 不能全局互换：寻址的 Bucket 与 Key 必须和持久元数据匹配，之后才能写 Part。
 

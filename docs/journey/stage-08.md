@@ -91,21 +91,21 @@ The parent-chain contract records fsync calls while creating `one/two/three`. It
     +    assert not stray.exists()
     ```
 
-**What it is and why it appears**
+**What this test locks**
 
 The storage suite now inspects durability calls and startup hygiene, not just logical object values.
 
-**Runtime role**
+**How it constructs the counterexample**
 
 Its recorder makes invisible filesystem obligations observable; its restart case verifies cleanup decisions against manifest authority.
 
-**Key code**
+**Key test statement**
 
 ```python
 assert calls == [tmp_path, tmp_path / "one", tmp_path / "one" / "two"]
 ```
 
-**Statement understanding**
+**What a failure means**
 
 Each new directory entry lives in its parent, so the expected list walks the ancestry rather than repeating the final path. This assertion locks the durability chain.
 
@@ -121,11 +121,7 @@ Crash safety is an end-to-end ordering property, not merely a call to `fsync` so
 
 Tests replace `fsync_directory` with a recorder, perform real directory/storage creation, and assert the ordered parents. A separate restart case plants a stray temporary file, reopens storage, and requires cleanup while the published object remains readable.
 
-### Mechanism blocks
 
-#### Directory durability and startup cleanup
-
-Lock the parent-directory fsync obligations and prove restart cleanup removes only unpublished temporary artifacts.
 
 ### Verification evidence
 

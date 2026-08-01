@@ -95,21 +95,21 @@
     +        reopened.abort_multipart_upload("b", "movie", upload.upload_id)
     ```
 
-**是什么，为什么现在需要**
+**测试锁定什么**
 
 存储恢复套件增加 Multipart 完成的双侧崩溃契约。
 
-**在运行时做什么**
+**如何构造反例**
 
 它使用全新服务实例，让已发布 Manifest 与恢复后的 Staging 成为唯一证据，而不是旧内存。
 
-**关键代码**
+**关键测试语句**
 
 ```python
 assert reopened.get_object("b", "movie").body == b"abcx"
 ```
 
-**关键语句理解**
+**失败意味着什么**
 
 在发布后场景，即使清理尚未运行，可见完整对象仍是权威。恢复必须保留它，只删除匹配的 upload Staging。
 
@@ -125,11 +125,7 @@ assert reopened.get_object("b", "movie").body == b"abcx"
 
 每条测试准备持久 upload 与 parts，注入一个崩溃点，丢弃崩溃服务再重开。Before 场景重试完成；After 场景读取对象，并确认 Abort 得到 `NoSuchUpload`，因为恢复已清理 Staging。
 
-### 机制板块
 
-#### Multipart 发布恢复
-
-证明完成操作在 Manifest 发布两侧崩溃时，只会恢复到旧对象或新对象的精确可见状态。
 
 ### 验证证据
 

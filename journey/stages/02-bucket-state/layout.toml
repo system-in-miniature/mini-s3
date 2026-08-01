@@ -1,7 +1,9 @@
+failure_files = ["tests/test_bucket.py"]
+
 [[blocks]]
 id = "bucket-aggregate"
 title_en = "Bucket aggregate and deterministic identity"
 title_zh = "Bucket 聚合与确定性身份"
 summary_en = "Keep versioning state, exact-key histories, and monotonic identities under one aggregate boundary, then prove its transitions directly."
 summary_zh = "把版本状态、精确 Key 历史和单调身份收进同一个聚合边界，并直接证明它的状态迁移。"
-files = ["src/minis3/bucket.py", "tests/test_bucket.py"]
+files = ["src/minis3/bucket.py"]

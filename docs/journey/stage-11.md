@@ -134,21 +134,21 @@ The main contract uploads two parts and confirms List is empty before completion
     +
     ```
 
-**What it is and why it appears**
+**What this test locks**
 
 Four cases cover invisibility until completion, same-number replacement, manifest validation, abort, and restart of unfinished staging.
 
-**Runtime role**
+**How it constructs the counterexample**
 
 They exercise the complete public lifecycle and inspect both visible objects and private upload behavior.
 
-**Key code**
+**Key test statement**
 
 ```python
 assert completed.etag != content_etag(completed.body)
 ```
 
-**Statement understanding**
+**What a failure means**
 
 This prevents an easy but incorrect implementation from hashing assembled bytes as a normal PUT. Multipart identity is derived from part digests.
 

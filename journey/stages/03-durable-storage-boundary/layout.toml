@@ -1,10 +1,12 @@
+failure_files = ["tests/test_storage_boundary.py"]
+
 [[blocks]]
 id = "durable-publication"
 title_en = "Durable publication and recovery"
 title_zh = "持久发布与恢复"
 summary_en = "Connect atomic file replacement, immutable artifacts, Manifest visibility, and restart reconstruction as one durability protocol."
 summary_zh = "把原子文件替换、不可变 Artifact、Manifest 可见性和重启重建连成一套持久化协议。"
-files = ["src/minis3/storage/atomic.py", "src/minis3/storage/disk.py", "tests/test_storage_boundary.py"]
+files = ["src/minis3/storage/atomic.py", "src/minis3/storage/disk.py"]
 
 [[blocks]]
 id = "storage-wiring"

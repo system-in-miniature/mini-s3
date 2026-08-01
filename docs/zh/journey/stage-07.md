@@ -93,21 +93,21 @@ Stage 03 描述了最后发布的存储，正常重启也通过了，但这还�
     +    assert visible.etag == '"2063c1608d6e0baf80249c42e2be5804"'
     ```
 
-**是什么，为什么现在需要**
+**测试锁定什么**
 
 存储集成套件加入围绕 Artifact 与 Manifest 发布的参数化崩溃矩阵。
 
-**在运行时做什么**
+**如何构造反例**
 
 它只在重开后观察系统，丢弃可能误导人的进程内内存，并实际运行恢复清理。
 
-**关键代码**
+**关键测试语句**
 
 ```python
 crash_injector=CrashOnce("before_manifest_publish"),
 ```
 
-**关键语句理解**
+**失败意味着什么**
 
 命名 hook 固定精确中断边界；全新实例上的断言因而能区分“Artifact 已持久化”和“状态已发布”。
 
@@ -123,11 +123,7 @@ crash_injector=CrashOnce("before_manifest_publish"),
 
 测试准备旧状态、安装 `CrashOnce`、尝试变更、捕获 `InjectedCrash`，再创建全新服务。随后检查可见数据与磁盘残留。本 Stage 不改生产代码，新增的是对现有边界的可信证据。
 
-### 机制板块
 
-#### Manifest 发布失败矩阵
-
-用注入崩溃点区分所有发布前状态与第一个发布后状态。
 
 ### 验证证据
 

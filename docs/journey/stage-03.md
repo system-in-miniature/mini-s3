@@ -46,21 +46,21 @@ The storage contract writes a bucket, creates a new `DiskStorage` over the same 
     +    assert not list(tmp_path.rglob("*.tmp-*"))
     ```
 
-**What it is and why it appears**
+**What this test locks**
 
 This first storage contract proves one complete bucket can cross a process-like restart boundary.
 
-**Runtime role**
+**How it constructs the counterexample**
 
 It persists state, constructs a fresh adapter, and compares recovered values and sequence metadata. It is broader than a serialization unit test but narrower than the public MiniS3 service.
 
-**Key code**
+**Key test statement**
 
 ```python
 recovered, maximum_sequence = DiskStorage(tmp_path).load_buckets()
 ```
 
-**Statement understanding**
+**What a failure means**
 
 Using a new adapter is essential: reading the same in-memory Bucket would not prove bytes were published or recoverable. Returning `maximum` also prevents future sequence reuse.
 

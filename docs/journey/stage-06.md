@@ -121,21 +121,21 @@ The delimiter contract stores `a.txt`, `raw`, and several `photos/...` keys. Lis
     +        )
     ```
 
-**What it is and why it appears**
+**What this test locks**
 
 Five contracts cover directory illusion, combined pagination, marker hiding, flattened version history, and invalid tokens.
 
-**Runtime role**
+**How it constructs the counterexample**
 
 They build state through `MiniS3` and inspect public results, so the examples connect model semantics to the final read view.
 
-**Key code**
+**Key test statement**
 
 ```python
 assert root.common_prefixes == ("photos/",)
 ```
 
-**Statement understanding**
+**What a failure means**
 
 Several flat keys collapse into one projected prefix at the root. The tuple does not mean a `photos/` object or directory was stored.
 

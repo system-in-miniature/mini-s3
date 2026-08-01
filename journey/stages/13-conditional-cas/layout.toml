@@ -1,3 +1,5 @@
+failure_files = ["tests/test_conditional.py"]
+
 [[blocks]]
 id = "condition-matching"
 title_en = "Conditional matching and failures"
@@ -12,7 +14,7 @@ title_en = "Guarded service mutation"
 title_zh = "受保护的服务变更"
 summary_en = "Evaluate a precondition and apply the corresponding PUT, GET, or DELETE under one lock so stale writers cannot win."
 summary_zh = "在同一把锁下判断前置条件并执行 PUT、GET 或 DELETE，使过期写入者无法获胜。"
-files = ["src/minis3/store.py", "tests/test_conditional.py"]
+files = ["src/minis3/store.py"]
 
 [[blocks]]
 id = "public-wiring"

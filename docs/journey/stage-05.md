@@ -122,21 +122,21 @@ The suspended-delete contract creates named history, writes a `null` value, then
          store.create_bucket("b")
     ```
 
-**What it is and why it appears**
+**What this test locks**
 
 Three new scenarios lock the projection of unversioned replacement, suspended replacement, and suspended deletion.
 
-**Runtime role**
+**How it constructs the counterexample**
 
 They observe public histories after real service mutations, so the evidence covers Bucket plus projection rather than a fabricated input alone.
 
-**Key code**
+**Key test statement**
 
 ```python
 assert marker is not None and marker.version_id == "null"
 ```
 
-**Statement understanding**
+**What a failure means**
 
 Suspension does not mean deletion becomes physical. The new marker occupies the public `null` slot while named history remains addressable.
 

@@ -67,21 +67,21 @@ The domain contract supplies staged parts and a client completion manifest. Swap
     +        )
     ```
 
-**What it is and why it appears**
+**What this test locks**
 
 This focused contract makes completion rules visible before durable staging is added.
 
-**Runtime role**
+**How it constructs the counterexample**
 
 It supplies explicit staged parts and manifests, proving both accepted order/composite ETag and the major rejection paths.
 
-**Key code**
+**Key test statement**
 
 ```python
 def test_completion_validation_orders_parts_and_hashes_binary_digests() -> None:
 ```
 
-**Statement understanding**
+**What a failure means**
 
 The test name captures two independent obligations: client order is semantic, and composite hashing uses binary digests rather than concatenated hexadecimal text.
 

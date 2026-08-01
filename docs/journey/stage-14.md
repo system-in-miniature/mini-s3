@@ -138,21 +138,21 @@ The pure-boundary contract evaluates the same history at time `9.999` and `10.0`
     +
     ```
 
-**What it is and why it appears**
+**What this test locks**
 
 Four contracts cover pure filtering/boundaries, current versus noncurrent transitions, injected time/restart, and invalid rules.
 
-**Runtime role**
+**How it constructs the counterexample**
 
 `ManualClock` lets tests advance time deliberately and prove persisted timestamps rather than waiting on wall time.
 
-**Key code**
+**Key test statement**
 
 ```python
 assert evaluate_expiration(snapshot, [rule], now=9.999) == ()
 ```
 
-**Statement understanding**
+**What a failure means**
 
 This is the just-before boundary. Paired with the `10.0` assertion, it proves inclusion precisely rather than merely testing an obviously old object.
 

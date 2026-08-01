@@ -68,21 +68,21 @@ The highest-signal contract uses `ObjectRecord(key="/a//b/")` and expects the ex
     +
     ```
 
-**What it is and why it appears**
+**What this test locks**
 
 These tests record the three model invariants introduced today: quoted ETags, opaque keys with immutable values, and body-less delete markers.
 
-**Runtime role**
+**How it constructs the counterexample**
 
 They call the learner-visible values directly. They prove value semantics only; they do not yet prove bucket transitions, disk persistence, or a public object service.
 
-**Key code**
+**Key test statement**
 
 ```python
 assert record.key == "/a//b/"
 ```
 
-**Statement understanding**
+**What a failure means**
 
 The deliberately unusual key catches path normalization. Passing this assertion means the model preserved the exact string, not that directory behavior exists.
 

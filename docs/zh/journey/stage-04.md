@@ -60,21 +60,21 @@
     +    assert second.version_id != first.version_id
     ```
 
-**是什么，为什么现在需要**
+**测试锁定什么**
 
 这些契约通过公开服务检查持久化，包括重启、崩溃注入、Bucket 删除和序列恢复。
 
-**在运行时做什么**
+**如何构造反例**
 
 它们捕获“内存成功但重开失败”的缺口，是编排层与存储层相遇的位置。
 
-**关键代码**
+**关键测试语句**
 
 ```python
 assert reopened.get_object("b", "k", version_id=first.version_id).body == b"one"
 ```
 
-**关键语句理解**
+**失败意味着什么**
 
 在新实例上按旧版本 ID 读取，证明版本历史和字节都跨发布保存；只检查最新值证据更弱。
 
@@ -197,21 +197,21 @@ assert reopened.get_object("b", "k", version_id=first.version_id).body == b"one"
     +        store.delete_bucket("b")
     ```
 
-**是什么，为什么现在需要**
+**测试锁定什么**
 
 这里锁定完整公开版本状态机和 DELETE 含义。
 
-**在运行时做什么**
+**如何构造反例**
 
 它区分未版本化删除、Marker 创建、指定版本删除、最新 Marker 导致 404，以及具名历史保留。
 
-**关键代码**
+**关键测试语句**
 
 ```python
 assert bucket.get("k", historical.version_id) == historical
 ```
 
-**关键语句理解**
+**失败意味着什么**
 
 这个防御性场景证明：即使恢复或外部构造中出现具名历史，未版本化删除也不能把它擦掉。
 

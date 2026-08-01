@@ -47,22 +47,22 @@ The focused contract writes an unversioned value, enables versioning, writes aga
     +        bucket.set_versioning(VersioningState.UNVERSIONED)
     ```
 
-**What it is and why it appears**
+**What this test locks**
 
 This contract exercises the aggregate before service and disk layers can hide the source of an error.
 
-**Runtime role**
+**How it constructs the counterexample**
 
 It proves the same sequence produces `null/e00000001` and then `v00000002/e00000002`, and it locks the forbidden backward transition.
 
-**Key code**
+**Key test statement**
 
 ```python
 with pytest.raises(ValueError):
     bucket.set_versioning(VersioningState.UNVERSIONED)
 ```
 
-**Statement understanding**
+**What a failure means**
 
 The failure is part of domain behavior, not merely validation style: once named versions can exist, “never versioned” is no longer a truthful state.
 

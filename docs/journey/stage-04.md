@@ -60,21 +60,21 @@ The restart contract writes two versions, opens a fresh `MiniS3`, reads both bod
     +    assert second.version_id != first.version_id
     ```
 
-**What it is and why it appears**
+**What this test locks**
 
 These contracts exercise persistence through the public service, including restart, crash injection, bucket deletion, and sequence recovery.
 
-**Runtime role**
+**How it constructs the counterexample**
 
 They detect gaps between in-memory success and reopened state. This is where orchestration and storage meet.
 
-**Key code**
+**Key test statement**
 
 ```python
 assert reopened.get_object("b", "k", version_id=first.version_id).body == b"one"
 ```
 
-**Statement understanding**
+**What a failure means**
 
 Addressing the old version after constructing `reopened` proves both the version history and its bytes survived publication; checking only the latest value would be weaker.
 
@@ -197,21 +197,21 @@ Addressing the old version after constructing `reopened` proves both the version
     +        store.delete_bucket("b")
     ```
 
-**What it is and why it appears**
+**What this test locks**
 
 This file locks the full public versioning state machine and DELETE meanings.
 
-**Runtime role**
+**How it constructs the counterexample**
 
 It distinguishes unversioned deletion, marker creation, specific-version deletion, latest-marker 404 behavior, and retained named history.
 
-**Key code**
+**Key test statement**
 
 ```python
 assert bucket.get("k", historical.version_id) == historical
 ```
 
-**Statement understanding**
+**What a failure means**
 
 The defensive case proves an unversioned delete cannot erase a named version already present in recovered or externally constructed history.
 

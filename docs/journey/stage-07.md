@@ -93,21 +93,21 @@ One test injects `before_manifest_publish` after new artifacts are durable. Reop
     +    assert visible.etag == '"2063c1608d6e0baf80249c42e2be5804"'
     ```
 
-**What it is and why it appears**
+**What this test locks**
 
 The storage integration suite gains a parameterized crash matrix around artifact and manifest publication.
 
-**Runtime role**
+**How it constructs the counterexample**
 
 It observes the system only after reopening, which discards misleading in-process memory and exercises recovery cleanup.
 
-**Key code**
+**Key test statement**
 
 ```python
 crash_injector=CrashOnce("before_manifest_publish"),
 ```
 
-**Statement understanding**
+**What a failure means**
 
 The named hook fixes the exact interruption boundary. Assertions after a fresh open can therefore distinguish “artifacts durable” from “state published.”
 
@@ -123,11 +123,7 @@ Documentation and happy-path tests cannot prove crash atomicity. Deliberate proc
 
 The test prepares old state, installs `CrashOnce`, attempts a mutation, catches `InjectedCrash`, and constructs a fresh service. It then checks visible data and disk debris. The production code does not change in this stage; the new value is confidence in the existing boundary.
 
-### Mechanism blocks
 
-#### Manifest publication failure matrix
-
-Use injected crash points to distinguish every pre-publication state from the first post-publication state.
 
 ### Verification evidence
 

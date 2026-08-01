@@ -28,6 +28,7 @@ class Card:
     english: str
     chinese: str
     patch: str
+    failure_files: tuple[str, ...]
     blocks: tuple["BlockLayout", ...]
 
 
@@ -164,11 +165,25 @@ def load_block_layouts(
     *,
     stage_label: str,
     patch_paths: set[str],
-) -> tuple[BlockLayout, ...]:
+) -> tuple[tuple[str, ...], tuple[BlockLayout, ...]]:
     data = tomllib.loads(path.read_text())
-    raw_blocks = data.get("blocks")
-    if not isinstance(raw_blocks, list) or not raw_blocks:
-        raise ValueError(f"{stage_label}: layout.toml requires at least one [[blocks]] entry")
+    raw_failure_files = data.get("failure_files", [])
+    if (
+        not isinstance(raw_failure_files, list)
+        or any(not isinstance(item, str) or not item for item in raw_failure_files)
+    ):
+        raise ValueError(f"{stage_label}: failure_files must be a list of paths")
+    failure_files = tuple(raw_failure_files)
+    expected_failure_files = tuple(sorted(path for path in patch_paths if path.startswith("tests/")))
+    if tuple(sorted(failure_files)) != expected_failure_files:
+        raise ValueError(
+            f"{stage_label}: failure_files must own every tests/ path exactly once; "
+            f"expected={list(expected_failure_files)}, actual={list(failure_files)}"
+        )
+
+    raw_blocks = data.get("blocks", [])
+    if not isinstance(raw_blocks, list):
+        raise ValueError(f"{stage_label}: blocks must be a list")
 
     blocks: list[BlockLayout] = []
     for index, raw in enumerate(raw_blocks, start=1):
@@ -191,6 +206,12 @@ def load_block_layouts(
             or any(not isinstance(item, str) or not item for item in files)
         ):
             raise ValueError(f"{stage_label}: block {block_id} requires a non-empty file list")
+        test_paths = [item for item in files if item.startswith("tests/")]
+        if test_paths:
+            raise ValueError(
+                f"{stage_label}: tests belong to failure_files, not mechanism block "
+                f"{block_id}: {test_paths}"
+            )
         supporting = raw.get("supporting", False)
         if not isinstance(supporting, bool):
             raise ValueError(f"{stage_label}: block {block_id} supporting must be boolean")
@@ -209,7 +230,7 @@ def load_block_layouts(
     ids = [block.id for block in blocks]
     if len(ids) != len(set(ids)):
         raise ValueError(f"{stage_label}: duplicate block id")
-    owned = [file for block in blocks for file in block.files]
+    owned = [*failure_files, *(file for block in blocks for file in block.files)]
     duplicates = sorted({file for file in owned if owned.count(file) > 1})
     missing_paths = sorted(patch_paths - set(owned))
     extra_paths = sorted(set(owned) - patch_paths)
@@ -218,7 +239,7 @@ def load_block_layouts(
             f"{stage_label}: block coverage mismatch; duplicates={duplicates}, "
             f"missing={missing_paths}, extra={extra_paths}"
         )
-    return tuple(blocks)
+    return failure_files, tuple(blocks)
 
 
 def load_cards() -> list[Card]:
@@ -235,6 +256,11 @@ def load_cards() -> list[Card]:
             raise ValueError(f"invalid goal metadata: {directory}")
         patch = (directory / "stage.patch").read_text()
         patch_paths = {item.path for item in split_file_patches(patch)}
+        failure_files, blocks = load_block_layouts(
+            directory / "layout.toml",
+            stage_label=f"stage-{number_text}",
+            patch_paths=patch_paths,
+        )
         cards.append(
             Card(
                 number=int(number_text),
@@ -246,11 +272,8 @@ def load_cards() -> list[Card]:
                 english=section(goal, "## English", "## 中文"),
                 chinese=section(goal, "## 中文", None),
                 patch=patch,
-                blocks=load_block_layouts(
-                    directory / "layout.toml",
-                    stage_label=f"stage-{number_text}",
-                    patch_paths=patch_paths,
-                ),
+                failure_files=failure_files,
+                blocks=blocks,
             )
         )
     return cards
@@ -429,7 +452,12 @@ def _insert_test_walkthrough(
     return f"{prelude[:position].rstrip()}\n\n{tests}\n\n{prelude[position:]}"
 
 
-def _render_file_explanation(lesson: FileLesson) -> str:
+def _render_file_explanation(
+    lesson: FileLesson,
+    *,
+    test_evidence: bool = False,
+    chinese: bool = False,
+) -> str:
     _, separator, explanation = lesson.body.partition("\n")
     if not separator:
         raise ValueError(f"{lesson.path}: file lesson has no explanation after its heading")
@@ -439,6 +467,24 @@ def _render_file_explanation(lesson: FileLesson) -> str:
         explanation.lstrip(),
         flags=re.MULTILINE,
     )
+    if test_evidence:
+        labels = (
+            {
+                "是什么，为什么现在需要": "测试锁定什么",
+                "在运行时做什么": "如何构造反例",
+                "关键代码": "关键测试语句",
+                "关键语句理解": "失败意味着什么",
+            }
+            if chinese
+            else {
+                "What it is and why it appears": "What this test locks",
+                "Runtime role": "How it constructs the counterexample",
+                "Key code": "Key test statement",
+                "Statement understanding": "What a failure means",
+            }
+        )
+        for original, replacement in labels.items():
+            explanation = explanation.replace(f"**{original}**", f"**{replacement}**")
     return explanation
 
 
@@ -479,17 +525,20 @@ def render_card(card: Card, *, chinese: bool) -> str:
         "\n\n".join(
             (
                 _render_file_diff(patch_by_path[item.path], chinese=chinese),
-                _render_file_explanation(item),
+                _render_file_explanation(item, test_evidence=True, chinese=chinese),
             )
         )
-        for item in lesson.files
-        if item.path.startswith("tests/")
+        for path in card.failure_files
+        for item in (lesson_by_path[path],)
     ]
     prelude = _insert_test_walkthrough(
         _collapse_deliverables(lesson.pre_walkthrough, chinese=chinese),
         test_sections,
         chinese=chinese,
     )
+    if not card.blocks:
+        mechanism_heading = "### 机制板块" if chinese else "### Mechanism blocks"
+        prelude = prelude.removesuffix(mechanism_heading).rstrip()
     block_sections = [
         _render_mechanism_block(
             block,

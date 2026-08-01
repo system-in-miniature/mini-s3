@@ -227,6 +227,43 @@ Book.
                 self.assertEqual(page.count(drawer), 1)
                 self.assertNotIn(drawer, page[page.index(mechanisms):])
 
+    def test_failure_preview_uses_test_specific_walkthrough_labels(self) -> None:
+        stage_two = self.cards[1]
+        expectations = (
+            (
+                False,
+                "### Failure preview",
+                "### Basic concepts",
+                (
+                    "What this test locks",
+                    "How it constructs the counterexample",
+                    "Key test statement",
+                    "What a failure means",
+                ),
+                (
+                    "What it is and why it appears",
+                    "Runtime role",
+                    "Key code",
+                    "Statement understanding",
+                ),
+            ),
+            (
+                True,
+                "### 先看会坏在哪里",
+                "### 基本概念",
+                ("测试锁定什么", "如何构造反例", "关键测试语句", "失败意味着什么"),
+                ("是什么，为什么现在需要", "在运行时做什么", "关键代码", "关键语句理解"),
+            ),
+        )
+        for chinese, start, end, required, forbidden in expectations:
+            with self.subTest(chinese=chinese):
+                page = render_pages.render_card(stage_two, chinese=chinese)
+                preview = page[page.index(start):page.index(end)]
+                for label in required:
+                    self.assertIn(f"**{label}**", preview)
+                for label in forbidden:
+                    self.assertNotIn(f"**{label}**", preview)
+
     def test_core_explanation_follows_its_file_drawer_without_a_path_label(self) -> None:
         expectations = (
             (
@@ -256,10 +293,30 @@ Book.
     def test_block_layouts_cover_every_patch_file_exactly_once(self) -> None:
         for card in self.cards:
             expected = [item.path for item in render_pages.split_file_patches(card.patch)]
-            actual = [path for block in card.blocks for path in block.files]
+            actual = [*card.failure_files, *(path for block in card.blocks for path in block.files)]
             with self.subTest(stage=card.number):
                 self.assertEqual(set(actual), set(expected))
                 self.assertEqual(len(actual), len(set(actual)))
+
+    def test_test_files_belong_only_to_failure_preview(self) -> None:
+        for card in self.cards:
+            expected = {
+                item.path
+                for item in render_pages.split_file_patches(card.patch)
+                if item.path.startswith("tests/")
+            }
+            mechanism_files = {path for block in card.blocks for path in block.files}
+            with self.subTest(stage=card.number):
+                self.assertEqual(set(card.failure_files), expected)
+                self.assertFalse(mechanism_files & expected)
+
+    def test_test_only_stages_do_not_render_an_empty_mechanism_section(self) -> None:
+        for card in (self.cards[6], self.cards[7], self.cards[11]):
+            headings = ((False, "### Mechanism blocks"), (True, "### 机制板块"))
+            for chinese, heading in headings:
+                with self.subTest(stage=card.number, chinese=chinese):
+                    page = render_pages.render_card(card, chinese=chinese)
+                    self.assertNotIn(heading, page)
 
     def test_block_layout_rejects_duplicate_file_ownership(self) -> None:
         layout = """

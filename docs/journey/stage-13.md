@@ -110,21 +110,21 @@ The concurrency contract starts two writers with the same initial ETag. Exactly 
     +
     ```
 
-**What it is and why it appears**
+**What this test locks**
 
 Four contracts cover GET validators, mutation guards, wildcard behavior, and the two-writer CAS race.
 
-**Runtime role**
+**How it constructs the counterexample**
 
 The threaded test proves serialization behavior that a sequential helper unit test cannot establish.
 
-**Key code**
+**Key test statement**
 
 ```python
 assert sorted(outcomes) == ["412", "stored"]
 ```
 
-**Statement understanding**
+**What a failure means**
 
 One `stored` and one `412` is the externally visible CAS guarantee. Two stored outcomes would prove the check and mutation were not atomic.
 

@@ -1,10 +1,12 @@
+failure_files = ["tests/test_model.py"]
+
 [[blocks]]
 id = "object-values"
 title_en = "Object value vocabulary"
 title_zh = "对象值词汇"
 summary_en = "Define the immutable values and executable invariants that every later Bucket, storage, and service boundary shares."
 summary_zh = "定义后续 Bucket、存储和服务边界共同使用的不可变值与可执行不变量。"
-files = ["src/minis3/errors.py", "src/minis3/model.py", "tests/test_model.py"]
+files = ["src/minis3/errors.py", "src/minis3/model.py"]
 
 [[blocks]]
 id = "project-scaffold"

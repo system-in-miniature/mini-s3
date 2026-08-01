@@ -1,10 +1,12 @@
+failure_files = ["tests/test_listing.py"]
+
 [[blocks]]
 id = "listing-projection"
 title_en = "Directory-like listing projection"
 title_zh = "目录式 Listing 投影"
 summary_en = "Derive prefix, delimiter, pagination, and continuation behavior from flat exact keys without creating directories."
 summary_zh = "从扁平精确 Key 派生 prefix、delimiter、分页与 continuation 行为，而不创建真实目录。"
-files = ["src/minis3/listing.py", "src/minis3/store.py", "tests/test_listing.py"]
+files = ["src/minis3/listing.py", "src/minis3/store.py"]
 
 [[blocks]]
 id = "public-wiring"

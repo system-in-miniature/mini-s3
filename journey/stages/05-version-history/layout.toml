@@ -1,10 +1,12 @@
+failure_files = ["tests/test_versioning.py"]
+
 [[blocks]]
 id = "history-projection"
 title_en = "Version-history projection"
 title_zh = "版本历史投影"
 summary_en = "Project newest-first Bucket histories into stable public values without losing null versions or delete markers."
 summary_zh = "把 Bucket 的新到旧历史投影成稳定公开值，同时保留 null 版本和删除标记。"
-files = ["src/minis3/listing.py", "src/minis3/store.py", "tests/test_versioning.py"]
+files = ["src/minis3/listing.py", "src/minis3/store.py"]
 
 [[blocks]]
 id = "public-wiring"

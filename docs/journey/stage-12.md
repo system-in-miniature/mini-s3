@@ -95,21 +95,21 @@ The pre-publication test crashes completion at `before_manifest_publish`, reopen
     +        reopened.abort_multipart_upload("b", "movie", upload.upload_id)
     ```
 
-**What it is and why it appears**
+**What this test locks**
 
 The storage recovery suite gains the two-sided multipart completion crash contract.
 
-**Runtime role**
+**How it constructs the counterexample**
 
 It uses fresh service instances to make published manifest and recovered staging—not stale memory—the only evidence.
 
-**Key code**
+**Key test statement**
 
 ```python
 assert reopened.get_object("b", "movie").body == b"abcx"
 ```
 
-**Statement understanding**
+**What a failure means**
 
 In the after-publish case, the visible complete object is authoritative even if cleanup did not run. Recovery must keep it and remove only the matching upload staging.
 
@@ -125,11 +125,7 @@ Using directory existence alone cannot distinguish an unfinished upload from pos
 
 Each test prepares a durable upload and parts, injects one crash point, discards the crashing service, and reopens. The before case retries completion; the after case reads the object and verifies abort now reports `NoSuchUpload` because recovery cleaned staging.
 
-### Mechanism blocks
 
-#### Multipart publication recovery
-
-Prove completion crashes on either side of Manifest publication recover to exactly the old or new visible object state.
 
 ### Verification evidence
 

@@ -1,7 +1,1 @@
-[[blocks]]
-id = "multipart-recovery"
-title_en = "Multipart publication recovery"
-title_zh = "Multipart 发布恢复"
-summary_en = "Prove completion crashes on either side of Manifest publication recover to exactly the old or new visible object state."
-summary_zh = "证明完成操作在 Manifest 发布两侧崩溃时，只会恢复到旧对象或新对象的精确可见状态。"
-files = ["tests/test_storage.py"]
+failure_files = ["tests/test_storage.py"]

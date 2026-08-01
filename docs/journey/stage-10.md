@@ -60,21 +60,21 @@ The first integration contract creates an upload for key `right`, then tries to 
     +        store.upload_part("b", "right", upload.upload_id, 10_001, b"x")
     ```
 
-**What it is and why it appears**
+**What this test locks**
 
 The first durable multipart test locks upload identity and legal part-number range.
 
-**Runtime role**
+**How it constructs the counterexample**
 
 It enters through `MiniS3`, so failures cover service validation plus storage identity lookup.
 
-**Key code**
+**Key test statement**
 
 ```python
 store.upload_part("b", "wrong", upload.upload_id, 1, b"x")
 ```
 
-**Statement understanding**
+**What a failure means**
 
 An upload ID is not globally interchangeable: the addressed Bucket and Key must match its persisted metadata before any part is written.
 

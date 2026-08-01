@@ -47,22 +47,22 @@ Stage 01 只能描述一份值，还不能决定已有历史上的 PUT 或 DELET
     +        bucket.set_versioning(VersioningState.UNVERSIONED)
     ```
 
-**是什么，为什么现在需要**
+**测试锁定什么**
 
 这个契约先单测聚合，避免服务层和磁盘层掩盖错误来源。
 
-**在运行时做什么**
+**如何构造反例**
 
 它证明相同序列源依次产生 `null/e00000001` 与 `v00000002/e00000002`，并锁定禁止的倒退迁移。
 
-**关键代码**
+**关键测试语句**
 
 ```python
 with pytest.raises(ValueError):
     bucket.set_versioning(VersioningState.UNVERSIONED)
 ```
 
-**关键语句理解**
+**失败意味着什么**
 
 这个失败属于领域行为：一旦可能存在具名版本，“从未版本化”就不再是真实状态。
 

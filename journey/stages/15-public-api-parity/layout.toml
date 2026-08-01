@@ -1,3 +1,5 @@
+failure_files = []
+
 [[blocks]]
 id = "public-api-parity"
 title_en = "Explicit public API and parity boundary"
