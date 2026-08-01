@@ -1,13 +1,7 @@
 name: Journey chain
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - "journey/**"
-      - "src/**"
-      - "tests/**"
-      - ".github/workflows/journey.yml"
+  workflow_dispatch:
 permissions:
   contents: read
 

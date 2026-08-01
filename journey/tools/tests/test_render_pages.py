@@ -510,6 +510,10 @@ files = ["src/example.py"]
                 for phrase in forbidden:
                     self.assertNotIn(phrase, page)
 
+    def test_navigation_groups_remain_collapsible(self) -> None:
+        navigation = Path("mkdocs.yml").read_text()
+        self.assertNotIn("navigation.sections", navigation)
+
 
 if __name__ == "__main__":
     unittest.main()
