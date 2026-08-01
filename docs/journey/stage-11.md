@@ -30,11 +30,15 @@ Publishing each part would violate whole-object visibility. Removing staging bef
 
 `complete_multipart_upload` holds the service lock, loads upload plus parts, calls pure `validate_completion`, joins bodies, mutates a candidate Bucket with composite ETag/provenance, persists it, swaps it into memory, and only then removes the upload directory.
 
-### File-by-file walkthrough
+### Mechanism blocks
 
-#### `src/minis3/store.py`
+#### Atomic multipart completion
 
-??? note "File diff: src/minis3/store.py"
+Validate receipts, assemble staged bytes, publish one object version, and remove upload state as one locked operation.
+
+??? note "View block diff (2 files)"
+    **`src/minis3/store.py`**
+
     ```diff
     diff --git a/src/minis3/store.py b/src/minis3/store.py
     index 0d7e596..9b50aa2 100644
@@ -82,29 +86,8 @@ Publishing each part would violate whole-object visibility. Removing staging bef
          ) -> None:
     ```
 
-##### What it is and why it appears
+    **`tests/test_multipart.py`**
 
-The service gains the completion orchestration that connects private staging to the existing object publication path.
-
-##### Runtime role
-
-It owns the ordering across storage load, pure validation, Bucket mutation, manifest publication, and staging cleanup.
-
-##### Key code
-
-```python
-self._storage.persist_bucket(candidate)
-self._buckets[bucket] = candidate
-self._storage.remove_multipart_upload(bucket, key, upload_id)
-```
-
-##### Statement understanding
-
-Cleanup is last. If publication fails, the upload remains retryable; once publication succeeds, removing staging cannot make the committed object disappear.
-
-#### `tests/test_multipart.py`
-
-??? note "File diff: tests/test_multipart.py"
     ```diff
     diff --git a/tests/test_multipart.py b/tests/test_multipart.py
     index 0b61034..adcb3f7 100644
@@ -222,21 +205,46 @@ Cleanup is last. If publication fails, the upload remains retryable; once public
     +
     ```
 
-##### What it is and why it appears
+
+**Explanation: `src/minis3/store.py`**
+
+**What it is and why it appears**
+
+The service gains the completion orchestration that connects private staging to the existing object publication path.
+
+**Runtime role**
+
+It owns the ordering across storage load, pure validation, Bucket mutation, manifest publication, and staging cleanup.
+
+**Key code**
+
+```python
+self._storage.persist_bucket(candidate)
+self._buckets[bucket] = candidate
+self._storage.remove_multipart_upload(bucket, key, upload_id)
+```
+
+**Statement understanding**
+
+Cleanup is last. If publication fails, the upload remains retryable; once publication succeeds, removing staging cannot make the committed object disappear.
+
+**Explanation: `tests/test_multipart.py`**
+
+**What it is and why it appears**
 
 Four cases cover invisibility until completion, same-number replacement, manifest validation, abort, and restart of unfinished staging.
 
-##### Runtime role
+**Runtime role**
 
 They exercise the complete public lifecycle and inspect both visible objects and private upload behavior.
 
-##### Key code
+**Key code**
 
 ```python
 assert completed.etag != content_etag(completed.body)
 ```
 
-##### Statement understanding
+**Statement understanding**
 
 This prevents an easy but incorrect implementation from hashing assembled bytes as a normal PUT. Multipart identity is derived from part digests.
 

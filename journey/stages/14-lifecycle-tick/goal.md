@@ -37,7 +37,7 @@ Pure evaluation can be reasoned about and repeated without side effects. An inje
 
 The caller invokes `lifecycle_tick` with rules. The service captures injected time, deep-copies the Bucket, calls `evaluate_expiration`, applies each action through Bucket deletion semantics, persists the candidate if actions exist, swaps it, and returns the action list.
 
-### File-by-file walkthrough
+### Mechanism blocks
 
 <!-- journey-file: src/minis3/lifecycle.py -->
 #### `src/minis3/lifecycle.py`
@@ -168,7 +168,7 @@ Version 已有创建时间，但没有任何机制让它们过期。把时间读
 
 调用方用规则调用 `lifecycle_tick`。服务取得注入时间、深拷贝 Bucket、调用 `evaluate_expiration`、通过 Bucket 删除语义应用每个 action；有 action 时持久化并替换候选，最后返回 action 列表。
 
-### 逐文件走读
+### 机制板块
 
 <!-- journey-file: src/minis3/lifecycle.py -->
 #### `src/minis3/lifecycle.py`

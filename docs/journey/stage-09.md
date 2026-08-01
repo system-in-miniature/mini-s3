@@ -31,11 +31,15 @@ Validation is a domain rule shared by any future storage adapter. Keeping it pur
 
 `validate_completion` normalizes each client entry, enforces strictly increasing part numbers, resolves each staged part, compares ETags, checks every nonfinal part size, then returns the selected parts and composite ETag. It performs no I/O and mutation.
 
-### File-by-file walkthrough
+### Mechanism blocks
 
-#### `src/minis3/errors.py`
+#### Multipart completion rules
 
-??? note "File diff: src/minis3/errors.py"
+Define upload identity, ordered part receipts, validation failures, and composite ETag calculation as a pure domain contract.
+
+??? note "View block diff (3 files)"
+    **`src/minis3/errors.py`**
+
     ```diff
     diff --git a/src/minis3/errors.py b/src/minis3/errors.py
     index e1a2230..9db3b4c 100644
@@ -62,27 +66,8 @@ Validation is a domain rule shared by any future storage adapter. Keeping it pur
     +    """A non-final multipart part is below the configured minimum size."""
     ```
 
-##### What it is and why it appears
+    **`src/minis3/multipart.py`**
 
-The public failure vocabulary gains missing-upload, invalid-part, invalid-order, and too-small-part meanings.
-
-##### Runtime role
-
-Domain validation and later service/storage code raise the same precise types, allowing callers to distinguish retryable identity errors from invalid completion requests.
-
-##### Key code
-
-```python
-class EntityTooSmall(MiniS3Error):
-```
-
-##### Statement understanding
-
-Part size is not a generic `ValueError`; it is an S3-shaped completion failure with stable meaning at the public boundary.
-
-#### `src/minis3/multipart.py`
-
-??? note "File diff: src/minis3/multipart.py"
     ```diff
     diff --git a/src/minis3/multipart.py b/src/minis3/multipart.py
     new file mode 100644
@@ -199,27 +184,8 @@ Part size is not a generic `ValueError`; it is an S3-shaped completion failure w
     +    return tuple(selected), f'"{composite}-{len(selected)}"'
     ```
 
-##### What it is and why it appears
+    **`tests/test_multipart_domain.py`**
 
-This file owns multipart values and the pure completion validator.
-
-##### Runtime role
-
-Storage will persist these values and the service will call the validator, but neither needs to reimplement ordering, receipt, or ETag rules.
-
-##### Key code
-
-```python
-return tuple(selected), f'"{composite}-{len(selected)}"'
-```
-
-##### Statement understanding
-
-The return keeps validated order and its derived composite fingerprint together. The `-N` suffix records part count and distinguishes multipart ETags from normal whole-body ETags.
-
-#### `tests/test_multipart_domain.py`
-
-??? note "File diff: tests/test_multipart_domain.py"
     ```diff
     diff --git a/tests/test_multipart_domain.py b/tests/test_multipart_domain.py
     new file mode 100644
@@ -269,21 +235,64 @@ The return keeps validated order and its derived composite fingerprint together.
     +        )
     ```
 
-##### What it is and why it appears
+
+**Explanation: `src/minis3/errors.py`**
+
+**What it is and why it appears**
+
+The public failure vocabulary gains missing-upload, invalid-part, invalid-order, and too-small-part meanings.
+
+**Runtime role**
+
+Domain validation and later service/storage code raise the same precise types, allowing callers to distinguish retryable identity errors from invalid completion requests.
+
+**Key code**
+
+```python
+class EntityTooSmall(MiniS3Error):
+```
+
+**Statement understanding**
+
+Part size is not a generic `ValueError`; it is an S3-shaped completion failure with stable meaning at the public boundary.
+
+**Explanation: `src/minis3/multipart.py`**
+
+**What it is and why it appears**
+
+This file owns multipart values and the pure completion validator.
+
+**Runtime role**
+
+Storage will persist these values and the service will call the validator, but neither needs to reimplement ordering, receipt, or ETag rules.
+
+**Key code**
+
+```python
+return tuple(selected), f'"{composite}-{len(selected)}"'
+```
+
+**Statement understanding**
+
+The return keeps validated order and its derived composite fingerprint together. The `-N` suffix records part count and distinguishes multipart ETags from normal whole-body ETags.
+
+**Explanation: `tests/test_multipart_domain.py`**
+
+**What it is and why it appears**
 
 This focused contract makes completion rules visible before durable staging is added.
 
-##### Runtime role
+**Runtime role**
 
 It supplies explicit staged parts and manifests, proving both accepted order/composite ETag and the major rejection paths.
 
-##### Key code
+**Key code**
 
 ```python
 def test_completion_validation_orders_parts_and_hashes_binary_digests() -> None:
 ```
 
-##### Statement understanding
+**Statement understanding**
 
 The test name captures two independent obligations: client order is semantic, and composite hashing uses binary digests rather than concatenated hexadecimal text.
 

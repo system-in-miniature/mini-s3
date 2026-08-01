@@ -30,11 +30,15 @@ Scattering branches across callers would allow illegal transitions and inconsist
 
 A caller supplies a command and `SequenceCounter`. Bucket validates its state, obtains one sequence, constructs a new version or marker, and replaces the exact key's immutable `ObjectRecord`. Enabled writes prepend history; unversioned and suspended writes replace only the `null` slot.
 
-### File-by-file walkthrough
+### Mechanism blocks
 
-#### `src/minis3/bucket.py`
+#### Bucket aggregate and deterministic identity
 
-??? note "File diff: src/minis3/bucket.py"
+Keep versioning state, exact-key histories, and monotonic identities under one aggregate boundary, then prove its transitions directly.
+
+??? note "View block diff (2 files)"
+    **`src/minis3/bucket.py`**
+
     ```diff
     diff --git a/src/minis3/bucket.py b/src/minis3/bucket.py
     new file mode 100644
@@ -203,29 +207,8 @@ A caller supplies a command and `SequenceCounter`. Bucket validates its state, o
     +        return marker
     ```
 
-##### What it is and why it appears
+    **`tests/test_bucket.py`**
 
-This mutable aggregate is the single owner of legal versioning changes and per-key histories. Persistence remains outside it.
-
-##### Runtime role
-
-Service code will call `set_versioning`, `put`, `get`, and `delete`. Each method turns one current Bucket state into the next state or raises before mutation.
-
-##### Key code
-
-```python
-if self.versioning is VersioningState.ENABLED:
-    versions = (version, *old.versions)
-else:
-```
-
-##### Statement understanding
-
-Enabled PUT preserves every earlier version by prepending. The `else` branch deliberately replaces the public `null` slot while retaining named history; treating both branches alike would break suspended semantics.
-
-#### `tests/test_bucket.py`
-
-??? note "File diff: tests/test_bucket.py"
     ```diff
     diff --git a/tests/test_bucket.py b/tests/test_bucket.py
     new file mode 100644
@@ -256,22 +239,47 @@ Enabled PUT preserves every earlier version by prepending. The `else` branch del
     +        bucket.set_versioning(VersioningState.UNVERSIONED)
     ```
 
-##### What it is and why it appears
+
+**Explanation: `src/minis3/bucket.py`**
+
+**What it is and why it appears**
+
+This mutable aggregate is the single owner of legal versioning changes and per-key histories. Persistence remains outside it.
+
+**Runtime role**
+
+Service code will call `set_versioning`, `put`, `get`, and `delete`. Each method turns one current Bucket state into the next state or raises before mutation.
+
+**Key code**
+
+```python
+if self.versioning is VersioningState.ENABLED:
+    versions = (version, *old.versions)
+else:
+```
+
+**Statement understanding**
+
+Enabled PUT preserves every earlier version by prepending. The `else` branch deliberately replaces the public `null` slot while retaining named history; treating both branches alike would break suspended semantics.
+
+**Explanation: `tests/test_bucket.py`**
+
+**What it is and why it appears**
 
 This contract exercises the aggregate before service and disk layers can hide the source of an error.
 
-##### Runtime role
+**Runtime role**
 
 It proves the same sequence produces `null/e00000001` and then `v00000002/e00000002`, and it locks the forbidden backward transition.
 
-##### Key code
+**Key code**
 
 ```python
 with pytest.raises(ValueError):
     bucket.set_versioning(VersioningState.UNVERSIONED)
 ```
 
-##### Statement understanding
+**Statement understanding**
 
 The failure is part of domain behavior, not merely validation style: once named versions can exist, “never versioned” is no longer a truthful state.
 

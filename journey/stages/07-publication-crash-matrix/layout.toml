@@ -1,0 +1,7 @@
+[[blocks]]
+id = "publication-failure-matrix"
+title_en = "Manifest publication failure matrix"
+title_zh = "Manifest 发布失败矩阵"
+summary_en = "Use injected crash points to distinguish every pre-publication state from the first post-publication state."
+summary_zh = "用注入崩溃点区分所有发布前状态与第一个发布后状态。"
+files = ["tests/test_storage.py"]

@@ -35,7 +35,7 @@ Scattering branches across callers would allow illegal transitions and inconsist
 
 A caller supplies a command and `SequenceCounter`. Bucket validates its state, obtains one sequence, constructs a new version or marker, and replaces the exact key's immutable `ObjectRecord`. Enabled writes prepend history; unversioned and suspended writes replace only the `null` slot.
 
-### File-by-file walkthrough
+### Mechanism blocks
 
 <!-- journey-file: src/minis3/bucket.py -->
 #### `src/minis3/bucket.py`
@@ -131,7 +131,7 @@ Stage 01 只能描述一份值，还不能决定已有历史上的 PUT 或 DELET
 
 调用方给出命令和 `SequenceCounter`。Bucket 校验状态、取一个序列、构造新版本或 Marker，再替换精确 Key 的不可变 `ObjectRecord`。Enabled 写入追加历史；未版本化和暂停写入只替换 `null` 槽。
 
-### 逐文件走读
+### 机制板块
 
 <!-- journey-file: src/minis3/bucket.py -->
 #### `src/minis3/bucket.py`

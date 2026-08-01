@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+import tempfile
 import unittest
 
 from journey.tools import render_pages
@@ -50,7 +52,7 @@ class RenderPagesTest(unittest.TestCase):
                 "### Basic concepts",
                 "### Why this mechanism is necessary",
                 "### Runtime mental model",
-                "### File-by-file walkthrough",
+                "### Mechanism blocks",
                 "### Verification evidence",
                 "### Durable takeaways",
             ),
@@ -61,7 +63,7 @@ class RenderPagesTest(unittest.TestCase):
                 "### 基本概念",
                 "### 为什么需要这个机制",
                 "### 运行时心智模型",
-                "### 逐文件走读",
+                "### 机制板块",
                 "### 验证证据",
                 "### 需要真正记住的内容",
             ),
@@ -112,7 +114,7 @@ Necessity.
 
 Flow.
 
-### File-by-file walkthrough
+### Mechanism blocks
 
 <!-- journey-file: src/minis3/example.py -->
 #### `src/minis3/example.py`
@@ -170,38 +172,78 @@ Book.
                 file_patches=[file_patch],
             )
 
-    def test_stage_page_has_one_localized_walkthrough_per_changed_file(self) -> None:
+    def test_stage_page_groups_files_into_mechanism_blocks(self) -> None:
         expectations = (
-            (False, "### File-by-file walkthrough", "File diff: "),
-            (True, "### 逐文件走读", "文件差异："),
+            (False, "### Mechanism blocks", '??? note "View block diff (3 files)"'),
+            (True, "### 机制板块", '??? note "查看本板块差异（3 个文件）"'),
         )
-        for chinese, heading, label in expectations:
+        for chinese, heading, drawer in expectations:
             with self.subTest(chinese=chinese):
                 page = render_pages.render_card(self.stage_one, chinese=chinese)
                 self.assertIn(heading, page)
-                self.assertEqual(page.count(label), self.stage_one.patch.count("diff --git "))
-                self.assertIn(f"{label}src/minis3/model.py", page)
-                self.assertIn(f"{label}tests/test_model.py", page)
-                self.assertLess(
-                    page.index(f"{label}src/minis3/model.py"),
-                    page.index(f"{label}tests/test_model.py"),
-                )
+                self.assertIn(drawer, page)
+                self.assertEqual(page.count("View block diff (") + page.count("查看本板块差异（"), 2)
                 self.assertIn("Complete reference patch / 完整参考补丁", page)
                 self.assertEqual(page.count("diff --git "), self.stage_one.patch.count("diff --git "))
 
-    def test_each_file_diff_follows_its_file_heading(self) -> None:
-        expectations = (
-            (False, "src/minis3/model.py", "File diff: ", "##### What it is and why it appears"),
-            (True, "src/minis3/model.py", "文件差异：", "##### 是什么，为什么现在需要"),
-        )
-        for chinese, path, diff_label, explanation_heading in expectations:
-            page = render_pages.render_card(self.stage_one, chinese=chinese)
-            file_heading = page.index(f"#### `{path}`")
-            diff = page.index(f'{diff_label}{path}', file_heading)
-            explanation = page.index(explanation_heading, file_heading)
-            with self.subTest(chinese=chinese):
-                self.assertLess(file_heading, diff)
-                self.assertLess(diff, explanation)
+    def test_block_layouts_cover_every_patch_file_exactly_once(self) -> None:
+        for card in self.cards:
+            expected = [item.path for item in render_pages.split_file_patches(card.patch)]
+            actual = [path for block in card.blocks for path in block.files]
+            with self.subTest(stage=card.number):
+                self.assertEqual(set(actual), set(expected))
+                self.assertEqual(len(actual), len(set(actual)))
+
+    def test_block_layout_rejects_duplicate_file_ownership(self) -> None:
+        layout = """
+[[blocks]]
+id = "first"
+title_en = "First"
+title_zh = "第一"
+summary_en = "First summary."
+summary_zh = "第一段说明。"
+files = ["src/example.py"]
+
+[[blocks]]
+id = "second"
+title_en = "Second"
+title_zh = "第二"
+summary_en = "Second summary."
+summary_zh = "第二段说明。"
+files = ["src/example.py"]
+"""
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "layout.toml"
+            path.write_text(layout)
+            with self.assertRaisesRegex(ValueError, "duplicates=.*src/example.py"):
+                render_pages.load_block_layouts(
+                    path,
+                    stage_label="stage-99",
+                    patch_paths={"src/example.py"},
+                )
+
+    def test_supporting_files_skip_per_file_browser_explanations(self) -> None:
+        english = render_pages.render_card(self.stage_one, chinese=False)
+        chinese = render_pages.render_card(self.stage_one, chinese=True)
+
+        self.assertIn("#### Object value vocabulary", english)
+        self.assertIn("#### Package and tooling scaffold", english)
+        self.assertIn("#### 对象值词汇", chinese)
+        self.assertIn("#### 包与工具脚手架", chinese)
+        self.assertIn("This is the stage's central domain-value file.", english)
+        self.assertNotIn("small learner-workspace entry point", english)
+        self.assertNotIn("这是小型学习仓库的入口", chinese)
+        for path in (
+            "README.md",
+            "pyproject.toml",
+            "src/minis3/__init__.py",
+            "src/minis3/errors.py",
+            "src/minis3/model.py",
+            "tests/test_model.py",
+            "uv.lock",
+        ):
+            self.assertNotIn(f"#### `{path}`", english)
+            self.assertNotIn(f"#### `{path}`", chinese)
 
     def test_deliverable_file_lists_are_collapsed_in_browser_pages(self) -> None:
         english = render_pages.render_card(self.stage_one, chinese=False)
@@ -260,12 +302,12 @@ Book.
     def test_all_stage_pages_cover_every_canonical_file_once(self) -> None:
         for card in self.cards:
             expected_paths = [item.path for item in render_pages.split_file_patches(card.patch)]
-            for chinese, label in ((False, "File diff: "), (True, "文件差异：")):
+            for chinese in (False, True):
                 with self.subTest(stage=card.number, chinese=chinese):
                     page = render_pages.render_card(card, chinese=chinese)
-                    self.assertEqual(page.count(label), len(expected_paths))
+                    self.assertEqual(page.count("diff --git "), len(expected_paths))
                     for path in expected_paths:
-                        self.assertEqual(page.count(f"{label}{path}"), 1)
+                        self.assertEqual(page.count(f"**`{path}`**"), 1)
 
     def test_rendered_pages_do_not_use_generic_teaching_boilerplate(self) -> None:
         forbidden = (

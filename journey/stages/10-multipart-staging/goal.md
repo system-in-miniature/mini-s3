@@ -39,7 +39,7 @@ Keeping parts only in memory makes retry and restart unreliable. Writing them di
 
 The service allocates a deterministic upload ID and asks DiskStorage to create `uploads/<id>/upload.json` plus `parts/`. `upload_part` validates the number and upload identity, then atomically writes one numbered `.data` file. Abort removes only that private upload directory.
 
-### File-by-file walkthrough
+### Mechanism blocks
 
 <!-- journey-file: src/minis3/model.py -->
 #### `src/minis3/model.py`
@@ -214,7 +214,7 @@ Staging 是持久私有状态，不是部分可见对象。每次上传由 `(buc
 
 服务分配确定性 upload ID，让 DiskStorage 创建 `uploads/<id>/upload.json` 和 `parts/`。`upload_part` 校验编号与上传身份，再原子写一个编号 `.data` 文件。Abort 只删除这次私有上传目录。
 
-### 逐文件走读
+### 机制板块
 
 <!-- journey-file: src/minis3/model.py -->
 #### `src/minis3/model.py`

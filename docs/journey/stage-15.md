@@ -27,11 +27,15 @@ A course can slowly become a detached toy while its examples still pass. Closing
 
 User imports resolve through `src/minis3/__init__.py`. Separately, `build_journey.py --check` starts from the empty Journey root, applies all 15 canonical patches, gathers Journey-owned tests, and compares reconstructed bytes to the current main tree without moving refs.
 
-### File-by-file walkthrough
+### Mechanism blocks
 
-#### `src/minis3/__init__.py`
+#### Explicit public API and parity boundary
 
-??? note "File diff: src/minis3/__init__.py"
+Turn package exports into an intentional compatibility contract and close the Journey with exact reconstruction evidence.
+
+??? note "View block diff (1 file)"
+    **`src/minis3/__init__.py`**
+
     ```diff
     diff --git a/src/minis3/__init__.py b/src/minis3/__init__.py
     index 36bc1f3..86d6755 100644
@@ -78,21 +82,24 @@ User imports resolve through `src/minis3/__init__.py`. Separately, `build_journe
     +]
     ```
 
-##### What it is and why it appears
+
+**Explanation: `src/minis3/__init__.py`**
+
+**What it is and why it appears**
 
 The package root receives its final explicit export list for values, services, policies, results, and public failures.
 
-##### Runtime role
+**Runtime role**
 
 It is the stable learner-facing import boundary. Internal storage helpers and implementation-only functions remain absent.
 
-##### Key code
+**Key code**
 
 ```python
 __all__ = [
 ```
 
-##### Statement understanding
+**Statement understanding**
 
 The list converts an implicit collection of imports into a deliberate contract. Adding an internal helper elsewhere no longer makes it public accidentally.
 

@@ -37,11 +37,15 @@ If these meanings were left as loose dictionaries, later code could mutate a his
 
 At this stage the flow is deliberately short: caller bytes enter `content_etag`, become an ETag, and are placed in a `Version`; an `ObjectRecord` associates an exact key with a newest-first tuple of versions. No class here owns I/O or mutation. It only defines values that Bucket, storage, and service code will own later.
 
-### File-by-file walkthrough
+### Mechanism blocks
 
-#### `src/minis3/errors.py`
+#### Object value vocabulary
 
-??? note "File diff: src/minis3/errors.py"
+Define the immutable values and executable invariants that every later Bucket, storage, and service boundary shares.
+
+??? note "View block diff (3 files)"
+    **`src/minis3/errors.py`**
+
     ```diff
     diff --git a/src/minis3/errors.py b/src/minis3/errors.py
     new file mode 100644
@@ -81,27 +85,8 @@ At this stage the flow is deliberately short: caller bytes enter `content_etag`,
     +
     ```
 
-##### What it is and why it appears
+    **`src/minis3/model.py`**
 
-This file defines protocol-independent domain failures. Bucket and service code can raise a precise error without importing HTTP concepts.
-
-##### Runtime role
-
-Callers catch subclasses of `MiniS3Error` and may later translate them to S3-shaped responses. Keeping missing bucket, missing key, and missing version distinct prevents one broad exception from erasing useful semantics.
-
-##### Key code
-
-```python
-class NoSuchKey(MiniS3Error):
-```
-
-##### Statement understanding
-
-Inheritance says this is part of MiniS3's public failure vocabulary while remaining distinguishable from `NoSuchBucket` and `NoSuchVersion`.
-
-#### `src/minis3/model.py`
-
-??? note "File diff: src/minis3/model.py"
     ```diff
     diff --git a/src/minis3/model.py b/src/minis3/model.py
     new file mode 100644
@@ -186,55 +171,8 @@ Inheritance says this is part of MiniS3's public failure vocabulary while remain
     +
     ```
 
-##### What it is and why it appears
+    **`tests/test_model.py`**
 
-This is the stage's central domain-value file. It defines whole-object versions, body-less delete markers, per-key history, and content-derived ETags.
-
-##### Runtime role
-
-Later Bucket code constructs these values, listing code projects them, and disk storage serializes them. The values themselves perform no I/O and own no global state.
-
-##### Key code
-
-```python
-digest = md5(body, usedforsecurity=False).hexdigest()
-return f'"{digest}"'
-```
-
-##### Statement understanding
-
-`usedforsecurity=False` documents that MD5 is used as the S3-style fingerprint, not as a security primitive. Quoting the hexadecimal digest is part of the externally visible ETag representation, so returning the bare digest would be a semantic bug.
-
-#### `src/minis3/__init__.py`
-
-??? note "File diff: src/minis3/__init__.py"
-    ```diff
-    diff --git a/src/minis3/__init__.py b/src/minis3/__init__.py
-    new file mode 100644
-    index 0000000..8a3d1c7
-    --- /dev/null
-    +++ b/src/minis3/__init__.py
-    @@ -0,0 +1,3 @@
-    +"""Public API for the MiniS3 teaching implementation."""
-    +from .errors import BucketAlreadyExists, BucketNotEmpty, InvalidContinuationToken, MiniS3Error, NoSuchBucket, NoSuchKey, NoSuchVersion
-    +from .model import DeleteMarker, ObjectRecord, Version, content_etag
-    ```
-
-##### What it is and why it appears
-
-This package boundary exposes the names a learner or later service can import from `minis3` without knowing the internal module layout.
-
-##### Runtime role
-
-It performs wiring only. If a public name is missing here, import fails before any object flow begins; it does not own ETag or version behavior.
-
-##### Statement understanding
-
-The explicit imports are the first public API contract. Internal helpers stay internal until a later stage deliberately exports them.
-
-#### `tests/test_model.py`
-
-??? note "File diff: tests/test_model.py"
     ```diff
     diff --git a/tests/test_model.py b/tests/test_model.py
     new file mode 100644
@@ -279,27 +217,75 @@ The explicit imports are the first public API contract. Internal helpers stay in
     +
     ```
 
-##### What it is and why it appears
+
+**Explanation: `src/minis3/errors.py`**
+
+**What it is and why it appears**
+
+This file defines protocol-independent domain failures. Bucket and service code can raise a precise error without importing HTTP concepts.
+
+**Runtime role**
+
+Callers catch subclasses of `MiniS3Error` and may later translate them to S3-shaped responses. Keeping missing bucket, missing key, and missing version distinct prevents one broad exception from erasing useful semantics.
+
+**Key code**
+
+```python
+class NoSuchKey(MiniS3Error):
+```
+
+**Statement understanding**
+
+Inheritance says this is part of MiniS3's public failure vocabulary while remaining distinguishable from `NoSuchBucket` and `NoSuchVersion`.
+
+**Explanation: `src/minis3/model.py`**
+
+**What it is and why it appears**
+
+This is the stage's central domain-value file. It defines whole-object versions, body-less delete markers, per-key history, and content-derived ETags.
+
+**Runtime role**
+
+Later Bucket code constructs these values, listing code projects them, and disk storage serializes them. The values themselves perform no I/O and own no global state.
+
+**Key code**
+
+```python
+digest = md5(body, usedforsecurity=False).hexdigest()
+return f'"{digest}"'
+```
+
+**Statement understanding**
+
+`usedforsecurity=False` documents that MD5 is used as the S3-style fingerprint, not as a security primitive. Quoting the hexadecimal digest is part of the externally visible ETag representation, so returning the bare digest would be a semantic bug.
+
+**Explanation: `tests/test_model.py`**
+
+**What it is and why it appears**
 
 These tests record the three model invariants introduced today: quoted ETags, opaque keys with immutable values, and body-less delete markers.
 
-##### Runtime role
+**Runtime role**
 
 They call the learner-visible values directly. They prove value semantics only; they do not yet prove bucket transitions, disk persistence, or a public object service.
 
-##### Key code
+**Key code**
 
 ```python
 assert record.key == "/a//b/"
 ```
 
-##### Statement understanding
+**Statement understanding**
 
 The deliberately unusual key catches path normalization. Passing this assertion means the model preserved the exact string, not that directory behavior exists.
 
-#### `README.md`
+#### Package and tooling scaffold
 
-??? note "File diff: README.md"
+Wire the package, test environment, learner README, and reproducible dependency set without treating that setup as an object-storage mechanism.
+
+??? note "View block diff (4 files)"
+    **`README.md`**
+
     ```diff
     diff --git a/README.md b/README.md
     new file mode 100644
@@ -312,21 +298,8 @@ The deliberately unusual key catches path normalization. Passing this assertion 
     +Build the object store one verified stage at a time.
     ```
 
-##### What it is and why it appears
+    **`pyproject.toml`**
 
-This is the small learner-workspace entry point. It states that the repository is rebuilt in verified stages.
-
-##### Runtime role
-
-It has no runtime responsibility; it helps a learner recognize that this checkout is a staged reconstruction rather than the finished repository.
-
-##### Statement understanding
-
-The wording “one verified stage at a time” defines the workspace workflow, not an object-storage invariant.
-
-#### `pyproject.toml`
-
-??? note "File diff: pyproject.toml"
     ```diff
     diff --git a/pyproject.toml b/pyproject.toml
     new file mode 100644
@@ -360,21 +333,22 @@ The wording “one verified stage at a time” defines the workspace workflow, n
     +
     ```
 
-##### What it is and why it appears
+    **`src/minis3/__init__.py`**
 
-This file makes `src/minis3` installable and tells pytest where source and tests live.
+    ```diff
+    diff --git a/src/minis3/__init__.py b/src/minis3/__init__.py
+    new file mode 100644
+    index 0000000..8a3d1c7
+    --- /dev/null
+    +++ b/src/minis3/__init__.py
+    @@ -0,0 +1,3 @@
+    +"""Public API for the MiniS3 teaching implementation."""
+    +from .errors import BucketAlreadyExists, BucketNotEmpty, InvalidContinuationToken, MiniS3Error, NoSuchBucket, NoSuchKey, NoSuchVersion
+    +from .model import DeleteMarker, ObjectRecord, Version, content_etag
+    ```
 
-##### Runtime role
+    **`uv.lock`**
 
-Build and test tools read it before Python imports MiniS3. A wrong package path looks like an import failure even when the model code itself is correct.
-
-##### Statement understanding
-
-`packages = ["src/minis3"]` connects the src-layout directory to the built package; `testpaths = ["tests"]` keeps test discovery bounded.
-
-#### `uv.lock`
-
-??? note "File diff: uv.lock"
     ```diff
     diff --git a/uv.lock b/uv.lock
     new file mode 100644
@@ -463,17 +437,6 @@ Build and test tools read it before Python imports MiniS3. A wrong package path 
     +]
     ```
 
-##### What it is and why it appears
-
-The lockfile records the exact development dependency graph used to run this stage.
-
-##### Runtime role
-
-It affects environment reproduction, not object behavior. It should be debugged when dependency resolution differs between machines.
-
-##### Statement understanding
-
-The editable `minis3` entry connects the local package to the locked environment, while the pytest version is resolved reproducibly.
 
 ### Verification evidence
 

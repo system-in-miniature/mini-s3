@@ -30,11 +30,15 @@ Stage 01 只能描述一份值，还不能决定已有历史上的 PUT 或 DELET
 
 调用方给出命令和 `SequenceCounter`。Bucket 校验状态、取一个序列、构造新版本或 Marker，再替换精确 Key 的不可变 `ObjectRecord`。Enabled 写入追加历史；未版本化和暂停写入只替换 `null` 槽。
 
-### 逐文件走读
+### 机制板块
 
-#### `src/minis3/bucket.py`
+#### Bucket 聚合与确定性身份
 
-??? note "文件差异：src/minis3/bucket.py"
+把版本状态、精确 Key 历史和单调身份收进同一个聚合边界，并直接证明它的状态迁移。
+
+??? note "查看本板块差异（2 个文件）"
+    **`src/minis3/bucket.py`**
+
     ```diff
     diff --git a/src/minis3/bucket.py b/src/minis3/bucket.py
     new file mode 100644
@@ -203,29 +207,8 @@ Stage 01 只能描述一份值，还不能决定已有历史上的 PUT 或 DELET
     +        return marker
     ```
 
-##### 是什么，为什么现在需要
+    **`tests/test_bucket.py`**
 
-这个可变聚合是合法版本状态与每 Key 历史的唯一所有者，持久化仍留在外部。
-
-##### 在运行时做什么
-
-服务层会调用 `set_versioning`、`put`、`get`、`delete`。每个方法把当前 Bucket 状态变成下一状态，或者在变更前抛错。
-
-##### 关键代码
-
-```python
-if self.versioning is VersioningState.ENABLED:
-    versions = (version, *old.versions)
-else:
-```
-
-##### 关键语句理解
-
-Enabled PUT 通过前插保留全部旧版本；`else` 则替换公开 `null` 槽并保留具名历史。把两个分支写成一样会破坏暂停语义。
-
-#### `tests/test_bucket.py`
-
-??? note "文件差异：tests/test_bucket.py"
     ```diff
     diff --git a/tests/test_bucket.py b/tests/test_bucket.py
     new file mode 100644
@@ -256,22 +239,47 @@ Enabled PUT 通过前插保留全部旧版本；`else` 则替换公开 `null` �
     +        bucket.set_versioning(VersioningState.UNVERSIONED)
     ```
 
-##### 是什么，为什么现在需要
+
+**讲解: `src/minis3/bucket.py`**
+
+**是什么，为什么现在需要**
+
+这个可变聚合是合法版本状态与每 Key 历史的唯一所有者，持久化仍留在外部。
+
+**在运行时做什么**
+
+服务层会调用 `set_versioning`、`put`、`get`、`delete`。每个方法把当前 Bucket 状态变成下一状态，或者在变更前抛错。
+
+**关键代码**
+
+```python
+if self.versioning is VersioningState.ENABLED:
+    versions = (version, *old.versions)
+else:
+```
+
+**关键语句理解**
+
+Enabled PUT 通过前插保留全部旧版本；`else` 则替换公开 `null` 槽并保留具名历史。把两个分支写成一样会破坏暂停语义。
+
+**讲解: `tests/test_bucket.py`**
+
+**是什么，为什么现在需要**
 
 这个契约先单测聚合，避免服务层和磁盘层掩盖错误来源。
 
-##### 在运行时做什么
+**在运行时做什么**
 
 它证明相同序列源依次产生 `null/e00000001` 与 `v00000002/e00000002`，并锁定禁止的倒退迁移。
 
-##### 关键代码
+**关键代码**
 
 ```python
 with pytest.raises(ValueError):
     bucket.set_versioning(VersioningState.UNVERSIONED)
 ```
 
-##### 关键语句理解
+**关键语句理解**
 
 这个失败属于领域行为：一旦可能存在具名版本，“从未版本化”就不再是真实状态。
 

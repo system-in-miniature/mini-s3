@@ -1,0 +1,24 @@
+[[blocks]]
+id = "condition-matching"
+title_en = "Conditional matching and failures"
+title_zh = "条件匹配与失败语义"
+summary_en = "Define wildcard and ETag-list matching separately from mutation, with precise public failure meanings."
+summary_zh = "把通配符和 ETag 列表匹配从变更中分离，并定义精确的公开失败语义。"
+files = ["src/minis3/conditional.py", "src/minis3/errors.py"]
+
+[[blocks]]
+id = "guarded-mutation"
+title_en = "Guarded service mutation"
+title_zh = "受保护的服务变更"
+summary_en = "Evaluate a precondition and apply the corresponding PUT, GET, or DELETE under one lock so stale writers cannot win."
+summary_zh = "在同一把锁下判断前置条件并执行 PUT、GET 或 DELETE，使过期写入者无法获胜。"
+files = ["src/minis3/store.py", "tests/test_conditional.py"]
+
+[[blocks]]
+id = "public-wiring"
+title_en = "Public export wiring"
+title_zh = "公开导出接线"
+summary_en = "Expose conditional failures while keeping matching and mutation ownership in the two core blocks."
+summary_zh = "导出条件失败类型，同时让匹配和变更所有权留在两个核心板块。"
+files = ["src/minis3/__init__.py"]
+supporting = true

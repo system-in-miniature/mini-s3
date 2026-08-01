@@ -3,14 +3,15 @@
 Journey Mode turns the finished MiniS3 system into 15 cumulative, testable
 rebuild stages. Each browser page is a complete authored lesson: it explains
 the current problem, previews one high-signal failure, establishes the basic
-concepts and necessity, follows the runtime flow, and then reads every changed
-file with critical-statement explanations. The canonical full diff remains a
-collapsed reference; it is not the teaching content by itself.
+concepts and necessity, follows the runtime flow, and then groups related files
+into mechanism blocks with critical-statement explanations. Supporting wiring
+stays compact. The canonical full diff remains a collapsed reference; it is not
+the teaching content by itself.
 
 Journey Mode 把 MiniS3 成品系统拆成 15 个可累积、可测试的重建阶段。每个网页
 本身都是人工编写的完整课程：先说明当前问题，用一条高信号失败场景直观看到
-为什么会坏，再建立基本概念、必要性和运行时流程，随后逐文件解释“是什么”与
-关键语句。Canonical 完整 Diff 仍作为折叠参考，但不再独自承担教学。
+为什么会坏，再建立基本概念、必要性和运行时流程，随后按机制板块连接相关文件与
+关键语句；辅助接线保持简短。Canonical 完整 Diff 仍作为折叠参考，但不再独自承担教学。
 
 The failure preview is executable motivation rather than a full test-first
 narrative. The browser course does not depend on live Q&A and is a learning
@@ -86,7 +87,7 @@ an internal handoff used by the Agent; learners do not need to run it.
 
 在 canonical MiniS3 仓库中打开 Codex，直接发送
 `开始 Agent 带教 Stage 03`。根目录 `AGENTS.md` 会自动创建或续接 Stage 独立学习
-仓库，再执行快速理解筛查、小片段代码走读、逐文件讲解和精确 parity 验收。详细使用
+仓库，再执行快速理解筛查、机制板块讲解、小片段代码走读和精确 parity 验收。详细使用
 步骤见 [`docs/zh/agent-guided.md`](../docs/zh/agent-guided.md)。
 
 Verify without changing refs:

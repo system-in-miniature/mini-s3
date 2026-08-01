@@ -42,7 +42,7 @@ If these meanings were left as loose dictionaries, later code could mutate a his
 
 At this stage the flow is deliberately short: caller bytes enter `content_etag`, become an ETag, and are placed in a `Version`; an `ObjectRecord` associates an exact key with a newest-first tuple of versions. No class here owns I/O or mutation. It only defines values that Bucket, storage, and service code will own later.
 
-### File-by-file walkthrough
+### Mechanism blocks
 
 <!-- journey-file: src/minis3/errors.py -->
 #### `src/minis3/errors.py`
@@ -224,7 +224,7 @@ Key 是不透明字符串。后面的 Listing 可以利用斜杠展示类似目�
 
 当前流程很短：调用方的 bytes 进入 `content_etag` 得到 ETag，再进入 `Version`；`ObjectRecord` 把精确 Key 与按新到旧排列的版本元组关联起来。这里没有任何类负责 I/O 或全局变更，它们只是后续边界要使用的值。
 
-### 逐文件走读
+### 机制板块
 
 <!-- journey-file: src/minis3/errors.py -->
 #### `src/minis3/errors.py`

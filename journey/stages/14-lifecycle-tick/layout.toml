@@ -1,0 +1,24 @@
+[[blocks]]
+id = "lifecycle-policy"
+title_en = "Pure lifecycle policy"
+title_zh = "纯生命周期策略"
+summary_en = "Select deterministic expiration actions from histories, ordered rules, and an explicit time without mutating state."
+summary_zh = "根据历史、有序规则和显式时间确定性选择过期 Action，不直接修改状态。"
+files = ["src/minis3/lifecycle.py"]
+
+[[blocks]]
+id = "lifecycle-application"
+title_en = "Clocked lifecycle application"
+title_zh = "时钟驱动的生命周期执行"
+summary_en = "Apply selected actions through existing version semantics under a lock, then persist only the resulting changed Bucket."
+summary_zh = "在锁内通过已有版本语义应用 Action，并只持久化产生变更后的 Bucket。"
+files = ["src/minis3/store.py", "tests/test_lifecycle.py"]
+
+[[blocks]]
+id = "public-wiring"
+title_en = "Public export wiring"
+title_zh = "公开导出接线"
+summary_en = "Expose lifecycle policy values without duplicating their policy or execution explanation."
+summary_zh = "导出生命周期策略值，不重复策略或执行讲解。"
+files = ["src/minis3/__init__.py"]
+supporting = true

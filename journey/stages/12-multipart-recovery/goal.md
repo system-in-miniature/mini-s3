@@ -32,7 +32,7 @@ Using directory existence alone cannot distinguish an unfinished upload from pos
 
 Each test prepares a durable upload and parts, injects one crash point, discards the crashing service, and reopens. The before case retries completion; the after case reads the object and verifies abort now reports `NoSuchUpload` because recovery cleaned staging.
 
-### File-by-file walkthrough
+### Mechanism blocks
 
 <!-- journey-file: tests/test_storage.py -->
 #### `tests/test_storage.py`
@@ -101,7 +101,7 @@ Multipart recovery follows the same manifest commit point as normal objects, but
 
 每条测试准备持久 upload 与 parts，注入一个崩溃点，丢弃崩溃服务再重开。Before 场景重试完成；After 场景读取对象，并确认 Abort 得到 `NoSuchUpload`，因为恢复已清理 Staging。
 
-### 逐文件走读
+### 机制板块
 
 <!-- journey-file: tests/test_storage.py -->
 #### `tests/test_storage.py`

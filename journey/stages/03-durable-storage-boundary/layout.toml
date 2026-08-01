@@ -1,0 +1,16 @@
+[[blocks]]
+id = "durable-publication"
+title_en = "Durable publication and recovery"
+title_zh = "持久发布与恢复"
+summary_en = "Connect atomic file replacement, immutable artifacts, Manifest visibility, and restart reconstruction as one durability protocol."
+summary_zh = "把原子文件替换、不可变 Artifact、Manifest 可见性和重启重建连成一套持久化协议。"
+files = ["src/minis3/storage/atomic.py", "src/minis3/storage/disk.py", "tests/test_storage_boundary.py"]
+
+[[blocks]]
+id = "storage-wiring"
+title_en = "Storage package wiring"
+title_zh = "存储包接线"
+summary_en = "Expose the storage boundary to later service code; this Stage adds no separate mechanism at the export layer."
+summary_zh = "向后续服务代码暴露存储边界；本 Stage 的导出层不引入独立机制。"
+files = ["src/minis3/storage/__init__.py"]
+supporting = true

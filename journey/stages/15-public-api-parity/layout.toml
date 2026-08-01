@@ -1,0 +1,7 @@
+[[blocks]]
+id = "public-api-parity"
+title_en = "Explicit public API and parity boundary"
+title_zh = "显式公开 API 与 Parity 边界"
+summary_en = "Turn package exports into an intentional compatibility contract and close the Journey with exact reconstruction evidence."
+summary_zh = "把包导出变成有意的兼容契约，并用精确重建证据完成 Journey 收官。"
+files = ["src/minis3/__init__.py"]

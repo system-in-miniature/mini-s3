@@ -35,7 +35,7 @@ Returning raw internal objects would couple callers to storage fields and tempt 
 
 The service locks and passes Bucket records to `list_object_versions`. The pure function filters exact key prefixes, iterates keys deterministically, flattens each newest-first history, marks only index zero as latest, and returns an immutable result.
 
-### File-by-file walkthrough
+### Mechanism blocks
 
 <!-- journey-file: src/minis3/listing.py -->
 #### `src/minis3/listing.py`
@@ -164,7 +164,7 @@ GET 只返回一份被寻址的数据版本，无法解释最新值或 Marker �
 
 服务加锁，把 Bucket records 交给 `list_object_versions`。纯函数按精确 Key 前缀过滤、确定性遍历 Key、展开新到旧历史、只把索引 0 标成 latest，再返回不可变结果。
 
-### 逐文件走读
+### 机制板块
 
 <!-- journey-file: src/minis3/listing.py -->
 #### `src/minis3/listing.py`

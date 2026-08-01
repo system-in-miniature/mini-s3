@@ -6,6 +6,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 import re
+import tomllib
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -27,6 +28,18 @@ class Card:
     english: str
     chinese: str
     patch: str
+    blocks: tuple["BlockLayout", ...]
+
+
+@dataclass(frozen=True)
+class BlockLayout:
+    id: str
+    title_en: str
+    title_zh: str
+    summary_en: str
+    summary_zh: str
+    files: tuple[str, ...]
+    supporting: bool = False
 
 
 @dataclass(frozen=True)
@@ -69,7 +82,7 @@ REQUIRED_HEADINGS = {
         "### Basic concepts",
         "### Why this mechanism is necessary",
         "### Runtime mental model",
-        "### File-by-file walkthrough",
+        "### Mechanism blocks",
         "### Verification evidence",
         "### Durable takeaways",
         "### Explain it in your own words",
@@ -83,7 +96,7 @@ REQUIRED_HEADINGS = {
         "### 基本概念",
         "### 为什么需要这个机制",
         "### 运行时心智模型",
-        "### 逐文件走读",
+        "### 机制板块",
         "### 验证证据",
         "### 需要真正记住的内容",
         "### 用自己的话讲清楚",
@@ -146,6 +159,68 @@ def section(text: str, heading: str, next_heading: str | None) -> str:
     return text[start:end].strip()
 
 
+def load_block_layouts(
+    path: Path,
+    *,
+    stage_label: str,
+    patch_paths: set[str],
+) -> tuple[BlockLayout, ...]:
+    data = tomllib.loads(path.read_text())
+    raw_blocks = data.get("blocks")
+    if not isinstance(raw_blocks, list) or not raw_blocks:
+        raise ValueError(f"{stage_label}: layout.toml requires at least one [[blocks]] entry")
+
+    blocks: list[BlockLayout] = []
+    for index, raw in enumerate(raw_blocks, start=1):
+        if not isinstance(raw, dict):
+            raise ValueError(f"{stage_label}: block {index} must be a table")
+        required = ("id", "title_en", "title_zh", "summary_en", "summary_zh", "files")
+        missing = [field for field in required if field not in raw]
+        if missing:
+            raise ValueError(f"{stage_label}: block {index} missing {missing}")
+        block_id = raw["id"]
+        if not isinstance(block_id, str) or not re.fullmatch(r"[a-z0-9-]+", block_id):
+            raise ValueError(f"{stage_label}: block {index} has invalid id")
+        strings = {field: raw[field] for field in required[1:-1]}
+        if any(not isinstance(value, str) or not value.strip() for value in strings.values()):
+            raise ValueError(f"{stage_label}: block {block_id} has an empty localized field")
+        files = raw["files"]
+        if (
+            not isinstance(files, list)
+            or not files
+            or any(not isinstance(item, str) or not item for item in files)
+        ):
+            raise ValueError(f"{stage_label}: block {block_id} requires a non-empty file list")
+        supporting = raw.get("supporting", False)
+        if not isinstance(supporting, bool):
+            raise ValueError(f"{stage_label}: block {block_id} supporting must be boolean")
+        blocks.append(
+            BlockLayout(
+                id=block_id,
+                title_en=raw["title_en"].strip(),
+                title_zh=raw["title_zh"].strip(),
+                summary_en=raw["summary_en"].strip(),
+                summary_zh=raw["summary_zh"].strip(),
+                files=tuple(files),
+                supporting=supporting,
+            )
+        )
+
+    ids = [block.id for block in blocks]
+    if len(ids) != len(set(ids)):
+        raise ValueError(f"{stage_label}: duplicate block id")
+    owned = [file for block in blocks for file in block.files]
+    duplicates = sorted({file for file in owned if owned.count(file) > 1})
+    missing_paths = sorted(patch_paths - set(owned))
+    extra_paths = sorted(set(owned) - patch_paths)
+    if duplicates or missing_paths or extra_paths:
+        raise ValueError(
+            f"{stage_label}: block coverage mismatch; duplicates={duplicates}, "
+            f"missing={missing_paths}, extra={extra_paths}"
+        )
+    return tuple(blocks)
+
+
 def load_cards() -> list[Card]:
     cards: list[Card] = []
     for directory in sorted(STAGES_ROOT.iterdir()):
@@ -158,6 +233,8 @@ def load_cards() -> list[Card]:
         meta_match = META.search(goal)
         if title_match is None or meta_match is None:
             raise ValueError(f"invalid goal metadata: {directory}")
+        patch = (directory / "stage.patch").read_text()
+        patch_paths = {item.path for item in split_file_patches(patch)}
         cards.append(
             Card(
                 number=int(number_text),
@@ -168,7 +245,12 @@ def load_cards() -> list[Card]:
                 tests_added=int(meta_match["tests"]),
                 english=section(goal, "## English", "## 中文"),
                 chinese=section(goal, "## 中文", None),
-                patch=(directory / "stage.patch").read_text(),
+                patch=patch,
+                blocks=load_block_layouts(
+                    directory / "layout.toml",
+                    stage_label=f"stage-{number_text}",
+                    patch_paths=patch_paths,
+                ),
             )
         )
     return cards
@@ -240,7 +322,7 @@ def parse_localized_lesson(
     headings = REQUIRED_HEADINGS[chinese]
     _heading_positions(body, headings, label=label)
 
-    walkthrough_heading = "### 逐文件走读" if chinese else "### File-by-file walkthrough"
+    walkthrough_heading = "### 机制板块" if chinese else "### Mechanism blocks"
     verification_heading = "### 验证证据" if chinese else "### Verification evidence"
     walkthrough_start = body.index(walkthrough_heading) + len(walkthrough_heading)
     verification_start = body.index(verification_heading, walkthrough_start)
@@ -287,14 +369,26 @@ def parse_localized_lesson(
     )
 
 
-def _render_diff(file_patch: FilePatch, *, chinese: bool) -> str:
-    label = "文件差异：" if chinese else "File diff: "
-    lines = [f'??? note "{label}{file_patch.path}"', "    ```diff"]
-    lines.extend(
-        f"    {clean}" if (clean := line.rstrip()) else ""
-        for line in file_patch.patch.splitlines()
-    )
-    lines.append("    ```")
+def _render_block_diff(
+    block: BlockLayout,
+    patch_by_path: dict[str, FilePatch],
+    *,
+    chinese: bool,
+) -> str:
+    count = len(block.files)
+    if chinese:
+        label = f"查看本板块差异（{count} 个文件）"
+    else:
+        noun = "file" if count == 1 else "files"
+        label = f"View block diff ({count} {noun})"
+    lines = [f'??? note "{label}"']
+    for path in block.files:
+        lines.extend([f"    **`{path}`**", "", "    ```diff"])
+        lines.extend(
+            f"    {clean}" if (clean := line.rstrip()) else ""
+            for line in patch_by_path[path].patch.splitlines()
+        )
+        lines.extend(["    ```", ""])
     return "\n".join(lines)
 
 
@@ -310,20 +404,40 @@ def _collapse_deliverables(prelude: str, *, chinese: bool) -> str:
     return prelude[:heading_start] + collapsed + prelude[next_heading + 1:]
 
 
-def _render_file_section(
-    lesson: FileLesson,
-    file_patch: FilePatch,
+def _render_core_file_explanation(lesson: FileLesson, *, chinese: bool) -> str:
+    _, separator, explanation = lesson.body.partition("\n")
+    if not separator:
+        raise ValueError(f"{lesson.path}: file lesson has no explanation after its heading")
+    explanation = re.sub(
+        r"^##### (.+)$",
+        lambda match: f"**{match.group(1)}**",
+        explanation.lstrip(),
+        flags=re.MULTILINE,
+    )
+    label = "讲解" if chinese else "Explanation"
+    return f"**{label}: `{lesson.path}`**\n\n{explanation}"
+
+
+def _render_mechanism_block(
+    block: BlockLayout,
+    lesson_by_path: dict[str, FileLesson],
+    patch_by_path: dict[str, FilePatch],
     *,
     chinese: bool,
 ) -> str:
-    heading, separator, explanation = lesson.body.partition("\n")
-    if not separator:
-        raise ValueError(f"{lesson.path}: file lesson has no explanation after its heading")
-    return (
-        f"{heading}\n\n"
-        f"{_render_diff(file_patch, chinese=chinese)}\n\n"
-        f"{explanation.lstrip()}"
-    )
+    title = block.title_zh if chinese else block.title_en
+    summary = block.summary_zh if chinese else block.summary_en
+    parts = [
+        f"#### {title}",
+        summary,
+        _render_block_diff(block, patch_by_path, chinese=chinese),
+    ]
+    if not block.supporting:
+        parts.extend(
+            _render_core_file_explanation(lesson_by_path[path], chinese=chinese)
+            for path in block.files
+        )
+    return "\n\n".join(parts)
 
 
 def render_card(card: Card, *, chinese: bool) -> str:
@@ -337,13 +451,15 @@ def render_card(card: Card, *, chinese: bool) -> str:
         file_patches=file_patches,
     )
     patch_by_path = {item.path: item for item in file_patches}
-    file_sections = [
-        _render_file_section(
-            item,
-            patch_by_path[item.path],
+    lesson_by_path = {item.path: item for item in lesson.files}
+    block_sections = [
+        _render_mechanism_block(
+            block,
+            lesson_by_path,
+            patch_by_path,
             chinese=chinese,
         )
-        for item in lesson.files
+        for block in card.blocks
     ]
     link_label = "在 GitHub 查看阶段差异" if chinese else "Compare this stage on GitHub"
     checkout = (
@@ -355,7 +471,7 @@ def render_card(card: Card, *, chinese: bool) -> str:
     return (
         f"# Stage {card.number:02d} · {title}\n\n"
         f"{_collapse_deliverables(lesson.pre_walkthrough, chinese=chinese)}\n\n"
-        + "\n\n".join(file_sections)
+        + "\n\n".join(block_sections)
         + f"\n\n{lesson.post_walkthrough}\n\n"
         f"[{link_label}]({compare_link(card.number)})\n\n"
         f"{checkout}\n\n"
@@ -368,7 +484,7 @@ def render_index(cards: list[Card], *, chinese: bool) -> str:
         lines = [
             "# 自主重建",
             "",
-            "每个 Stage 都是一节可独立浏览的完整课：先理解当前问题、基本概念与必要性，再逐文件读懂关键语句，最后用验证证据和自己的话完成理解闭环。",
+            "每个 Stage 都是一节可独立浏览的完整课：先理解当前问题、基本概念与必要性，再按机制板块连接相关文件和关键语句，最后用验证证据和自己的话完成理解闭环。",
             "",
             "这是三种学习模式中的浏览器自主学习路径。按主题学习请进入[机制教程](../tutorial/index.md)；需要 CLI 互动请查看 [Agent 带教使用教程](../agent-guided.md)。",
             "",
@@ -381,7 +497,7 @@ def render_index(cards: list[Card], *, chinese: bool) -> str:
         lines = [
             "# Self-Guided Rebuild",
             "",
-            "Each Stage is a complete independent-browser lesson: understand the current problem, concepts, and necessity; read each changed file and its critical statements; then close with evidence and your own explanation.",
+            "Each Stage is a complete independent-browser lesson: understand the current problem, concepts, and necessity; connect related files and critical statements through mechanism blocks; then close with evidence and your own explanation.",
             "",
             "This is the browser-based path among MiniS3's three learning modes. Use the [Mechanism Tutorial](../tutorial/index.md) for topic-oriented study, or the [Agent-Guided usage guide](../agent-guided.md) for interactive CLI teaching.",
             "",

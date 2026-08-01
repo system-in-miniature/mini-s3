@@ -27,11 +27,15 @@ Documentation and happy-path tests cannot prove crash atomicity. Deliberate proc
 
 The test prepares old state, installs `CrashOnce`, attempts a mutation, catches `InjectedCrash`, and constructs a fresh service. It then checks visible data and disk debris. The production code does not change in this stage; the new value is confidence in the existing boundary.
 
-### File-by-file walkthrough
+### Mechanism blocks
 
-#### `tests/test_storage.py`
+#### Manifest publication failure matrix
 
-??? note "File diff: tests/test_storage.py"
+Use injected crash points to distinguish every pre-publication state from the first post-publication state.
+
+??? note "View block diff (1 file)"
+    **`tests/test_storage.py`**
+
     ```diff
     diff --git a/tests/test_storage.py b/tests/test_storage.py
     index c96a7a6..5faad97 100644
@@ -109,21 +113,24 @@ The test prepares old state, installs `CrashOnce`, attempts a mutation, catches 
     +    assert visible.etag == '"2063c1608d6e0baf80249c42e2be5804"'
     ```
 
-##### What it is and why it appears
+
+**Explanation: `tests/test_storage.py`**
+
+**What it is and why it appears**
 
 The storage integration suite gains a parameterized crash matrix around artifact and manifest publication.
 
-##### Runtime role
+**Runtime role**
 
 It observes the system only after reopening, which discards misleading in-process memory and exercises recovery cleanup.
 
-##### Key code
+**Key code**
 
 ```python
 crash_injector=CrashOnce("before_manifest_publish"),
 ```
 
-##### Statement understanding
+**Statement understanding**
 
 The named hook fixes the exact interruption boundary. Assertions after a fresh open can therefore distinguish “artifacts durable” from “state published.”
 

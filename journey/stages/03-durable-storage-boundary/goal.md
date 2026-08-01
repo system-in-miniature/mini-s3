@@ -37,7 +37,7 @@ Updating one large mutable state file makes every object write rewrite shared st
 
 `DiskStorage.persist_bucket` writes every missing immutable artifact, then calls `atomic_write` for the manifest. `atomic_write` writes a temporary file, flushes and fsyncs it, replaces the final name, and fsyncs the parent. Startup loads only manifest references and cleans everything else.
 
-### File-by-file walkthrough
+### Mechanism blocks
 
 <!-- journey-file: src/minis3/storage/atomic.py -->
 #### `src/minis3/storage/atomic.py`
@@ -171,7 +171,7 @@ MiniS3 保存不可变数据/元数据 Artifact 与较小的可变 `manifest.jso
 
 `DiskStorage.persist_bucket` 先写缺失的不可变 Artifact，再为 Manifest 调用 `atomic_write`。后者写临时文件、flush、文件 fsync、替换最终名称、父目录 fsync。启动时只加载 Manifest 引用并清理其余内容。
 
-### 逐文件走读
+### 机制板块
 
 <!-- journey-file: src/minis3/storage/atomic.py -->
 #### `src/minis3/storage/atomic.py`

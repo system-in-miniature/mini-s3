@@ -1,0 +1,7 @@
+[[blocks]]
+id = "directory-durability"
+title_en = "Directory durability and startup cleanup"
+title_zh = "目录持久性与启动清理"
+summary_en = "Lock the parent-directory fsync obligations and prove restart cleanup removes only unpublished temporary artifacts."
+summary_zh = "锁定父目录 fsync 义务，并证明启动清理只移除未发布的临时 Artifact。"
+files = ["tests/test_storage.py"]

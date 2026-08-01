@@ -1,0 +1,16 @@
+[[blocks]]
+id = "object-values"
+title_en = "Object value vocabulary"
+title_zh = "对象值词汇"
+summary_en = "Define the immutable values and executable invariants that every later Bucket, storage, and service boundary shares."
+summary_zh = "定义后续 Bucket、存储和服务边界共同使用的不可变值与可执行不变量。"
+files = ["src/minis3/errors.py", "src/minis3/model.py", "tests/test_model.py"]
+
+[[blocks]]
+id = "project-scaffold"
+title_en = "Package and tooling scaffold"
+title_zh = "包与工具脚手架"
+summary_en = "Wire the package, test environment, learner README, and reproducible dependency set without treating that setup as an object-storage mechanism."
+summary_zh = "接好包、测试环境、学习 README 与可复现依赖，但不把这些工程设置当成对象存储机制讲解。"
+files = ["README.md", "pyproject.toml", "src/minis3/__init__.py", "uv.lock"]
+supporting = true

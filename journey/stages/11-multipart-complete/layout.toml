@@ -1,0 +1,7 @@
+[[blocks]]
+id = "atomic-completion"
+title_en = "Atomic multipart completion"
+title_zh = "Multipart 原子完成"
+summary_en = "Validate receipts, assemble staged bytes, publish one object version, and remove upload state as one locked operation."
+summary_zh = "在一次带锁操作中校验回执、组装暂存字节、发布对象版本并移除上传状态。"
+files = ["src/minis3/store.py", "tests/test_multipart.py"]

@@ -32,11 +32,15 @@ Version 已有创建时间，但没有任何机制让它们过期。把时间读
 
 调用方用规则调用 `lifecycle_tick`。服务取得注入时间、深拷贝 Bucket、调用 `evaluate_expiration`、通过 Bucket 删除语义应用每个 action；有 action 时持久化并替换候选，最后返回 action 列表。
 
-### 逐文件走读
+### 机制板块
 
-#### `src/minis3/lifecycle.py`
+#### 纯生命周期策略
 
-??? note "文件差异：src/minis3/lifecycle.py"
+根据历史、有序规则和显式时间确定性选择过期 Action，不直接修改状态。
+
+??? note "查看本板块差异（1 个文件）"
+    **`src/minis3/lifecycle.py`**
+
     ```diff
     diff --git a/src/minis3/lifecycle.py b/src/minis3/lifecycle.py
     new file mode 100644
@@ -149,27 +153,34 @@ Version 已有创建时间，但没有任何机制让它们过期。把时间读
     +    return tuple(actions)
     ```
 
-##### 是什么，为什么现在需要
+
+**讲解: `src/minis3/lifecycle.py`**
+
+**是什么，为什么现在需要**
 
 这个纯策略模块定义过期规则、action 值和决策求值。
 
-##### 在运行时做什么
+**在运行时做什么**
 
 它读取历史并返回应该改变什么，从不调用存储或修改 Bucket records。
 
-##### 关键代码
+**关键代码**
 
 ```python
 return threshold is not None and now - created_at >= threshold
 ```
 
-##### 关键语句理解
+**关键语句理解**
 
 `>=` 让策略边界包含阈值且确定；`None` 表示该类别没有过期规则，不是年龄零。
 
-#### `src/minis3/store.py`
+#### 时钟驱动的生命周期执行
 
-??? note "文件差异：src/minis3/store.py"
+在锁内通过已有版本语义应用 Action，并只持久化产生变更后的 Bucket。
+
+??? note "查看本板块差异（2 个文件）"
+    **`src/minis3/store.py`**
+
     ```diff
     diff --git a/src/minis3/store.py b/src/minis3/store.py
     index e47e1ac..c2bdc5b 100644
@@ -379,89 +390,8 @@ return threshold is not None and now - created_at >= threshold
     -
     ```
 
-##### 是什么，为什么现在需要
+    **`tests/test_lifecycle.py`**
 
-服务增加把纯 action 转成持久状态迁移的显式 tick。
-
-##### 在运行时做什么
-
-它在锁内提供一个时间值与稳定快照，再复用 Bucket 删除和候选发布。
-
-##### 关键代码
-
-```python
-self._storage.persist_bucket(candidate)
-```
-
-##### 关键语句理解
-
-策略输出本身不改变任何状态。持久化候选才让过期跨重启保存；无 action tick 不必发布。
-
-#### `src/minis3/__init__.py`
-
-??? note "文件差异：src/minis3/__init__.py"
-    ```diff
-    diff --git a/src/minis3/__init__.py b/src/minis3/__init__.py
-    index 3f6e582..36bc1f3 100644
-    --- a/src/minis3/__init__.py
-    +++ b/src/minis3/__init__.py
-    @@ -1,10 +1,34 @@
-     """Public API for the MiniS3 teaching implementation."""
-    -from .errors import BucketAlreadyExists, BucketNotEmpty, InvalidContinuationToken, MiniS3Error, NoSuchBucket, NoSuchKey, NoSuchVersion
-    +
-    +from .errors import (
-    +    BucketAlreadyExists,
-    +    BucketNotEmpty,
-    +    EntityTooSmall,
-    +    InvalidContinuationToken,
-    +    InvalidPart,
-    +    InvalidPartOrder,
-    +    MiniS3Error,
-    +    NoSuchBucket,
-    +    NoSuchKey,
-    +    NoSuchUpload,
-    +    NoSuchVersion,
-    +    NotModified,
-    +    PreconditionFailed,
-    +)
-     from .bucket import SequenceCounter, VersioningState
-    +from .listing import (
-    +    ListedObject,
-    +    ListedVersion,
-    +    ListObjectsResult,
-    +    ListObjectVersionsResult,
-    +)
-     from .model import DeleteMarker, ObjectRecord, Version, content_etag
-    +from .lifecycle import (
-    +    ExpirationRule,
-    +    LifecycleAction,
-    +    LifecycleActionKind,
-    +    evaluate_expiration,
-    +)
-    +from .multipart import MIN_PART_SIZE, MultipartPart, MultipartUpload
-     from .store import MiniS3
-     from .storage import InjectedCrash
-    -from .listing import ListedObject, ListedVersion, ListObjectsResult, ListObjectVersionsResult
-    -from .errors import EntityTooSmall, InvalidPart, InvalidPartOrder, NoSuchUpload
-    -from .multipart import MIN_PART_SIZE, MultipartPart, MultipartUpload
-    -from .errors import NotModified, PreconditionFailed
-    ```
-
-##### 是什么，为什么现在需要
-
-规则与 action 类型加入公开学习 API。
-
-##### 在运行时做什么
-
-调用方可构造策略、检查返回决策，而不依赖生命周期内部实现。
-
-##### 关键语句理解
-
-包导出声明式值，实际变更仍是 `MiniS3` 操作。
-
-#### `tests/test_lifecycle.py`
-
-??? note "文件差异：tests/test_lifecycle.py"
     ```diff
     diff --git a/tests/test_lifecycle.py b/tests/test_lifecycle.py
     new file mode 100644
@@ -581,23 +511,101 @@ self._storage.persist_bucket(candidate)
     +
     ```
 
-##### 是什么，为什么现在需要
+
+**讲解: `src/minis3/store.py`**
+
+**是什么，为什么现在需要**
+
+服务增加把纯 action 转成持久状态迁移的显式 tick。
+
+**在运行时做什么**
+
+它在锁内提供一个时间值与稳定快照，再复用 Bucket 删除和候选发布。
+
+**关键代码**
+
+```python
+self._storage.persist_bucket(candidate)
+```
+
+**关键语句理解**
+
+策略输出本身不改变任何状态。持久化候选才让过期跨重启保存；无 action tick 不必发布。
+
+**讲解: `tests/test_lifecycle.py`**
+
+**是什么，为什么现在需要**
 
 四条契约覆盖纯过滤/边界、当前与非当前迁移、注入时间/重启和非法规则。
 
-##### 在运行时做什么
+**在运行时做什么**
 
 `ManualClock` 让测试主动推进时间，证明持久时间戳，而不是等待 wall time。
 
-##### 关键代码
+**关键代码**
 
 ```python
 assert evaluate_expiration(snapshot, [rule], now=9.999) == ()
 ```
 
-##### 关键语句理解
+**关键语句理解**
 
 这是刚到阈值前的边界；与 `10.0` 断言成对后，精确证明 inclusive，而不是只测明显过期对象。
+
+#### 公开导出接线
+
+导出生命周期策略值，不重复策略或执行讲解。
+
+??? note "查看本板块差异（1 个文件）"
+    **`src/minis3/__init__.py`**
+
+    ```diff
+    diff --git a/src/minis3/__init__.py b/src/minis3/__init__.py
+    index 3f6e582..36bc1f3 100644
+    --- a/src/minis3/__init__.py
+    +++ b/src/minis3/__init__.py
+    @@ -1,10 +1,34 @@
+     """Public API for the MiniS3 teaching implementation."""
+    -from .errors import BucketAlreadyExists, BucketNotEmpty, InvalidContinuationToken, MiniS3Error, NoSuchBucket, NoSuchKey, NoSuchVersion
+    +
+    +from .errors import (
+    +    BucketAlreadyExists,
+    +    BucketNotEmpty,
+    +    EntityTooSmall,
+    +    InvalidContinuationToken,
+    +    InvalidPart,
+    +    InvalidPartOrder,
+    +    MiniS3Error,
+    +    NoSuchBucket,
+    +    NoSuchKey,
+    +    NoSuchUpload,
+    +    NoSuchVersion,
+    +    NotModified,
+    +    PreconditionFailed,
+    +)
+     from .bucket import SequenceCounter, VersioningState
+    +from .listing import (
+    +    ListedObject,
+    +    ListedVersion,
+    +    ListObjectsResult,
+    +    ListObjectVersionsResult,
+    +)
+     from .model import DeleteMarker, ObjectRecord, Version, content_etag
+    +from .lifecycle import (
+    +    ExpirationRule,
+    +    LifecycleAction,
+    +    LifecycleActionKind,
+    +    evaluate_expiration,
+    +)
+    +from .multipart import MIN_PART_SIZE, MultipartPart, MultipartUpload
+     from .store import MiniS3
+     from .storage import InjectedCrash
+    -from .listing import ListedObject, ListedVersion, ListObjectsResult, ListObjectVersionsResult
+    -from .errors import EntityTooSmall, InvalidPart, InvalidPartOrder, NoSuchUpload
+    -from .multipart import MIN_PART_SIZE, MultipartPart, MultipartUpload
+    -from .errors import NotModified, PreconditionFailed
+    ```
+
 
 ### 验证证据
 

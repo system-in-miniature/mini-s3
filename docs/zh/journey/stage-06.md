@@ -32,11 +32,15 @@ Continuation token 是不透明游标。MiniS3 把 offset 与 prefix、delimiter
 
 服务锁住 Bucket 快照并调用 `list_objects`。函数选择每个 Key 的当前可见数据，应用 prefix/delimiter 投影，对组合结果排序，解码绑定查询的 offset，截取一页，并在仍有结果时生成下一 token。
 
-### 逐文件走读
+### 机制板块
 
-#### `src/minis3/listing.py`
+#### 目录式 Listing 投影
 
-??? note "文件差异：src/minis3/listing.py"
+从扁平精确 Key 派生 prefix、delimiter、分页与 continuation 行为，而不创建真实目录。
+
+??? note "查看本板块差异（3 个文件）"
+    **`src/minis3/listing.py`**
+
     ```diff
     diff --git a/src/minis3/listing.py b/src/minis3/listing.py
     index 3c40e0d..c6e95b3 100644
@@ -183,27 +187,8 @@ Continuation token 是不透明游标。MiniS3 把 offset 与 prefix、delimiter
     +
     ```
 
-##### 是什么，为什么现在需要
+    **`src/minis3/store.py`**
 
-读取侧现在除版本历史外，还拥有当前对象 Listing、delimiter 分组与分页 token。
-
-##### 在运行时做什么
-
-它不修改 Bucket records，返回不可变 `contents`、`common_prefixes` 与 `next_token`。
-
-##### 关键代码
-
-```python
-return urlsafe_b64encode(payload).decode().rstrip("=")
-```
-
-##### 关键语句理解
-
-编码隐藏游标表示；payload 还带查询形状，因此解码时能拒绝属于其他 prefix 或 delimiter 的游标。
-
-#### `src/minis3/store.py`
-
-??? note "文件差异：src/minis3/store.py"
     ```diff
     diff --git a/src/minis3/store.py b/src/minis3/store.py
     index 23ddd8e..7c82b41 100644
@@ -326,95 +311,8 @@ return urlsafe_b64encode(payload).decode().rstrip("=")
     -
     ```
 
-##### 是什么，为什么现在需要
+    **`tests/test_listing.py`**
 
-服务增加当前 Listing 的公开带锁入口。
-
-##### 在运行时做什么
-
-它提供一致 records 快照，并把全部只读投影规则委托给 `listing.py`。
-
-##### 关键代码
-
-```python
-with self._lock:
-```
-
-##### 关键语句理解
-
-纯投影也需要稳定输入。锁防止并发 PUT/DELETE 在分页构造中途改变 Key 集合。
-
-#### `src/minis3/__init__.py`
-
-??? note "文件差异：src/minis3/__init__.py"
-    ```diff
-    diff --git a/src/minis3/__init__.py b/src/minis3/__init__.py
-    index f9c1adf..1a69ac7 100644
-    --- a/src/minis3/__init__.py
-    +++ b/src/minis3/__init__.py
-    @@ -1,7 +1,43 @@
-     """Public API for the MiniS3 teaching implementation."""
-    -from .errors import BucketAlreadyExists, BucketNotEmpty, InvalidContinuationToken, MiniS3Error, NoSuchBucket, NoSuchKey, NoSuchVersion
-    +
-    +from .errors import (
-    +    BucketAlreadyExists,
-    +    BucketNotEmpty,
-    +    InvalidContinuationToken,
-    +    MiniS3Error,
-    +    NoSuchBucket,
-    +    NoSuchKey,
-    +    NoSuchVersion,
-    +)
-     from .bucket import SequenceCounter, VersioningState
-    +from .listing import (
-    +    ListedObject,
-    +    ListedVersion,
-    +    ListObjectsResult,
-    +    ListObjectVersionsResult,
-    +)
-     from .model import DeleteMarker, ObjectRecord, Version, content_etag
-     from .store import MiniS3
-     from .storage import InjectedCrash
-    -from .listing import ListedVersion, ListObjectVersionsResult
-    +
-    +__all__ = [
-    +    "BucketAlreadyExists",
-    +    "BucketNotEmpty",
-    +    "DeleteMarker",
-    +    "ListedObject",
-    +    "ListedVersion",
-    +    "ListObjectsResult",
-    +    "ListObjectVersionsResult",
-    +    "MiniS3",
-    +    "InvalidContinuationToken",
-    +    "InjectedCrash",
-    +    "MiniS3Error",
-    +    "NoSuchBucket",
-    +    "NoSuchKey",
-    +    "NoSuchVersion",
-    +    "ObjectRecord",
-    +    "SequenceCounter",
-    +    "Version",
-    +    "VersioningState",
-    +    "content_etag",
-    +]
-    ```
-
-##### 是什么，为什么现在需要
-
-包把当前 Listing 响应类型加入累积公开 API。
-
-##### 在运行时做什么
-
-调用方只需依赖一个受支持导入面；它不计算前缀或 token。
-
-##### 关键语句理解
-
-显式 `__all__` 开始记录累积的公开名称，避免意外导出全部内部 helper。
-
-#### `tests/test_listing.py`
-
-??? note "文件差异：tests/test_listing.py"
     ```diff
     diff --git a/tests/test_listing.py b/tests/test_listing.py
     new file mode 100644
@@ -517,23 +415,127 @@ with self._lock:
     +        )
     ```
 
-##### 是什么，为什么现在需要
+
+**讲解: `src/minis3/listing.py`**
+
+**是什么，为什么现在需要**
+
+读取侧现在除版本历史外，还拥有当前对象 Listing、delimiter 分组与分页 token。
+
+**在运行时做什么**
+
+它不修改 Bucket records，返回不可变 `contents`、`common_prefixes` 与 `next_token`。
+
+**关键代码**
+
+```python
+return urlsafe_b64encode(payload).decode().rstrip("=")
+```
+
+**关键语句理解**
+
+编码隐藏游标表示；payload 还带查询形状，因此解码时能拒绝属于其他 prefix 或 delimiter 的游标。
+
+**讲解: `src/minis3/store.py`**
+
+**是什么，为什么现在需要**
+
+服务增加当前 Listing 的公开带锁入口。
+
+**在运行时做什么**
+
+它提供一致 records 快照，并把全部只读投影规则委托给 `listing.py`。
+
+**关键代码**
+
+```python
+with self._lock:
+```
+
+**关键语句理解**
+
+纯投影也需要稳定输入。锁防止并发 PUT/DELETE 在分页构造中途改变 Key 集合。
+
+**讲解: `tests/test_listing.py`**
+
+**是什么，为什么现在需要**
 
 五条契约覆盖目录幻觉、组合分页、Marker 隐藏、版本展开和无效 token。
 
-##### 在运行时做什么
+**在运行时做什么**
 
 它们通过 `MiniS3` 建立状态并观察公开结果，把模型语义连接到最终读取视图。
 
-##### 关键代码
+**关键代码**
 
 ```python
 assert root.common_prefixes == ("photos/",)
 ```
 
-##### 关键语句理解
+**关键语句理解**
 
 多个扁平 Key 在根视图中折叠成一个投影前缀；这个 tuple 不表示存储了 `photos/` 对象或目录。
+
+#### 公开导出接线
+
+导出 Listing 值，同时让投影语义继续集中在核心板块。
+
+??? note "查看本板块差异（1 个文件）"
+    **`src/minis3/__init__.py`**
+
+    ```diff
+    diff --git a/src/minis3/__init__.py b/src/minis3/__init__.py
+    index f9c1adf..1a69ac7 100644
+    --- a/src/minis3/__init__.py
+    +++ b/src/minis3/__init__.py
+    @@ -1,7 +1,43 @@
+     """Public API for the MiniS3 teaching implementation."""
+    -from .errors import BucketAlreadyExists, BucketNotEmpty, InvalidContinuationToken, MiniS3Error, NoSuchBucket, NoSuchKey, NoSuchVersion
+    +
+    +from .errors import (
+    +    BucketAlreadyExists,
+    +    BucketNotEmpty,
+    +    InvalidContinuationToken,
+    +    MiniS3Error,
+    +    NoSuchBucket,
+    +    NoSuchKey,
+    +    NoSuchVersion,
+    +)
+     from .bucket import SequenceCounter, VersioningState
+    +from .listing import (
+    +    ListedObject,
+    +    ListedVersion,
+    +    ListObjectsResult,
+    +    ListObjectVersionsResult,
+    +)
+     from .model import DeleteMarker, ObjectRecord, Version, content_etag
+     from .store import MiniS3
+     from .storage import InjectedCrash
+    -from .listing import ListedVersion, ListObjectVersionsResult
+    +
+    +__all__ = [
+    +    "BucketAlreadyExists",
+    +    "BucketNotEmpty",
+    +    "DeleteMarker",
+    +    "ListedObject",
+    +    "ListedVersion",
+    +    "ListObjectsResult",
+    +    "ListObjectVersionsResult",
+    +    "MiniS3",
+    +    "InvalidContinuationToken",
+    +    "InjectedCrash",
+    +    "MiniS3Error",
+    +    "NoSuchBucket",
+    +    "NoSuchKey",
+    +    "NoSuchVersion",
+    +    "ObjectRecord",
+    +    "SequenceCounter",
+    +    "Version",
+    +    "VersioningState",
+    +    "content_etag",
+    +]
+    ```
+
 
 ### 验证证据
 

@@ -37,7 +37,7 @@ Locking only Bucket or only disk is insufficient because a public mutation spans
 
 `put_object` acquires the lock, resolves a Bucket, copies it, delegates PUT to the candidate, persists the candidate, swaps it into `_buckets`, and returns the Version. GET and HEAD read under the same lock; HEAD reuses GET because this protocol-free model returns the same metadata value.
 
-### File-by-file walkthrough
+### Mechanism blocks
 
 <!-- journey-file: src/minis3/store.py -->
 #### `src/minis3/store.py`
@@ -169,7 +169,7 @@ The service owns orchestration and locking; Bucket owns domain transitions; stor
 
 `put_object` 加锁、解析 Bucket、复制候选、把 PUT 委托给候选、持久化候选、替换 `_buckets`，最后返回 Version。GET/HEAD 在同一把锁下读取；HEAD 复用 GET，因为当前协议无关模型返回相同元数据值。
 
-### 逐文件走读
+### 机制板块
 
 <!-- journey-file: src/minis3/store.py -->
 #### `src/minis3/store.py`

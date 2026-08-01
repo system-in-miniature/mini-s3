@@ -32,11 +32,15 @@ Locking only Bucket or only disk is insufficient because a public mutation spans
 
 `put_object` acquires the lock, resolves a Bucket, copies it, delegates PUT to the candidate, persists the candidate, swaps it into `_buckets`, and returns the Version. GET and HEAD read under the same lock; HEAD reuses GET because this protocol-free model returns the same metadata value.
 
-### File-by-file walkthrough
+### Mechanism blocks
 
-#### `src/minis3/store.py`
+#### Object service boundary
 
-??? note "File diff: src/minis3/store.py"
+Coordinate locking, copy-on-write Bucket mutation, persistence, and public object operations behind one service facade.
+
+??? note "View block diff (3 files)"
+    **`src/minis3/store.py`**
+
     ```diff
     diff --git a/src/minis3/store.py b/src/minis3/store.py
     new file mode 100644
@@ -150,57 +154,8 @@ Locking only Bucket or only disk is insufficient because a public mutation spans
     +
     ```
 
-##### What it is and why it appears
+    **`tests/test_storage.py`**
 
-This is the public application boundary that coordinates locking, aggregate transitions, persistence, and recovery.
-
-##### Runtime role
-
-Every public bucket/object call enters here. Successful mutations cross Bucket then DiskStorage; reads resolve the current in-memory aggregate.
-
-##### Key code
-
-```python
-self._storage.persist_bucket(candidate)
-self._buckets[bucket] = candidate
-```
-
-##### Statement understanding
-
-Publication occurs before the candidate becomes the process-visible Bucket. Reversing these lines would let a failed disk write leak state that disappears after restart.
-
-#### `src/minis3/__init__.py`
-
-??? note "File diff: src/minis3/__init__.py"
-    ```diff
-    diff --git a/src/minis3/__init__.py b/src/minis3/__init__.py
-    index 8a3d1c7..11378e1 100644
-    --- a/src/minis3/__init__.py
-    +++ b/src/minis3/__init__.py
-    @@ -1,3 +1,6 @@
-     """Public API for the MiniS3 teaching implementation."""
-     from .errors import BucketAlreadyExists, BucketNotEmpty, InvalidContinuationToken, MiniS3Error, NoSuchBucket, NoSuchKey, NoSuchVersion
-    +from .bucket import SequenceCounter, VersioningState
-     from .model import DeleteMarker, ObjectRecord, Version, content_etag
-    +from .store import MiniS3
-    +from .storage import InjectedCrash
-    ```
-
-##### What it is and why it appears
-
-The package now exports `MiniS3` and versioning state in addition to the value model.
-
-##### Runtime role
-
-It establishes the intended entry point; callers no longer need to assemble Bucket and DiskStorage themselves.
-
-##### Statement understanding
-
-Public export is API wiring, not proof of runtime behavior. The service tests below provide that evidence.
-
-#### `tests/test_storage.py`
-
-??? note "File diff: tests/test_storage.py"
     ```diff
     diff --git a/tests/test_storage.py b/tests/test_storage.py
     new file mode 100644
@@ -242,27 +197,8 @@ Public export is API wiring, not proof of runtime behavior. The service tests be
     +    assert second.version_id != first.version_id
     ```
 
-##### What it is and why it appears
+    **`tests/test_versioning.py`**
 
-These contracts exercise persistence through the public service, including restart, crash injection, bucket deletion, and sequence recovery.
-
-##### Runtime role
-
-They detect gaps between in-memory success and reopened state. This is where orchestration and storage meet.
-
-##### Key code
-
-```python
-assert reopened.get_object("b", "k", version_id=first.version_id).body == b"one"
-```
-
-##### Statement understanding
-
-Addressing the old version after constructing `reopened` proves both the version history and its bytes survived publication; checking only the latest value would be weaker.
-
-#### `tests/test_versioning.py`
-
-??? note "File diff: tests/test_versioning.py"
     ```diff
     diff --git a/tests/test_versioning.py b/tests/test_versioning.py
     new file mode 100644
@@ -381,23 +317,89 @@ Addressing the old version after constructing `reopened` proves both the version
     +        store.delete_bucket("b")
     ```
 
-##### What it is and why it appears
+
+**Explanation: `src/minis3/store.py`**
+
+**What it is and why it appears**
+
+This is the public application boundary that coordinates locking, aggregate transitions, persistence, and recovery.
+
+**Runtime role**
+
+Every public bucket/object call enters here. Successful mutations cross Bucket then DiskStorage; reads resolve the current in-memory aggregate.
+
+**Key code**
+
+```python
+self._storage.persist_bucket(candidate)
+self._buckets[bucket] = candidate
+```
+
+**Statement understanding**
+
+Publication occurs before the candidate becomes the process-visible Bucket. Reversing these lines would let a failed disk write leak state that disappears after restart.
+
+**Explanation: `tests/test_storage.py`**
+
+**What it is and why it appears**
+
+These contracts exercise persistence through the public service, including restart, crash injection, bucket deletion, and sequence recovery.
+
+**Runtime role**
+
+They detect gaps between in-memory success and reopened state. This is where orchestration and storage meet.
+
+**Key code**
+
+```python
+assert reopened.get_object("b", "k", version_id=first.version_id).body == b"one"
+```
+
+**Statement understanding**
+
+Addressing the old version after constructing `reopened` proves both the version history and its bytes survived publication; checking only the latest value would be weaker.
+
+**Explanation: `tests/test_versioning.py`**
+
+**What it is and why it appears**
 
 This file locks the full public versioning state machine and DELETE meanings.
 
-##### Runtime role
+**Runtime role**
 
 It distinguishes unversioned deletion, marker creation, specific-version deletion, latest-marker 404 behavior, and retained named history.
 
-##### Key code
+**Key code**
 
 ```python
 assert bucket.get("k", historical.version_id) == historical
 ```
 
-##### Statement understanding
+**Statement understanding**
 
 The defensive case proves an unversioned delete cannot erase a named version already present in recovered or externally constructed history.
+
+#### Public export wiring
+
+Make the new service importable without giving routine package wiring its own conceptual walkthrough.
+
+??? note "View block diff (1 file)"
+    **`src/minis3/__init__.py`**
+
+    ```diff
+    diff --git a/src/minis3/__init__.py b/src/minis3/__init__.py
+    index 8a3d1c7..11378e1 100644
+    --- a/src/minis3/__init__.py
+    +++ b/src/minis3/__init__.py
+    @@ -1,3 +1,6 @@
+     """Public API for the MiniS3 teaching implementation."""
+     from .errors import BucketAlreadyExists, BucketNotEmpty, InvalidContinuationToken, MiniS3Error, NoSuchBucket, NoSuchKey, NoSuchVersion
+    +from .bucket import SequenceCounter, VersioningState
+     from .model import DeleteMarker, ObjectRecord, Version, content_etag
+    +from .store import MiniS3
+    +from .storage import InjectedCrash
+    ```
+
 
 ### Verification evidence
 

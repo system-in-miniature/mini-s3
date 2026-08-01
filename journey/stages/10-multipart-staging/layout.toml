@@ -1,0 +1,24 @@
+[[blocks]]
+id = "multipart-state"
+title_en = "Multipart state and identity"
+title_zh = "Multipart 状态与身份"
+summary_en = "Extend Bucket identity and stored values so multipart uploads can coexist with ordinary object versions."
+summary_zh = "扩展 Bucket 身份与存储值，使 Multipart 上传能与普通对象版本共存。"
+files = ["src/minis3/bucket.py", "src/minis3/model.py"]
+
+[[blocks]]
+id = "durable-staging"
+title_en = "Durable staging orchestration"
+title_zh = "持久暂存编排"
+summary_en = "Coordinate service calls and disk layout so each uploaded Part is durably staged but remains invisible as an object."
+summary_zh = "协调服务调用与磁盘布局，让每个 Part 持久暂存但仍不作为对象可见。"
+files = ["src/minis3/storage/disk.py", "src/minis3/store.py", "tests/test_multipart.py"]
+
+[[blocks]]
+id = "public-wiring"
+title_en = "Public export wiring"
+title_zh = "公开导出接线"
+summary_en = "Expose multipart values without duplicating the state and staging explanations above."
+summary_zh = "导出 Multipart 值，不重复上面的状态与暂存讲解。"
+files = ["src/minis3/__init__.py"]
+supporting = true

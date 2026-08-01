@@ -27,11 +27,15 @@
 
 测试用 recorder 替换 `fsync_directory`，执行真实目录/存储创建，再断言父级顺序。另一个重启场景植入 stray 临时文件，重开存储后要求清理它，同时已发布对象仍可读取。
 
-### 逐文件走读
+### 机制板块
 
-#### `tests/test_storage.py`
+#### 目录持久性与启动清理
 
-??? note "文件差异：tests/test_storage.py"
+锁定父目录 fsync 义务，并证明启动清理只移除未发布的临时 Artifact。
+
+??? note "查看本板块差异（1 个文件）"
+    **`tests/test_storage.py`**
+
     ```diff
     diff --git a/tests/test_storage.py b/tests/test_storage.py
     index 5faad97..afc9a8a 100644
@@ -107,21 +111,24 @@
     +    assert not stray.exists()
     ```
 
-##### 是什么，为什么现在需要
+
+**讲解: `tests/test_storage.py`**
+
+**是什么，为什么现在需要**
 
 存储套件现在检查持久化调用与启动卫生，而不只检查逻辑对象值。
 
-##### 在运行时做什么
+**在运行时做什么**
 
 Recorder 让不可见的文件系统义务变得可观察；重启场景按 Manifest 权威验证清理决策。
 
-##### 关键代码
+**关键代码**
 
 ```python
 assert calls == [tmp_path, tmp_path / "one", tmp_path / "one" / "two"]
 ```
 
-##### 关键语句理解
+**关键语句理解**
 
 每个新目录项存放在其父目录中，因此期望列表沿祖先链前进，而不是重复最终路径。这条断言锁定持久化链。
 

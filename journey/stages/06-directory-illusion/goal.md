@@ -37,7 +37,7 @@ Exposing a raw numeric offset leaks implementation and allows query mismatch. Tr
 
 The service locks a Bucket snapshot and calls `list_objects`. The function selects each key's current visible data, applies prefix and delimiter projection, sorts the combined entries, decodes a query-bound offset, slices one page, and creates the next opaque token when more entries remain.
 
-### File-by-file walkthrough
+### Mechanism blocks
 
 <!-- journey-file: src/minis3/listing.py -->
 #### `src/minis3/listing.py`
@@ -168,7 +168,7 @@ Continuation token 是不透明游标。MiniS3 把 offset 与 prefix、delimiter
 
 服务锁住 Bucket 快照并调用 `list_objects`。函数选择每个 Key 的当前可见数据，应用 prefix/delimiter 投影，对组合结果排序，解码绑定查询的 offset，截取一页，并在仍有结果时生成下一 token。
 
-### 逐文件走读
+### 机制板块
 
 <!-- journey-file: src/minis3/listing.py -->
 #### `src/minis3/listing.py`

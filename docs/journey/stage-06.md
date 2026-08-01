@@ -32,11 +32,15 @@ Exposing a raw numeric offset leaks implementation and allows query mismatch. Tr
 
 The service locks a Bucket snapshot and calls `list_objects`. The function selects each key's current visible data, applies prefix and delimiter projection, sorts the combined entries, decodes a query-bound offset, slices one page, and creates the next opaque token when more entries remain.
 
-### File-by-file walkthrough
+### Mechanism blocks
 
-#### `src/minis3/listing.py`
+#### Directory-like listing projection
 
-??? note "File diff: src/minis3/listing.py"
+Derive prefix, delimiter, pagination, and continuation behavior from flat exact keys without creating directories.
+
+??? note "View block diff (3 files)"
+    **`src/minis3/listing.py`**
+
     ```diff
     diff --git a/src/minis3/listing.py b/src/minis3/listing.py
     index 3c40e0d..c6e95b3 100644
@@ -183,27 +187,8 @@ The service locks a Bucket snapshot and calls `list_objects`. The function selec
     +
     ```
 
-##### What it is and why it appears
+    **`src/minis3/store.py`**
 
-The read-side projection now owns current-object listing, delimiter grouping, and pagination tokens alongside version listing.
-
-##### Runtime role
-
-It consumes Bucket records without mutation and returns immutable `contents`, `common_prefixes`, and `next_token`.
-
-##### Key code
-
-```python
-return urlsafe_b64encode(payload).decode().rstrip("=")
-```
-
-##### Statement understanding
-
-The token hides the cursor representation. Its payload also contains the query shape, so decoding can reject a cursor that belongs to another prefix or delimiter.
-
-#### `src/minis3/store.py`
-
-??? note "File diff: src/minis3/store.py"
     ```diff
     diff --git a/src/minis3/store.py b/src/minis3/store.py
     index 23ddd8e..7c82b41 100644
@@ -326,95 +311,8 @@ The token hides the cursor representation. Its payload also contains the query s
     -
     ```
 
-##### What it is and why it appears
+    **`tests/test_listing.py`**
 
-The service adds the public locked entry for current listing.
-
-##### Runtime role
-
-It supplies one consistent records snapshot and delegates all read-only projection rules to `listing.py`.
-
-##### Key code
-
-```python
-with self._lock:
-```
-
-##### Statement understanding
-
-Even a pure projection needs a stable input snapshot. The lock prevents a concurrent PUT or DELETE from changing keys halfway through pagination construction.
-
-#### `src/minis3/__init__.py`
-
-??? note "File diff: src/minis3/__init__.py"
-    ```diff
-    diff --git a/src/minis3/__init__.py b/src/minis3/__init__.py
-    index f9c1adf..1a69ac7 100644
-    --- a/src/minis3/__init__.py
-    +++ b/src/minis3/__init__.py
-    @@ -1,7 +1,43 @@
-     """Public API for the MiniS3 teaching implementation."""
-    -from .errors import BucketAlreadyExists, BucketNotEmpty, InvalidContinuationToken, MiniS3Error, NoSuchBucket, NoSuchKey, NoSuchVersion
-    +
-    +from .errors import (
-    +    BucketAlreadyExists,
-    +    BucketNotEmpty,
-    +    InvalidContinuationToken,
-    +    MiniS3Error,
-    +    NoSuchBucket,
-    +    NoSuchKey,
-    +    NoSuchVersion,
-    +)
-     from .bucket import SequenceCounter, VersioningState
-    +from .listing import (
-    +    ListedObject,
-    +    ListedVersion,
-    +    ListObjectsResult,
-    +    ListObjectVersionsResult,
-    +)
-     from .model import DeleteMarker, ObjectRecord, Version, content_etag
-     from .store import MiniS3
-     from .storage import InjectedCrash
-    -from .listing import ListedVersion, ListObjectVersionsResult
-    +
-    +__all__ = [
-    +    "BucketAlreadyExists",
-    +    "BucketNotEmpty",
-    +    "DeleteMarker",
-    +    "ListedObject",
-    +    "ListedVersion",
-    +    "ListObjectsResult",
-    +    "ListObjectVersionsResult",
-    +    "MiniS3",
-    +    "InvalidContinuationToken",
-    +    "InjectedCrash",
-    +    "MiniS3Error",
-    +    "NoSuchBucket",
-    +    "NoSuchKey",
-    +    "NoSuchVersion",
-    +    "ObjectRecord",
-    +    "SequenceCounter",
-    +    "Version",
-    +    "VersioningState",
-    +    "content_etag",
-    +]
-    ```
-
-##### What it is and why it appears
-
-The package exports current-list response types together with the accumulated public API.
-
-##### Runtime role
-
-It keeps callers on one supported import surface; it does not calculate prefixes or tokens.
-
-##### Statement understanding
-
-The explicit `__all__` begins documenting which accumulated names are public rather than exporting every imported helper accidentally.
-
-#### `tests/test_listing.py`
-
-??? note "File diff: tests/test_listing.py"
     ```diff
     diff --git a/tests/test_listing.py b/tests/test_listing.py
     new file mode 100644
@@ -517,23 +415,127 @@ The explicit `__all__` begins documenting which accumulated names are public rat
     +        )
     ```
 
-##### What it is and why it appears
+
+**Explanation: `src/minis3/listing.py`**
+
+**What it is and why it appears**
+
+The read-side projection now owns current-object listing, delimiter grouping, and pagination tokens alongside version listing.
+
+**Runtime role**
+
+It consumes Bucket records without mutation and returns immutable `contents`, `common_prefixes`, and `next_token`.
+
+**Key code**
+
+```python
+return urlsafe_b64encode(payload).decode().rstrip("=")
+```
+
+**Statement understanding**
+
+The token hides the cursor representation. Its payload also contains the query shape, so decoding can reject a cursor that belongs to another prefix or delimiter.
+
+**Explanation: `src/minis3/store.py`**
+
+**What it is and why it appears**
+
+The service adds the public locked entry for current listing.
+
+**Runtime role**
+
+It supplies one consistent records snapshot and delegates all read-only projection rules to `listing.py`.
+
+**Key code**
+
+```python
+with self._lock:
+```
+
+**Statement understanding**
+
+Even a pure projection needs a stable input snapshot. The lock prevents a concurrent PUT or DELETE from changing keys halfway through pagination construction.
+
+**Explanation: `tests/test_listing.py`**
+
+**What it is and why it appears**
 
 Five contracts cover directory illusion, combined pagination, marker hiding, flattened version history, and invalid tokens.
 
-##### Runtime role
+**Runtime role**
 
 They build state through `MiniS3` and inspect public results, so the examples connect model semantics to the final read view.
 
-##### Key code
+**Key code**
 
 ```python
 assert root.common_prefixes == ("photos/",)
 ```
 
-##### Statement understanding
+**Statement understanding**
 
 Several flat keys collapse into one projected prefix at the root. The tuple does not mean a `photos/` object or directory was stored.
+
+#### Public export wiring
+
+Expose listing values while keeping all projection semantics in the core block.
+
+??? note "View block diff (1 file)"
+    **`src/minis3/__init__.py`**
+
+    ```diff
+    diff --git a/src/minis3/__init__.py b/src/minis3/__init__.py
+    index f9c1adf..1a69ac7 100644
+    --- a/src/minis3/__init__.py
+    +++ b/src/minis3/__init__.py
+    @@ -1,7 +1,43 @@
+     """Public API for the MiniS3 teaching implementation."""
+    -from .errors import BucketAlreadyExists, BucketNotEmpty, InvalidContinuationToken, MiniS3Error, NoSuchBucket, NoSuchKey, NoSuchVersion
+    +
+    +from .errors import (
+    +    BucketAlreadyExists,
+    +    BucketNotEmpty,
+    +    InvalidContinuationToken,
+    +    MiniS3Error,
+    +    NoSuchBucket,
+    +    NoSuchKey,
+    +    NoSuchVersion,
+    +)
+     from .bucket import SequenceCounter, VersioningState
+    +from .listing import (
+    +    ListedObject,
+    +    ListedVersion,
+    +    ListObjectsResult,
+    +    ListObjectVersionsResult,
+    +)
+     from .model import DeleteMarker, ObjectRecord, Version, content_etag
+     from .store import MiniS3
+     from .storage import InjectedCrash
+    -from .listing import ListedVersion, ListObjectVersionsResult
+    +
+    +__all__ = [
+    +    "BucketAlreadyExists",
+    +    "BucketNotEmpty",
+    +    "DeleteMarker",
+    +    "ListedObject",
+    +    "ListedVersion",
+    +    "ListObjectsResult",
+    +    "ListObjectVersionsResult",
+    +    "MiniS3",
+    +    "InvalidContinuationToken",
+    +    "InjectedCrash",
+    +    "MiniS3Error",
+    +    "NoSuchBucket",
+    +    "NoSuchKey",
+    +    "NoSuchVersion",
+    +    "ObjectRecord",
+    +    "SequenceCounter",
+    +    "Version",
+    +    "VersioningState",
+    +    "content_etag",
+    +]
+    ```
+
 
 ### Verification evidence
 

@@ -27,11 +27,15 @@ Parity 命令在全新树中重放每个 patch，再与 main 比较字节。即�
 
 用户 import 通过 `src/minis3/__init__.py` 解析。另一边，`build_journey.py --check` 从空 Journey 根开始应用 15 个 canonical patch，收集 Journey 自有测试，再把重建字节与当前 main 比较，不移动 refs。
 
-### 逐文件走读
+### 机制板块
 
-#### `src/minis3/__init__.py`
+#### 显式公开 API 与 Parity 边界
 
-??? note "文件差异：src/minis3/__init__.py"
+把包导出变成有意的兼容契约，并用精确重建证据完成 Journey 收官。
+
+??? note "查看本板块差异（1 个文件）"
+    **`src/minis3/__init__.py`**
+
     ```diff
     diff --git a/src/minis3/__init__.py b/src/minis3/__init__.py
     index 36bc1f3..86d6755 100644
@@ -78,21 +82,24 @@ Parity 命令在全新树中重放每个 patch，再与 main 比较字节。即�
     +]
     ```
 
-##### 是什么，为什么现在需要
+
+**讲解: `src/minis3/__init__.py`**
+
+**是什么，为什么现在需要**
 
 包根得到最终显式导出列表，覆盖值、服务、策略、结果与公开失败。
 
-##### 在运行时做什么
+**在运行时做什么**
 
 它是稳定的学习者导入边界；内部存储 helper 和实现函数继续不公开。
 
-##### 关键代码
+**关键代码**
 
 ```python
 __all__ = [
 ```
 
-##### 关键语句理解
+**关键语句理解**
 
 这份列表把隐式 imports 集合变成有意契约；以后在内部增加 helper，也不会意外变成公开 API。
 

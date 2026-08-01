@@ -32,7 +32,7 @@ Documentation and happy-path tests cannot prove crash atomicity. Deliberate proc
 
 The test prepares old state, installs `CrashOnce`, attempts a mutation, catches `InjectedCrash`, and constructs a fresh service. It then checks visible data and disk debris. The production code does not change in this stage; the new value is confidence in the existing boundary.
 
-### File-by-file walkthrough
+### Mechanism blocks
 
 <!-- journey-file: tests/test_storage.py -->
 #### `tests/test_storage.py`
@@ -101,7 +101,7 @@ Stage 03 描述了最后发布的存储，正常重启也通过了，但这还�
 
 测试准备旧状态、安装 `CrashOnce`、尝试变更、捕获 `InjectedCrash`，再创建全新服务。随后检查可见数据与磁盘残留。本 Stage 不改生产代码，新增的是对现有边界的可信证据。
 
-### 逐文件走读
+### 机制板块
 
 <!-- journey-file: tests/test_storage.py -->
 #### `tests/test_storage.py`

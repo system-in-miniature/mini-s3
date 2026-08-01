@@ -36,7 +36,7 @@ Validation is a domain rule shared by any future storage adapter. Keeping it pur
 
 `validate_completion` normalizes each client entry, enforces strictly increasing part numbers, resolves each staged part, compares ETags, checks every nonfinal part size, then returns the selected parts and composite ETag. It performs no I/O and mutation.
 
-### File-by-file walkthrough
+### Mechanism blocks
 
 <!-- journey-file: src/minis3/errors.py -->
 #### `src/minis3/errors.py`
@@ -151,7 +151,7 @@ Multipart ETag 不是组装后 Body 的 MD5。MiniS3 把每个带引号 Part MD5
 
 `validate_completion` 规范化客户端条目、要求 Part 编号严格递增、解析每个暂存 Part、比较 ETag、检查所有非末 Part 尺寸，最后返回选中 Part 与组合 ETag。它不执行 I/O 和变更。
 
-### 逐文件走读
+### 机制板块
 
 <!-- journey-file: src/minis3/errors.py -->
 #### `src/minis3/errors.py`

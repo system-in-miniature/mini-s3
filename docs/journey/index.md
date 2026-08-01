@@ -1,6 +1,6 @@
 # Self-Guided Rebuild
 
-Each Stage is a complete independent-browser lesson: understand the current problem, concepts, and necessity; read each changed file and its critical statements; then close with evidence and your own explanation.
+Each Stage is a complete independent-browser lesson: understand the current problem, concepts, and necessity; connect related files and critical statements through mechanism blocks; then close with evidence and your own explanation.
 
 This is the browser-based path among MiniS3's three learning modes. Use the [Mechanism Tutorial](../tutorial/index.md) for topic-oriented study, or the [Agent-Guided usage guide](../agent-guided.md) for interactive CLI teaching.
 

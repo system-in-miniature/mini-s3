@@ -32,11 +32,15 @@ Pure evaluation can be reasoned about and repeated without side effects. An inje
 
 The caller invokes `lifecycle_tick` with rules. The service captures injected time, deep-copies the Bucket, calls `evaluate_expiration`, applies each action through Bucket deletion semantics, persists the candidate if actions exist, swaps it, and returns the action list.
 
-### File-by-file walkthrough
+### Mechanism blocks
 
-#### `src/minis3/lifecycle.py`
+#### Pure lifecycle policy
 
-??? note "File diff: src/minis3/lifecycle.py"
+Select deterministic expiration actions from histories, ordered rules, and an explicit time without mutating state.
+
+??? note "View block diff (1 file)"
+    **`src/minis3/lifecycle.py`**
+
     ```diff
     diff --git a/src/minis3/lifecycle.py b/src/minis3/lifecycle.py
     new file mode 100644
@@ -149,27 +153,34 @@ The caller invokes `lifecycle_tick` with rules. The service captures injected ti
     +    return tuple(actions)
     ```
 
-##### What it is and why it appears
+
+**Explanation: `src/minis3/lifecycle.py`**
+
+**What it is and why it appears**
 
 This pure policy module defines expiration rules, action values, and decision evaluation.
 
-##### Runtime role
+**Runtime role**
 
 It reads histories and returns what should change; it never calls storage or mutates Bucket records.
 
-##### Key code
+**Key code**
 
 ```python
 return threshold is not None and now - created_at >= threshold
 ```
 
-##### Statement understanding
+**Statement understanding**
 
 `>=` makes the policy boundary inclusive and deterministic. `None` means that category has no expiration rule, not age zero.
 
-#### `src/minis3/store.py`
+#### Clocked lifecycle application
 
-??? note "File diff: src/minis3/store.py"
+Apply selected actions through existing version semantics under a lock, then persist only the resulting changed Bucket.
+
+??? note "View block diff (2 files)"
+    **`src/minis3/store.py`**
+
     ```diff
     diff --git a/src/minis3/store.py b/src/minis3/store.py
     index e47e1ac..c2bdc5b 100644
@@ -379,89 +390,8 @@ return threshold is not None and now - created_at >= threshold
     -
     ```
 
-##### What it is and why it appears
+    **`tests/test_lifecycle.py`**
 
-The service adds the explicit tick that converts pure actions into durable state transitions.
-
-##### Runtime role
-
-It supplies one time value and stable snapshot under the lock, then reuses Bucket deletion and candidate publication.
-
-##### Key code
-
-```python
-self._storage.persist_bucket(candidate)
-```
-
-##### Statement understanding
-
-Policy output alone changes nothing. Persisting the candidate is what makes an applied expiration survive restart; no-action ticks avoid needless publication.
-
-#### `src/minis3/__init__.py`
-
-??? note "File diff: src/minis3/__init__.py"
-    ```diff
-    diff --git a/src/minis3/__init__.py b/src/minis3/__init__.py
-    index 3f6e582..36bc1f3 100644
-    --- a/src/minis3/__init__.py
-    +++ b/src/minis3/__init__.py
-    @@ -1,10 +1,34 @@
-     """Public API for the MiniS3 teaching implementation."""
-    -from .errors import BucketAlreadyExists, BucketNotEmpty, InvalidContinuationToken, MiniS3Error, NoSuchBucket, NoSuchKey, NoSuchVersion
-    +
-    +from .errors import (
-    +    BucketAlreadyExists,
-    +    BucketNotEmpty,
-    +    EntityTooSmall,
-    +    InvalidContinuationToken,
-    +    InvalidPart,
-    +    InvalidPartOrder,
-    +    MiniS3Error,
-    +    NoSuchBucket,
-    +    NoSuchKey,
-    +    NoSuchUpload,
-    +    NoSuchVersion,
-    +    NotModified,
-    +    PreconditionFailed,
-    +)
-     from .bucket import SequenceCounter, VersioningState
-    +from .listing import (
-    +    ListedObject,
-    +    ListedVersion,
-    +    ListObjectsResult,
-    +    ListObjectVersionsResult,
-    +)
-     from .model import DeleteMarker, ObjectRecord, Version, content_etag
-    +from .lifecycle import (
-    +    ExpirationRule,
-    +    LifecycleAction,
-    +    LifecycleActionKind,
-    +    evaluate_expiration,
-    +)
-    +from .multipart import MIN_PART_SIZE, MultipartPart, MultipartUpload
-     from .store import MiniS3
-     from .storage import InjectedCrash
-    -from .listing import ListedObject, ListedVersion, ListObjectsResult, ListObjectVersionsResult
-    -from .errors import EntityTooSmall, InvalidPart, InvalidPartOrder, NoSuchUpload
-    -from .multipart import MIN_PART_SIZE, MultipartPart, MultipartUpload
-    -from .errors import NotModified, PreconditionFailed
-    ```
-
-##### What it is and why it appears
-
-Rules and action types join the public learning API.
-
-##### Runtime role
-
-Callers can construct policy and inspect returned decisions without depending on lifecycle internals.
-
-##### Statement understanding
-
-The package exports declarative values, while actual mutation remains a `MiniS3` operation.
-
-#### `tests/test_lifecycle.py`
-
-??? note "File diff: tests/test_lifecycle.py"
     ```diff
     diff --git a/tests/test_lifecycle.py b/tests/test_lifecycle.py
     new file mode 100644
@@ -581,23 +511,101 @@ The package exports declarative values, while actual mutation remains a `MiniS3`
     +
     ```
 
-##### What it is and why it appears
+
+**Explanation: `src/minis3/store.py`**
+
+**What it is and why it appears**
+
+The service adds the explicit tick that converts pure actions into durable state transitions.
+
+**Runtime role**
+
+It supplies one time value and stable snapshot under the lock, then reuses Bucket deletion and candidate publication.
+
+**Key code**
+
+```python
+self._storage.persist_bucket(candidate)
+```
+
+**Statement understanding**
+
+Policy output alone changes nothing. Persisting the candidate is what makes an applied expiration survive restart; no-action ticks avoid needless publication.
+
+**Explanation: `tests/test_lifecycle.py`**
+
+**What it is and why it appears**
 
 Four contracts cover pure filtering/boundaries, current versus noncurrent transitions, injected time/restart, and invalid rules.
 
-##### Runtime role
+**Runtime role**
 
 `ManualClock` lets tests advance time deliberately and prove persisted timestamps rather than waiting on wall time.
 
-##### Key code
+**Key code**
 
 ```python
 assert evaluate_expiration(snapshot, [rule], now=9.999) == ()
 ```
 
-##### Statement understanding
+**Statement understanding**
 
 This is the just-before boundary. Paired with the `10.0` assertion, it proves inclusion precisely rather than merely testing an obviously old object.
+
+#### Public export wiring
+
+Expose lifecycle policy values without duplicating their policy or execution explanation.
+
+??? note "View block diff (1 file)"
+    **`src/minis3/__init__.py`**
+
+    ```diff
+    diff --git a/src/minis3/__init__.py b/src/minis3/__init__.py
+    index 3f6e582..36bc1f3 100644
+    --- a/src/minis3/__init__.py
+    +++ b/src/minis3/__init__.py
+    @@ -1,10 +1,34 @@
+     """Public API for the MiniS3 teaching implementation."""
+    -from .errors import BucketAlreadyExists, BucketNotEmpty, InvalidContinuationToken, MiniS3Error, NoSuchBucket, NoSuchKey, NoSuchVersion
+    +
+    +from .errors import (
+    +    BucketAlreadyExists,
+    +    BucketNotEmpty,
+    +    EntityTooSmall,
+    +    InvalidContinuationToken,
+    +    InvalidPart,
+    +    InvalidPartOrder,
+    +    MiniS3Error,
+    +    NoSuchBucket,
+    +    NoSuchKey,
+    +    NoSuchUpload,
+    +    NoSuchVersion,
+    +    NotModified,
+    +    PreconditionFailed,
+    +)
+     from .bucket import SequenceCounter, VersioningState
+    +from .listing import (
+    +    ListedObject,
+    +    ListedVersion,
+    +    ListObjectsResult,
+    +    ListObjectVersionsResult,
+    +)
+     from .model import DeleteMarker, ObjectRecord, Version, content_etag
+    +from .lifecycle import (
+    +    ExpirationRule,
+    +    LifecycleAction,
+    +    LifecycleActionKind,
+    +    evaluate_expiration,
+    +)
+    +from .multipart import MIN_PART_SIZE, MultipartPart, MultipartUpload
+     from .store import MiniS3
+     from .storage import InjectedCrash
+    -from .listing import ListedObject, ListedVersion, ListObjectsResult, ListObjectVersionsResult
+    -from .errors import EntityTooSmall, InvalidPart, InvalidPartOrder, NoSuchUpload
+    -from .multipart import MIN_PART_SIZE, MultipartPart, MultipartUpload
+    -from .errors import NotModified, PreconditionFailed
+    ```
+
 
 ### Verification evidence
 

@@ -32,7 +32,7 @@ Crash safety is an end-to-end ordering property, not merely a call to `fsync` so
 
 Tests replace `fsync_directory` with a recorder, perform real directory/storage creation, and assert the ordered parents. A separate restart case plants a stray temporary file, reopens storage, and requires cleanup while the published object remains readable.
 
-### File-by-file walkthrough
+### Mechanism blocks
 
 <!-- journey-file: tests/test_storage.py -->
 #### `tests/test_storage.py`
@@ -101,7 +101,7 @@ MiniS3 makes publication survive power loss by fsyncing every parent whose direc
 
 测试用 recorder 替换 `fsync_directory`，执行真实目录/存储创建，再断言父级顺序。另一个重启场景植入 stray 临时文件，重开存储后要求清理它，同时已发布对象仍可读取。
 
-### 逐文件走读
+### 机制板块
 
 <!-- journey-file: tests/test_storage.py -->
 #### `tests/test_storage.py`

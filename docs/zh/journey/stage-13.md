@@ -33,11 +33,15 @@ Compare-and-swap 表示“只有当前身份仍等于我观察到的身份才修
 
 服务获得锁，解析当前或指定版本 ETag，执行 `require_if_match`/`require_if_none_match`，之后才读取或变更。成功 PUT 会在下一名等待写入者检查前改变 ETag。
 
-### 逐文件走读
+### 机制板块
 
-#### `src/minis3/conditional.py`
+#### 条件匹配与失败语义
 
-??? note "文件差异：src/minis3/conditional.py"
+把通配符和 ETag 列表匹配从变更中分离，并定义精确的公开失败语义。
+
+??? note "查看本板块差异（2 个文件）"
+    **`src/minis3/conditional.py`**
+
     ```diff
     diff --git a/src/minis3/conditional.py b/src/minis3/conditional.py
     new file mode 100644
@@ -82,28 +86,8 @@ Compare-and-swap 表示“只有当前身份仍等于我观察到的身份才修
     +        raise NotModified(condition)
     ```
 
-##### 是什么，为什么现在需要
+    **`src/minis3/errors.py`**
 
-这个纯策略模块解析 ETag 条件并抛出正确语义失败。
-
-##### 在运行时做什么
-
-Store 提供当前 ETag；helper 决定匹配、前置条件失败或未修改，不拥有锁和状态。
-
-##### 关键代码
-
-```python
-if condition is not None and not etag_matches(condition, current_etag):
-    raise PreconditionFailed(condition)
-```
-
-##### 关键语句理解
-
-条件缺失表示不加 guard；条件存在但不匹配必须在变更前停止。只返回可能被调用方忽略的 `False` 会削弱契约。
-
-#### `src/minis3/errors.py`
-
-??? note "文件差异：src/minis3/errors.py"
     ```diff
     diff --git a/src/minis3/errors.py b/src/minis3/errors.py
     index 9db3b4c..5f255e0 100644
@@ -123,27 +107,55 @@ if condition is not None and not etag_matches(condition, current_etag):
     +    """An If-None-Match condition matched (the HTTP 304 control outcome)."""
     ```
 
-##### 是什么，为什么现在需要
+
+**讲解: `src/minis3/conditional.py`**
+
+**是什么，为什么现在需要**
+
+这个纯策略模块解析 ETag 条件并抛出正确语义失败。
+
+**在运行时做什么**
+
+Store 提供当前 ETag；helper 决定匹配、前置条件失败或未修改，不拥有锁和状态。
+
+**关键代码**
+
+```python
+if condition is not None and not etag_matches(condition, current_etag):
+    raise PreconditionFailed(condition)
+```
+
+**关键语句理解**
+
+条件缺失表示不加 guard；条件存在但不匹配必须在变更前停止。只返回可能被调用方忽略的 `False` 会削弱契约。
+
+**讲解: `src/minis3/errors.py`**
+
+**是什么，为什么现在需要**
 
 失败词汇增加前置条件失败与未修改两个不同结果。
 
-##### 在运行时做什么
+**在运行时做什么**
 
 协议适配器以后可分别映射 412 与 304，而领域服务无需嵌入 HTTP。
 
-##### 关键代码
+**关键代码**
 
 ```python
 class NotModified(MiniS3Error):
 ```
 
-##### 关键语句理解
+**关键语句理解**
 
 Not-modified 是校验器的控制流证据，不能和针对旧状态的变更拒绝混成同一错误。
 
-#### `src/minis3/store.py`
+#### 受保护的服务变更
 
-??? note "文件差异：src/minis3/store.py"
+在同一把锁下判断前置条件并执行 PUT、GET 或 DELETE，使过期写入者无法获胜。
+
+??? note "查看本板块差异（2 个文件）"
+    **`src/minis3/store.py`**
+
     ```diff
     diff --git a/src/minis3/store.py b/src/minis3/store.py
     index 9b50aa2..e47e1ac 100644
@@ -255,54 +267,8 @@ Not-modified 是校验器的控制流证据，不能和针对旧状态的变更�
                  return self._buckets[name]
     ```
 
-##### 是什么，为什么现在需要
+    **`tests/test_conditional.py`**
 
-公开 GET、PUT、DELETE 接受条件参数，并在已有锁内计算。
-
-##### 在运行时做什么
-
-它拥有当前 ETag 查找、前置条件决定与后续 Bucket 变更/发布之间的原子性。
-
-##### 关键代码
-
-```python
-require_if_match(self._current_etag(candidate, key), if_match)
-```
-
-##### 关键语句理解
-
-检查在服务锁内读取候选快照；从这行到变更之间，不会有其他写入者改变当前可见 ETag。
-
-#### `src/minis3/__init__.py`
-
-??? note "文件差异：src/minis3/__init__.py"
-    ```diff
-    diff --git a/src/minis3/__init__.py b/src/minis3/__init__.py
-    index 0c23aea..3f6e582 100644
-    --- a/src/minis3/__init__.py
-    +++ b/src/minis3/__init__.py
-    @@ -7,3 +7,4 @@ from .storage import InjectedCrash
-     from .listing import ListedObject, ListedVersion, ListObjectsResult, ListObjectVersionsResult
-     from .errors import EntityTooSmall, InvalidPart, InvalidPartOrder, NoSuchUpload
-     from .multipart import MIN_PART_SIZE, MultipartPart, MultipartUpload
-    +from .errors import NotModified, PreconditionFailed
-    ```
-
-##### 是什么，为什么现在需要
-
-条件请求失败成为受支持 API。
-
-##### 在运行时做什么
-
-调用方从包根捕获语义结果，匹配 helper 继续作为内部策略。
-
-##### 关键语句理解
-
-公开结果类型但不公开解析内部细节，可以保持 API 较小。
-
-#### `tests/test_conditional.py`
-
-??? note "文件差异：tests/test_conditional.py"
     ```diff
     diff --git a/tests/test_conditional.py b/tests/test_conditional.py
     new file mode 100644
@@ -393,23 +359,66 @@ require_if_match(self._current_etag(candidate, key), if_match)
     +
     ```
 
-##### 是什么，为什么现在需要
+
+**讲解: `src/minis3/store.py`**
+
+**是什么，为什么现在需要**
+
+公开 GET、PUT、DELETE 接受条件参数，并在已有锁内计算。
+
+**在运行时做什么**
+
+它拥有当前 ETag 查找、前置条件决定与后续 Bucket 变更/发布之间的原子性。
+
+**关键代码**
+
+```python
+require_if_match(self._current_etag(candidate, key), if_match)
+```
+
+**关键语句理解**
+
+检查在服务锁内读取候选快照；从这行到变更之间，不会有其他写入者改变当前可见 ETag。
+
+**讲解: `tests/test_conditional.py`**
+
+**是什么，为什么现在需要**
 
 四条契约覆盖 GET 校验、变更 guard、wildcard 和双写者 CAS 竞争。
 
-##### 在运行时做什么
+**在运行时做什么**
 
 线程测试证明顺序 helper 单测无法证明的串行化行为。
 
-##### 关键代码
+**关键代码**
 
 ```python
 assert sorted(outcomes) == ["412", "stored"]
 ```
 
-##### 关键语句理解
+**关键语句理解**
 
 一个 `stored` 与一个 `412` 是外部可见 CAS 保证；两个 stored 会证明检查与变更并不原子。
+
+#### 公开导出接线
+
+导出条件失败类型，同时让匹配和变更所有权留在两个核心板块。
+
+??? note "查看本板块差异（1 个文件）"
+    **`src/minis3/__init__.py`**
+
+    ```diff
+    diff --git a/src/minis3/__init__.py b/src/minis3/__init__.py
+    index 0c23aea..3f6e582 100644
+    --- a/src/minis3/__init__.py
+    +++ b/src/minis3/__init__.py
+    @@ -7,3 +7,4 @@ from .storage import InjectedCrash
+     from .listing import ListedObject, ListedVersion, ListObjectsResult, ListObjectVersionsResult
+     from .errors import EntityTooSmall, InvalidPart, InvalidPartOrder, NoSuchUpload
+     from .multipart import MIN_PART_SIZE, MultipartPart, MultipartUpload
+    +from .errors import NotModified, PreconditionFailed
+    ```
+
 
 ### 验证证据
 

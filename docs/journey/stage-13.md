@@ -33,11 +33,15 @@ Without preconditions, read-modify-write clients lose updates. Without distinct 
 
 The service acquires its lock, resolves the current or addressed ETag, applies `require_if_match`/`require_if_none_match`, and only then reads or mutates. A successful PUT changes the ETag before the next waiting writer performs its check.
 
-### File-by-file walkthrough
+### Mechanism blocks
 
-#### `src/minis3/conditional.py`
+#### Conditional matching and failures
 
-??? note "File diff: src/minis3/conditional.py"
+Define wildcard and ETag-list matching separately from mutation, with precise public failure meanings.
+
+??? note "View block diff (2 files)"
+    **`src/minis3/conditional.py`**
+
     ```diff
     diff --git a/src/minis3/conditional.py b/src/minis3/conditional.py
     new file mode 100644
@@ -82,28 +86,8 @@ The service acquires its lock, resolves the current or addressed ETag, applies `
     +        raise NotModified(condition)
     ```
 
-##### What it is and why it appears
+    **`src/minis3/errors.py`**
 
-This pure policy module parses ETag conditions and raises the correct semantic failure.
-
-##### Runtime role
-
-Store supplies the current ETag; the helpers decide match, precondition failure, or not-modified without owning locks or state.
-
-##### Key code
-
-```python
-if condition is not None and not etag_matches(condition, current_etag):
-    raise PreconditionFailed(condition)
-```
-
-##### Statement understanding
-
-Absent condition means no guard. A present nonmatch must stop the operation before mutation; returning `False` for the caller to ignore would weaken the contract.
-
-#### `src/minis3/errors.py`
-
-??? note "File diff: src/minis3/errors.py"
     ```diff
     diff --git a/src/minis3/errors.py b/src/minis3/errors.py
     index 9db3b4c..5f255e0 100644
@@ -123,27 +107,55 @@ Absent condition means no guard. A present nonmatch must stop the operation befo
     +    """An If-None-Match condition matched (the HTTP 304 control outcome)."""
     ```
 
-##### What it is and why it appears
+
+**Explanation: `src/minis3/conditional.py`**
+
+**What it is and why it appears**
+
+This pure policy module parses ETag conditions and raises the correct semantic failure.
+
+**Runtime role**
+
+Store supplies the current ETag; the helpers decide match, precondition failure, or not-modified without owning locks or state.
+
+**Key code**
+
+```python
+if condition is not None and not etag_matches(condition, current_etag):
+    raise PreconditionFailed(condition)
+```
+
+**Statement understanding**
+
+Absent condition means no guard. A present nonmatch must stop the operation before mutation; returning `False` for the caller to ignore would weaken the contract.
+
+**Explanation: `src/minis3/errors.py`**
+
+**What it is and why it appears**
 
 The failure vocabulary gains distinct precondition-failed and not-modified outcomes.
 
-##### Runtime role
+**Runtime role**
 
 Protocol adapters can later map them to 412 and 304 without embedding HTTP in the domain service.
 
-##### Key code
+**Key code**
 
 ```python
 class NotModified(MiniS3Error):
 ```
 
-##### Statement understanding
+**Statement understanding**
 
 Not-modified is control-flow evidence for a validator, not the same error as a mutation rejected against stale state.
 
-#### `src/minis3/store.py`
+#### Guarded service mutation
 
-??? note "File diff: src/minis3/store.py"
+Evaluate a precondition and apply the corresponding PUT, GET, or DELETE under one lock so stale writers cannot win.
+
+??? note "View block diff (2 files)"
+    **`src/minis3/store.py`**
+
     ```diff
     diff --git a/src/minis3/store.py b/src/minis3/store.py
     index 9b50aa2..e47e1ac 100644
@@ -255,54 +267,8 @@ Not-modified is control-flow evidence for a validator, not the same error as a m
                  return self._buckets[name]
     ```
 
-##### What it is and why it appears
+    **`tests/test_conditional.py`**
 
-Public GET, PUT, and DELETE accept conditional parameters and evaluate them inside existing locks.
-
-##### Runtime role
-
-It owns atomicity between current-ETag lookup, precondition decision, and any subsequent Bucket mutation/publication.
-
-##### Key code
-
-```python
-require_if_match(self._current_etag(candidate, key), if_match)
-```
-
-##### Statement understanding
-
-The check reads from the candidate snapshot while the service lock is held. No other writer can change the current visible ETag between this line and mutation.
-
-#### `src/minis3/__init__.py`
-
-??? note "File diff: src/minis3/__init__.py"
-    ```diff
-    diff --git a/src/minis3/__init__.py b/src/minis3/__init__.py
-    index 0c23aea..3f6e582 100644
-    --- a/src/minis3/__init__.py
-    +++ b/src/minis3/__init__.py
-    @@ -7,3 +7,4 @@ from .storage import InjectedCrash
-     from .listing import ListedObject, ListedVersion, ListObjectsResult, ListObjectVersionsResult
-     from .errors import EntityTooSmall, InvalidPart, InvalidPartOrder, NoSuchUpload
-     from .multipart import MIN_PART_SIZE, MultipartPart, MultipartUpload
-    +from .errors import NotModified, PreconditionFailed
-    ```
-
-##### What it is and why it appears
-
-Conditional failures become part of the supported API.
-
-##### Runtime role
-
-Callers catch semantic outcomes from the package root; match helpers remain internal policy.
-
-##### Statement understanding
-
-Exposing outcome types but not parsing internals keeps the public surface small.
-
-#### `tests/test_conditional.py`
-
-??? note "File diff: tests/test_conditional.py"
     ```diff
     diff --git a/tests/test_conditional.py b/tests/test_conditional.py
     new file mode 100644
@@ -393,23 +359,66 @@ Exposing outcome types but not parsing internals keeps the public surface small.
     +
     ```
 
-##### What it is and why it appears
+
+**Explanation: `src/minis3/store.py`**
+
+**What it is and why it appears**
+
+Public GET, PUT, and DELETE accept conditional parameters and evaluate them inside existing locks.
+
+**Runtime role**
+
+It owns atomicity between current-ETag lookup, precondition decision, and any subsequent Bucket mutation/publication.
+
+**Key code**
+
+```python
+require_if_match(self._current_etag(candidate, key), if_match)
+```
+
+**Statement understanding**
+
+The check reads from the candidate snapshot while the service lock is held. No other writer can change the current visible ETag between this line and mutation.
+
+**Explanation: `tests/test_conditional.py`**
+
+**What it is and why it appears**
 
 Four contracts cover GET validators, mutation guards, wildcard behavior, and the two-writer CAS race.
 
-##### Runtime role
+**Runtime role**
 
 The threaded test proves serialization behavior that a sequential helper unit test cannot establish.
 
-##### Key code
+**Key code**
 
 ```python
 assert sorted(outcomes) == ["412", "stored"]
 ```
 
-##### Statement understanding
+**Statement understanding**
 
 One `stored` and one `412` is the externally visible CAS guarantee. Two stored outcomes would prove the check and mutation were not atomic.
+
+#### Public export wiring
+
+Expose conditional failures while keeping matching and mutation ownership in the two core blocks.
+
+??? note "View block diff (1 file)"
+    **`src/minis3/__init__.py`**
+
+    ```diff
+    diff --git a/src/minis3/__init__.py b/src/minis3/__init__.py
+    index 0c23aea..3f6e582 100644
+    --- a/src/minis3/__init__.py
+    +++ b/src/minis3/__init__.py
+    @@ -7,3 +7,4 @@ from .storage import InjectedCrash
+     from .listing import ListedObject, ListedVersion, ListObjectsResult, ListObjectVersionsResult
+     from .errors import EntityTooSmall, InvalidPart, InvalidPartOrder, NoSuchUpload
+     from .multipart import MIN_PART_SIZE, MultipartPart, MultipartUpload
+    +from .errors import NotModified, PreconditionFailed
+    ```
+
 
 ### Verification evidence
 

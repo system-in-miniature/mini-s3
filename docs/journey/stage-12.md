@@ -27,11 +27,15 @@ Using directory existence alone cannot distinguish an unfinished upload from pos
 
 Each test prepares a durable upload and parts, injects one crash point, discards the crashing service, and reopens. The before case retries completion; the after case reads the object and verifies abort now reports `NoSuchUpload` because recovery cleaned staging.
 
-### File-by-file walkthrough
+### Mechanism blocks
 
-#### `tests/test_storage.py`
+#### Multipart publication recovery
 
-??? note "File diff: tests/test_storage.py"
+Prove completion crashes on either side of Manifest publication recover to exactly the old or new visible object state.
+
+??? note "View block diff (1 file)"
+    **`tests/test_storage.py`**
+
     ```diff
     diff --git a/tests/test_storage.py b/tests/test_storage.py
     index afc9a8a..96bc973 100644
@@ -111,21 +115,24 @@ Each test prepares a durable upload and parts, injects one crash point, discards
     +        reopened.abort_multipart_upload("b", "movie", upload.upload_id)
     ```
 
-##### What it is and why it appears
+
+**Explanation: `tests/test_storage.py`**
+
+**What it is and why it appears**
 
 The storage recovery suite gains the two-sided multipart completion crash contract.
 
-##### Runtime role
+**Runtime role**
 
 It uses fresh service instances to make published manifest and recovered staging—not stale memory—the only evidence.
 
-##### Key code
+**Key code**
 
 ```python
 assert reopened.get_object("b", "movie").body == b"abcx"
 ```
 
-##### Statement understanding
+**Statement understanding**
 
 In the after-publish case, the visible complete object is authoritative even if cleanup did not run. Recovery must keep it and remove only the matching upload staging.
 

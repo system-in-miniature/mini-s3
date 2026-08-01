@@ -37,11 +37,15 @@ Key 是不透明字符串。后面的 Listing 可以利用斜杠展示类似目�
 
 当前流程很短：调用方的 bytes 进入 `content_etag` 得到 ETag，再进入 `Version`；`ObjectRecord` 把精确 Key 与按新到旧排列的版本元组关联起来。这里没有任何类负责 I/O 或全局变更，它们只是后续边界要使用的值。
 
-### 逐文件走读
+### 机制板块
 
-#### `src/minis3/errors.py`
+#### 对象值词汇
 
-??? note "文件差异：src/minis3/errors.py"
+定义后续 Bucket、存储和服务边界共同使用的不可变值与可执行不变量。
+
+??? note "查看本板块差异（3 个文件）"
+    **`src/minis3/errors.py`**
+
     ```diff
     diff --git a/src/minis3/errors.py b/src/minis3/errors.py
     new file mode 100644
@@ -81,27 +85,8 @@ Key 是不透明字符串。后面的 Listing 可以利用斜杠展示类似目�
     +
     ```
 
-##### 是什么，为什么现在需要
+    **`src/minis3/model.py`**
 
-这里定义与 HTTP 无关的领域错误。Bucket 和服务代码可以准确表达失败，而不依赖传输协议。
-
-##### 在运行时做什么
-
-调用方可以捕获 `MiniS3Error` 的具体子类，再映射成协议响应。缺 Bucket、缺 Key、缺具体版本必须分开，否则会丢失语义。
-
-##### 关键代码
-
-```python
-class NoSuchKey(MiniS3Error):
-```
-
-##### 关键语句理解
-
-继承关系表示它属于 MiniS3 的公开失败词汇，同时仍可与 `NoSuchBucket`、`NoSuchVersion` 区分。
-
-#### `src/minis3/model.py`
-
-??? note "文件差异：src/minis3/model.py"
     ```diff
     diff --git a/src/minis3/model.py b/src/minis3/model.py
     new file mode 100644
@@ -186,55 +171,8 @@ class NoSuchKey(MiniS3Error):
     +
     ```
 
-##### 是什么，为什么现在需要
+    **`tests/test_model.py`**
 
-这是本阶段的核心领域值文件，定义完整对象版本、无 Body 删除标记、Key 的历史和内容 ETag。
-
-##### 在运行时做什么
-
-后续 Bucket 构造这些值，Listing 投影它们，磁盘层序列化它们；这些值自身不执行 I/O，也不拥有全局状态。
-
-##### 关键代码
-
-```python
-digest = md5(body, usedforsecurity=False).hexdigest()
-return f'"{digest}"'
-```
-
-##### 关键语句理解
-
-`usedforsecurity=False` 明确 MD5 在这里是 S3 风格指纹，不是安全算法。外层引号属于 ETag 的公开表示，返回裸摘要会造成语义错误。
-
-#### `src/minis3/__init__.py`
-
-??? note "文件差异：src/minis3/__init__.py"
-    ```diff
-    diff --git a/src/minis3/__init__.py b/src/minis3/__init__.py
-    new file mode 100644
-    index 0000000..8a3d1c7
-    --- /dev/null
-    +++ b/src/minis3/__init__.py
-    @@ -0,0 +1,3 @@
-    +"""Public API for the MiniS3 teaching implementation."""
-    +from .errors import BucketAlreadyExists, BucketNotEmpty, InvalidContinuationToken, MiniS3Error, NoSuchBucket, NoSuchKey, NoSuchVersion
-    +from .model import DeleteMarker, ObjectRecord, Version, content_etag
-    ```
-
-##### 是什么，为什么现在需要
-
-这是包级公开边界，让学习者和后续服务可以从 `minis3` 导入稳定名称，而不必知道内部模块布局。
-
-##### 在运行时做什么
-
-它只负责接线。名称漏导出会在对象流程开始前表现为 import 失败，但它不拥有 ETag 或版本行为。
-
-##### 关键语句理解
-
-显式导入组成第一版公开 API；内部辅助函数只有在后续阶段明确加入时才成为公开能力。
-
-#### `tests/test_model.py`
-
-??? note "文件差异：tests/test_model.py"
     ```diff
     diff --git a/tests/test_model.py b/tests/test_model.py
     new file mode 100644
@@ -279,27 +217,75 @@ return f'"{digest}"'
     +
     ```
 
-##### 是什么，为什么现在需要
+
+**讲解: `src/minis3/errors.py`**
+
+**是什么，为什么现在需要**
+
+这里定义与 HTTP 无关的领域错误。Bucket 和服务代码可以准确表达失败，而不依赖传输协议。
+
+**在运行时做什么**
+
+调用方可以捕获 `MiniS3Error` 的具体子类，再映射成协议响应。缺 Bucket、缺 Key、缺具体版本必须分开，否则会丢失语义。
+
+**关键代码**
+
+```python
+class NoSuchKey(MiniS3Error):
+```
+
+**关键语句理解**
+
+继承关系表示它属于 MiniS3 的公开失败词汇，同时仍可与 `NoSuchBucket`、`NoSuchVersion` 区分。
+
+**讲解: `src/minis3/model.py`**
+
+**是什么，为什么现在需要**
+
+这是本阶段的核心领域值文件，定义完整对象版本、无 Body 删除标记、Key 的历史和内容 ETag。
+
+**在运行时做什么**
+
+后续 Bucket 构造这些值，Listing 投影它们，磁盘层序列化它们；这些值自身不执行 I/O，也不拥有全局状态。
+
+**关键代码**
+
+```python
+digest = md5(body, usedforsecurity=False).hexdigest()
+return f'"{digest}"'
+```
+
+**关键语句理解**
+
+`usedforsecurity=False` 明确 MD5 在这里是 S3 风格指纹，不是安全算法。外层引号属于 ETag 的公开表示，返回裸摘要会造成语义错误。
+
+**讲解: `tests/test_model.py`**
+
+**是什么，为什么现在需要**
 
 三个测试分别固定带引号 ETag、含斜杠的不透明 Key 与不可变性、无 Body 删除标记。
 
-##### 在运行时做什么
+**在运行时做什么**
 
 它们直接调用学习者可见的领域值，只证明值语义；目前还不能证明 Bucket 迁移、磁盘持久化或对象服务。
 
-##### 关键代码
+**关键代码**
 
 ```python
 assert record.key == "/a//b/"
 ```
 
-##### 关键语句理解
+**关键语句理解**
 
 故意使用异常形状的 Key 是为了捕获路径规范化。断言通过只证明字符串被原样保存，不代表系统真的存在目录。
 
-#### `README.md`
+#### 包与工具脚手架
 
-??? note "文件差异：README.md"
+接好包、测试环境、学习 README 与可复现依赖，但不把这些工程设置当成对象存储机制讲解。
+
+??? note "查看本板块差异（4 个文件）"
+    **`README.md`**
+
     ```diff
     diff --git a/README.md b/README.md
     new file mode 100644
@@ -312,21 +298,8 @@ assert record.key == "/a//b/"
     +Build the object store one verified stage at a time.
     ```
 
-##### 是什么，为什么现在需要
+    **`pyproject.toml`**
 
-这是学习工作区的短入口，说明仓库会按可验证 Stage 重建。
-
-##### 在运行时做什么
-
-它不参与运行时，只帮助学习者识别这是阶段式重建工作区，而不是完成品源码。
-
-##### 关键语句理解
-
-“one verified stage at a time” 描述学习流程，不是对象存储不变量。
-
-#### `pyproject.toml`
-
-??? note "文件差异：pyproject.toml"
     ```diff
     diff --git a/pyproject.toml b/pyproject.toml
     new file mode 100644
@@ -360,21 +333,22 @@ assert record.key == "/a//b/"
     +
     ```
 
-##### 是什么，为什么现在需要
+    **`src/minis3/__init__.py`**
 
-它让 `src/minis3` 可安装，并告诉 pytest 源码与测试的位置。
+    ```diff
+    diff --git a/src/minis3/__init__.py b/src/minis3/__init__.py
+    new file mode 100644
+    index 0000000..8a3d1c7
+    --- /dev/null
+    +++ b/src/minis3/__init__.py
+    @@ -0,0 +1,3 @@
+    +"""Public API for the MiniS3 teaching implementation."""
+    +from .errors import BucketAlreadyExists, BucketNotEmpty, InvalidContinuationToken, MiniS3Error, NoSuchBucket, NoSuchKey, NoSuchVersion
+    +from .model import DeleteMarker, ObjectRecord, Version, content_etag
+    ```
 
-##### 在运行时做什么
+    **`uv.lock`**
 
-构建与测试工具先读取它，再导入 MiniS3。包路径配置错误时，即使模型代码正确也会表现为 import 失败。
-
-##### 关键语句理解
-
-`packages = ["src/minis3"]` 把 src-layout 目录接到构建产物；`testpaths = ["tests"]` 限定测试发现范围。
-
-#### `uv.lock`
-
-??? note "文件差异：uv.lock"
     ```diff
     diff --git a/uv.lock b/uv.lock
     new file mode 100644
@@ -463,17 +437,6 @@ assert record.key == "/a//b/"
     +]
     ```
 
-##### 是什么，为什么现在需要
-
-锁文件记录运行本阶段时的精确开发依赖图。
-
-##### 在运行时做什么
-
-它影响环境复现，不影响对象语义；不同机器解析出不同依赖时再从这里排查。
-
-##### 关键语句理解
-
-editable 的 `minis3` 条目把本地包接入锁定环境，pytest 版本也因此可复现。
 
 ### 验证证据
 

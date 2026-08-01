@@ -72,8 +72,8 @@ groups matching strings.
 1. **[Mechanism Tutorial](docs/tutorial/index.md)** — learn the storage
    mechanisms by topic.
 2. **[Self-Guided Rebuild](docs/journey/index.md)** — follow 15 complete browser
-   lessons that explain the problem, one failure preview, the concepts, every
-   changed file, and its critical statements.
+   lessons that explain the problem, one failure preview, and the concepts,
+   then connect related files and critical statements through mechanism blocks.
 3. **[Agent-Guided Rebuild](docs/agent-guided.md)** — open Codex in this
    repository and say `开始 Agent 带教 Stage NN`; Codex prepares or resumes the
    Stage automatically, then guides screening, implementation, code reading,

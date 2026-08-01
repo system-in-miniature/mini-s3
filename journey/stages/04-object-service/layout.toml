@@ -1,0 +1,16 @@
+[[blocks]]
+id = "object-service"
+title_en = "Object service boundary"
+title_zh = "对象服务边界"
+summary_en = "Coordinate locking, copy-on-write Bucket mutation, persistence, and public object operations behind one service facade."
+summary_zh = "在一个服务门面后协调加锁、Bucket 写时复制、持久化和公开对象操作。"
+files = ["src/minis3/store.py", "tests/test_storage.py", "tests/test_versioning.py"]
+
+[[blocks]]
+id = "public-wiring"
+title_en = "Public export wiring"
+title_zh = "公开导出接线"
+summary_en = "Make the new service importable without giving routine package wiring its own conceptual walkthrough."
+summary_zh = "让新服务可导入，但不为常规包接线单独展开概念讲解。"
+files = ["src/minis3/__init__.py"]
+supporting = true

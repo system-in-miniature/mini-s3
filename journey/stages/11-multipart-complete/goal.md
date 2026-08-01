@@ -35,7 +35,7 @@ Publishing each part would violate whole-object visibility. Removing staging bef
 
 `complete_multipart_upload` holds the service lock, loads upload plus parts, calls pure `validate_completion`, joins bodies, mutates a candidate Bucket with composite ETag/provenance, persists it, swaps it into memory, and only then removes the upload directory.
 
-### File-by-file walkthrough
+### Mechanism blocks
 
 <!-- journey-file: src/minis3/store.py -->
 #### `src/minis3/store.py`
@@ -130,7 +130,7 @@ Part 替换与完成分开。重传 Part 1 会改变当前 receipt；客户端�
 
 `complete_multipart_upload` 持有服务锁，加载 upload 与 parts，调用纯 `validate_completion`，拼接 Body，用组合 ETag/来源修改候选 Bucket，持久化并替换内存，最后才删除上传目录。
 
-### 逐文件走读
+### 机制板块
 
 <!-- journey-file: src/minis3/store.py -->
 #### `src/minis3/store.py`

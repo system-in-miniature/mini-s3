@@ -52,11 +52,11 @@ conditional requests, and lifecycle expiration.
 ### Self-Guided Rebuild / 自主重建
 
 Follow the [Self-Guided Rebuild](journey/index.md) to learn through 15 cumulative
-browser lessons. Each Stage explains the problem and failure first, then walks
-through every changed file and its critical statements.
+browser lessons. Each Stage explains the problem and failure first, then groups
+related files and critical statements into mechanism blocks.
 
 通过[自主重建](zh/journey/index.md)完成 15 个累积浏览课程。每个 Stage 先解释问题与
-失败场景，再逐文件理解关键语句。
+失败场景，再按机制板块理解相关文件与关键语句。
 
 ### Agent-Guided Rebuild / Agent 带教
 

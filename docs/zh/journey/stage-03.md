@@ -32,11 +32,15 @@ MiniS3 保存不可变数据/元数据 Artifact 与较小的可变 `manifest.jso
 
 `DiskStorage.persist_bucket` 先写缺失的不可变 Artifact，再为 Manifest 调用 `atomic_write`。后者写临时文件、flush、文件 fsync、替换最终名称、父目录 fsync。启动时只加载 Manifest 引用并清理其余内容。
 
-### 逐文件走读
+### 机制板块
 
-#### `src/minis3/storage/atomic.py`
+#### 持久发布与恢复
 
-??? note "文件差异：src/minis3/storage/atomic.py"
+把原子文件替换、不可变 Artifact、Manifest 可见性和重启重建连成一套持久化协议。
+
+??? note "查看本板块差异（3 个文件）"
+    **`src/minis3/storage/atomic.py`**
+
     ```diff
     diff --git a/src/minis3/storage/atomic.py b/src/minis3/storage/atomic.py
     new file mode 100644
@@ -103,28 +107,8 @@ MiniS3 保存不可变数据/元数据 Artifact 与较小的可变 `manifest.jso
     +    fsync_directory(path.parent)
     ```
 
-##### 是什么，为什么现在需要
+    **`src/minis3/storage/disk.py`**
 
-这个文件拥有可复用的文件系统发布原语，不负责 S3 领域决策。
-
-##### 在运行时做什么
-
-当文件或目录项必须跨崩溃保存时，DiskStorage 调用它；这里是检查可见性与持久化顺序的最底层边界。
-
-##### 关键代码
-
-```python
-os.replace(temporary, path)
-fsync_directory(path.parent)
-```
-
-##### 关键语句理解
-
-replace 改变最终名称指向哪份完整文件，随后的目录 fsync 才持久化这次 rename。省略第二行可能出现“现在看得到，掉电后却消失”。
-
-#### `src/minis3/storage/disk.py`
-
-??? note "文件差异：src/minis3/storage/disk.py"
     ```diff
     diff --git a/src/minis3/storage/disk.py b/src/minis3/storage/disk.py
     new file mode 100644
@@ -361,60 +345,8 @@ replace 改变最终名称指向哪份完整文件，随后的目录 fsync 才�
     +                path.rmdir()
     ```
 
-##### 是什么，为什么现在需要
+    **`tests/test_storage_boundary.py`**
 
-这是 Bucket 磁盘布局、Manifest 发布和启动恢复的唯一所有者。
-
-##### 在运行时做什么
-
-它把 Bucket 历史变成不可变 `.data`/`.json` Artifact 和 Manifest 引用，并在启动时重建 Bucket。
-
-##### 关键代码
-
-```python
-self._inject("before_manifest_publish")
-atomic_write(directory / "manifest.json", self._manifest_bytes(bucket))
-self._inject("after_manifest_publish")
-```
-
-##### 关键语句理解
-
-Manifest 写入被两个命名崩溃点夹住，因为它正是可见性边界。此前的 Artifact 尚未被引用；此后恢复必须把新状态视为已提交。
-
-#### `src/minis3/storage/__init__.py`
-
-??? note "文件差异：src/minis3/storage/__init__.py"
-    ```diff
-    diff --git a/src/minis3/storage/__init__.py b/src/minis3/storage/__init__.py
-    new file mode 100644
-    index 0000000..673ad9e
-    --- /dev/null
-    +++ b/src/minis3/storage/__init__.py
-    @@ -0,0 +1,7 @@
-    +"""Durable storage boundary for manifest-based atomic publication."""
-    +
-    +from .atomic import InjectedCrash
-    +from .disk import DiskStorage
-    +
-    +__all__ = ["DiskStorage", "InjectedCrash"]
-    +
-    ```
-
-##### 是什么，为什么现在需要
-
-这个包边界导出持久适配器，以及后续崩溃实验使用的故意崩溃类型。
-
-##### 在运行时做什么
-
-它提供稳定导入，同时保持布局辅助函数为内部细节。
-
-##### 关键语句理解
-
-导出 `DiskStorage` 明确存储所有者；导出 `InjectedCrash` 让崩溃边界可测试，而不必公开全部 helper。
-
-#### `tests/test_storage_boundary.py`
-
-??? note "文件差异：tests/test_storage_boundary.py"
     ```diff
     diff --git a/tests/test_storage_boundary.py b/tests/test_storage_boundary.py
     new file mode 100644
@@ -442,23 +374,93 @@ Manifest 写入被两个命名崩溃点夹住，因为它正是可见性边界�
     +    assert not list(tmp_path.rglob("*.tmp-*"))
     ```
 
-##### 是什么，为什么现在需要
+
+**讲解: `src/minis3/storage/atomic.py`**
+
+**是什么，为什么现在需要**
+
+这个文件拥有可复用的文件系统发布原语，不负责 S3 领域决策。
+
+**在运行时做什么**
+
+当文件或目录项必须跨崩溃保存时，DiskStorage 调用它；这里是检查可见性与持久化顺序的最底层边界。
+
+**关键代码**
+
+```python
+os.replace(temporary, path)
+fsync_directory(path.parent)
+```
+
+**关键语句理解**
+
+replace 改变最终名称指向哪份完整文件，随后的目录 fsync 才持久化这次 rename。省略第二行可能出现“现在看得到，掉电后却消失”。
+
+**讲解: `src/minis3/storage/disk.py`**
+
+**是什么，为什么现在需要**
+
+这是 Bucket 磁盘布局、Manifest 发布和启动恢复的唯一所有者。
+
+**在运行时做什么**
+
+它把 Bucket 历史变成不可变 `.data`/`.json` Artifact 和 Manifest 引用，并在启动时重建 Bucket。
+
+**关键代码**
+
+```python
+self._inject("before_manifest_publish")
+atomic_write(directory / "manifest.json", self._manifest_bytes(bucket))
+self._inject("after_manifest_publish")
+```
+
+**关键语句理解**
+
+Manifest 写入被两个命名崩溃点夹住，因为它正是可见性边界。此前的 Artifact 尚未被引用；此后恢复必须把新状态视为已提交。
+
+**讲解: `tests/test_storage_boundary.py`**
+
+**是什么，为什么现在需要**
 
 这是第一条存储契约，证明一个完整 Bucket 能跨越类似进程重启的边界。
 
-##### 在运行时做什么
+**在运行时做什么**
 
 它持久化状态、创建新适配器，再比较恢复后的值与序列元数据。它比序列化单测更广，但还没到公开 MiniS3 服务。
 
-##### 关键代码
+**关键代码**
 
 ```python
 recovered, maximum_sequence = DiskStorage(tmp_path).load_buckets()
 ```
 
-##### 关键语句理解
+**关键语句理解**
 
 必须使用新适配器；读取原内存 Bucket 无法证明字节已发布并可恢复。返回 `maximum` 还能避免未来复用序列。
+
+#### 存储包接线
+
+向后续服务代码暴露存储边界；本 Stage 的导出层不引入独立机制。
+
+??? note "查看本板块差异（1 个文件）"
+    **`src/minis3/storage/__init__.py`**
+
+    ```diff
+    diff --git a/src/minis3/storage/__init__.py b/src/minis3/storage/__init__.py
+    new file mode 100644
+    index 0000000..673ad9e
+    --- /dev/null
+    +++ b/src/minis3/storage/__init__.py
+    @@ -0,0 +1,7 @@
+    +"""Durable storage boundary for manifest-based atomic publication."""
+    +
+    +from .atomic import InjectedCrash
+    +from .disk import DiskStorage
+    +
+    +__all__ = ["DiskStorage", "InjectedCrash"]
+    +
+    ```
+
 
 ### 验证证据
 

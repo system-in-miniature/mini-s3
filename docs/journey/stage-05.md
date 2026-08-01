@@ -30,11 +30,15 @@ Returning raw internal objects would couple callers to storage fields and tempt 
 
 The service locks and passes Bucket records to `list_object_versions`. The pure function filters exact key prefixes, iterates keys deterministically, flattens each newest-first history, marks only index zero as latest, and returns an immutable result.
 
-### File-by-file walkthrough
+### Mechanism blocks
 
-#### `src/minis3/listing.py`
+#### Version-history projection
 
-??? note "File diff: src/minis3/listing.py"
+Project newest-first Bucket histories into stable public values without losing null versions or delete markers.
+
+??? note "View block diff (3 files)"
+    **`src/minis3/listing.py`**
+
     ```diff
     diff --git a/src/minis3/listing.py b/src/minis3/listing.py
     new file mode 100644
@@ -99,27 +103,8 @@ The service locks and passes Bucket records to `list_object_versions`. The pure 
     +    return ListObjectVersionsResult(tuple(result))
     ```
 
-##### What it is and why it appears
+    **`src/minis3/store.py`**
 
-This read-side module introduces response values and the pure history projection.
-
-##### Runtime role
-
-It consumes records without mutation and emits a stable sequence carrying key, IDs, ETag/size when data exists, marker flag, and latest flag.
-
-##### Key code
-
-```python
-etag=item.etag if is_data else None,
-```
-
-##### Statement understanding
-
-A marker has no body-derived ETag. Making the field explicitly `None` preserves the distinction instead of inventing an empty-object fingerprint.
-
-#### `src/minis3/store.py`
-
-??? note "File diff: src/minis3/store.py"
     ```diff
     diff --git a/src/minis3/store.py b/src/minis3/store.py
     index 5d418b8..23ddd8e 100644
@@ -149,54 +134,8 @@ A marker has no body-derived ETag. Making the field explicitly `None` preserves 
                  return self._buckets[name]
     ```
 
-##### What it is and why it appears
+    **`tests/test_versioning.py`**
 
-The public service gains a locked read method for the new projection.
-
-##### Runtime role
-
-It resolves the Bucket and delegates to the pure listing function while preventing a concurrent mutation from changing the snapshot mid-read.
-
-##### Key code
-
-```python
-return list_object_versions(self._bucket(bucket).records, prefix=prefix)
-```
-
-##### Statement understanding
-
-The service passes records but does not reproduce projection logic. This keeps ownership clear and makes the pure function independently understandable.
-
-#### `src/minis3/__init__.py`
-
-??? note "File diff: src/minis3/__init__.py"
-    ```diff
-    diff --git a/src/minis3/__init__.py b/src/minis3/__init__.py
-    index 11378e1..f9c1adf 100644
-    --- a/src/minis3/__init__.py
-    +++ b/src/minis3/__init__.py
-    @@ -4,3 +4,4 @@ from .bucket import SequenceCounter, VersioningState
-     from .model import DeleteMarker, ObjectRecord, Version, content_etag
-     from .store import MiniS3
-     from .storage import InjectedCrash
-    +from .listing import ListedVersion, ListObjectVersionsResult
-    ```
-
-##### What it is and why it appears
-
-The new result type becomes part of the supported package surface.
-
-##### Runtime role
-
-It lets callers name the response contract without importing an internal module path.
-
-##### Statement understanding
-
-Exporting a result value is a compatibility decision; the internal flattening helper remains an implementation detail.
-
-#### `tests/test_versioning.py`
-
-??? note "File diff: tests/test_versioning.py"
     ```diff
     diff --git a/tests/test_versioning.py b/tests/test_versioning.py
     index 389e45d..3f305c6 100644
@@ -300,23 +239,86 @@ Exporting a result value is a compatibility decision; the internal flattening he
          store.create_bucket("b")
     ```
 
-##### What it is and why it appears
+
+**Explanation: `src/minis3/listing.py`**
+
+**What it is and why it appears**
+
+This read-side module introduces response values and the pure history projection.
+
+**Runtime role**
+
+It consumes records without mutation and emits a stable sequence carrying key, IDs, ETag/size when data exists, marker flag, and latest flag.
+
+**Key code**
+
+```python
+etag=item.etag if is_data else None,
+```
+
+**Statement understanding**
+
+A marker has no body-derived ETag. Making the field explicitly `None` preserves the distinction instead of inventing an empty-object fingerprint.
+
+**Explanation: `src/minis3/store.py`**
+
+**What it is and why it appears**
+
+The public service gains a locked read method for the new projection.
+
+**Runtime role**
+
+It resolves the Bucket and delegates to the pure listing function while preventing a concurrent mutation from changing the snapshot mid-read.
+
+**Key code**
+
+```python
+return list_object_versions(self._bucket(bucket).records, prefix=prefix)
+```
+
+**Statement understanding**
+
+The service passes records but does not reproduce projection logic. This keeps ownership clear and makes the pure function independently understandable.
+
+**Explanation: `tests/test_versioning.py`**
+
+**What it is and why it appears**
 
 Three new scenarios lock the projection of unversioned replacement, suspended replacement, and suspended deletion.
 
-##### Runtime role
+**Runtime role**
 
 They observe public histories after real service mutations, so the evidence covers Bucket plus projection rather than a fabricated input alone.
 
-##### Key code
+**Key code**
 
 ```python
 assert marker is not None and marker.version_id == "null"
 ```
 
-##### Statement understanding
+**Statement understanding**
 
 Suspension does not mean deletion becomes physical. The new marker occupies the public `null` slot while named history remains addressable.
+
+#### Public export wiring
+
+Expose the projection result types; their behavior is owned by the projection block above.
+
+??? note "View block diff (1 file)"
+    **`src/minis3/__init__.py`**
+
+    ```diff
+    diff --git a/src/minis3/__init__.py b/src/minis3/__init__.py
+    index 11378e1..f9c1adf 100644
+    --- a/src/minis3/__init__.py
+    +++ b/src/minis3/__init__.py
+    @@ -4,3 +4,4 @@ from .bucket import SequenceCounter, VersioningState
+     from .model import DeleteMarker, ObjectRecord, Version, content_etag
+     from .store import MiniS3
+     from .storage import InjectedCrash
+    +from .listing import ListedVersion, ListObjectVersionsResult
+    ```
+
 
 ### Verification evidence
 

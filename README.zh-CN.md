@@ -66,7 +66,7 @@ print(stored.version_id, stored.etag)
 
 1. **[机制教程](docs/zh/tutorial/index.md)**：按主题理解对象存储机制。
 2. **[自主重建](docs/zh/journey/index.md)**：通过 15 个完整浏览课程，依次理解当前
-   问题、一条失败预览、基本概念、每个变更文件与关键语句。
+   问题、一条失败预览和基本概念，再按机制板块连接相关文件与关键语句。
 3. **[Agent 带教](docs/zh/agent-guided.md)**：在当前仓库打开 Codex，直接说
    `开始 Agent 带教 Stage NN`；Codex 会自动准备或续接 Stage，再通过互动筛查、实现、
    小片段代码走读与 parity 验收完成学习。

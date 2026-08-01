@@ -32,6 +32,8 @@ files before teaching:
    critical statements, and completion explanation.
 2. `stage.patch` — the canonical implementation reference.
 3. `tests.txt` — the cumulative verification nodes for this Stage.
+4. `layout.toml` — the authored mechanism blocks, file ownership, localized
+   summaries, and supporting-file classification.
 
 The canonical patch is an Agent reference: do not ask the learner to read the
 complete patch and do not quiz them on a symbol that has not appeared in the
@@ -64,7 +66,8 @@ Use this order unless the learner explicitly changes it:
 5. Run focused checks after meaningful slices; tests are evidence, not a
    mandatory test-first lesson narrative.
 6. Run the exact cumulative command printed as `CHECK:` during startup.
-7. Walk through every file changed in the current Stage.
+7. Walk through the authored mechanism blocks and account for every changed
+   file within its owning block.
 8. Ask the learner to explain the mechanism in their own words.
 
 The agent owns implementation order and may edit the learner project directly.
@@ -92,10 +95,11 @@ For code reading:
 
 Never require the learner to scan an entire file to answer the first question.
 
-## Modified File Walkthrough
+## Mechanism Block Walkthrough
 
-Before completing a Stage, explain every file changed relative to the baseline.
-For each substantive file cover:
+Use `layout.toml` as the teaching order. Start each block with its problem and
+runtime relationship, then connect the files that jointly implement it. For
+each substantive file within a core block cover:
 
 - what the file/component is;
 - why this Stage needs it;
@@ -105,8 +109,9 @@ For each substantive file cover:
 - why its critical statements exist;
 - which test or parity check covers it.
 
-Simple exports, documentation, lockfiles, and configuration may receive a
-short responsibility explanation rather than an artificial deep question.
+For a block marked `supporting = true`, give only its authored summary and a
+short account of why the wiring is required. Do not invent per-file conceptual
+questions for routine exports, documentation, lockfiles, or configuration.
 
 ## Completion
 

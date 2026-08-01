@@ -32,7 +32,7 @@ A course can slowly become a detached toy while its examples still pass. Closing
 
 User imports resolve through `src/minis3/__init__.py`. Separately, `build_journey.py --check` starts from the empty Journey root, applies all 15 canonical patches, gathers Journey-owned tests, and compares reconstructed bytes to the current main tree without moving refs.
 
-### File-by-file walkthrough
+### Mechanism blocks
 
 <!-- journey-file: src/minis3/__init__.py -->
 #### `src/minis3/__init__.py`
@@ -101,7 +101,7 @@ Parity 命令在全新树中重放每个 patch，再与 main 比较字节。即�
 
 用户 import 通过 `src/minis3/__init__.py` 解析。另一边，`build_journey.py --check` 从空 Journey 根开始应用 15 个 canonical patch，收集 Journey 自有测试，再把重建字节与当前 main 比较，不移动 refs。
 
-### 逐文件走读
+### 机制板块
 
 <!-- journey-file: src/minis3/__init__.py -->
 #### `src/minis3/__init__.py`

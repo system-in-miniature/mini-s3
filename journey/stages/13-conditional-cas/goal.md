@@ -38,7 +38,7 @@ Without preconditions, read-modify-write clients lose updates. Without distinct 
 
 The service acquires its lock, resolves the current or addressed ETag, applies `require_if_match`/`require_if_none_match`, and only then reads or mutates. A successful PUT changes the ETag before the next waiting writer performs its check.
 
-### File-by-file walkthrough
+### Mechanism blocks
 
 <!-- journey-file: src/minis3/conditional.py -->
 #### `src/minis3/conditional.py`
@@ -192,7 +192,7 @@ Compare-and-swap 表示“只有当前身份仍等于我观察到的身份才修
 
 服务获得锁，解析当前或指定版本 ETag，执行 `require_if_match`/`require_if_none_match`，之后才读取或变更。成功 PUT 会在下一名等待写入者检查前改变 ETag。
 
-### 逐文件走读
+### 机制板块
 
 <!-- journey-file: src/minis3/conditional.py -->
 #### `src/minis3/conditional.py`

@@ -30,11 +30,15 @@ GET 只返回一份被寻址的数据版本，无法解释最新值或 Marker �
 
 服务加锁，把 Bucket records 交给 `list_object_versions`。纯函数按精确 Key 前缀过滤、确定性遍历 Key、展开新到旧历史、只把索引 0 标成 latest，再返回不可变结果。
 
-### 逐文件走读
+### 机制板块
 
-#### `src/minis3/listing.py`
+#### 版本历史投影
 
-??? note "文件差异：src/minis3/listing.py"
+把 Bucket 的新到旧历史投影成稳定公开值，同时保留 null 版本和删除标记。
+
+??? note "查看本板块差异（3 个文件）"
+    **`src/minis3/listing.py`**
+
     ```diff
     diff --git a/src/minis3/listing.py b/src/minis3/listing.py
     new file mode 100644
@@ -99,27 +103,8 @@ GET 只返回一份被寻址的数据版本，无法解释最新值或 Marker �
     +    return ListObjectVersionsResult(tuple(result))
     ```
 
-##### 是什么，为什么现在需要
+    **`src/minis3/store.py`**
 
-这个读取侧模块引入响应值与纯历史投影。
-
-##### 在运行时做什么
-
-它不修改 records，只输出稳定序列，携带 Key、ID、数据存在时的 ETag/size、Marker 标记与 latest 标记。
-
-##### 关键代码
-
-```python
-etag=item.etag if is_data else None,
-```
-
-##### 关键语句理解
-
-Marker 没有基于 Body 的 ETag。显式使用 `None` 保留区别，而不是伪造一个空对象指纹。
-
-#### `src/minis3/store.py`
-
-??? note "文件差异：src/minis3/store.py"
     ```diff
     diff --git a/src/minis3/store.py b/src/minis3/store.py
     index 5d418b8..23ddd8e 100644
@@ -149,54 +134,8 @@ Marker 没有基于 Body 的 ETag。显式使用 `None` 保留区别，而不是
                  return self._buckets[name]
     ```
 
-##### 是什么，为什么现在需要
+    **`tests/test_versioning.py`**
 
-公开服务增加带锁的历史读取方法。
-
-##### 在运行时做什么
-
-它解析 Bucket 并委托纯 Listing 函数，同时阻止并发变更在读取中途改变快照。
-
-##### 关键代码
-
-```python
-return list_object_versions(self._bucket(bucket).records, prefix=prefix)
-```
-
-##### 关键语句理解
-
-服务传入 records，但不重复投影逻辑。这样职责清晰，纯函数也能独立理解。
-
-#### `src/minis3/__init__.py`
-
-??? note "文件差异：src/minis3/__init__.py"
-    ```diff
-    diff --git a/src/minis3/__init__.py b/src/minis3/__init__.py
-    index 11378e1..f9c1adf 100644
-    --- a/src/minis3/__init__.py
-    +++ b/src/minis3/__init__.py
-    @@ -4,3 +4,4 @@ from .bucket import SequenceCounter, VersioningState
-     from .model import DeleteMarker, ObjectRecord, Version, content_etag
-     from .store import MiniS3
-     from .storage import InjectedCrash
-    +from .listing import ListedVersion, ListObjectVersionsResult
-    ```
-
-##### 是什么，为什么现在需要
-
-新的结果类型成为受支持包级接口。
-
-##### 在运行时做什么
-
-调用方无需导入内部模块路径就能引用响应契约。
-
-##### 关键语句理解
-
-导出结果值是兼容性决策；内部展开 helper 仍是实现细节。
-
-#### `tests/test_versioning.py`
-
-??? note "文件差异：tests/test_versioning.py"
     ```diff
     diff --git a/tests/test_versioning.py b/tests/test_versioning.py
     index 389e45d..3f305c6 100644
@@ -300,23 +239,86 @@ return list_object_versions(self._bucket(bucket).records, prefix=prefix)
          store.create_bucket("b")
     ```
 
-##### 是什么，为什么现在需要
+
+**讲解: `src/minis3/listing.py`**
+
+**是什么，为什么现在需要**
+
+这个读取侧模块引入响应值与纯历史投影。
+
+**在运行时做什么**
+
+它不修改 records，只输出稳定序列，携带 Key、ID、数据存在时的 ETag/size、Marker 标记与 latest 标记。
+
+**关键代码**
+
+```python
+etag=item.etag if is_data else None,
+```
+
+**关键语句理解**
+
+Marker 没有基于 Body 的 ETag。显式使用 `None` 保留区别，而不是伪造一个空对象指纹。
+
+**讲解: `src/minis3/store.py`**
+
+**是什么，为什么现在需要**
+
+公开服务增加带锁的历史读取方法。
+
+**在运行时做什么**
+
+它解析 Bucket 并委托纯 Listing 函数，同时阻止并发变更在读取中途改变快照。
+
+**关键代码**
+
+```python
+return list_object_versions(self._bucket(bucket).records, prefix=prefix)
+```
+
+**关键语句理解**
+
+服务传入 records，但不重复投影逻辑。这样职责清晰，纯函数也能独立理解。
+
+**讲解: `tests/test_versioning.py`**
+
+**是什么，为什么现在需要**
 
 三个新场景锁定未版本化替换、暂停替换和暂停删除后的投影。
 
-##### 在运行时做什么
+**在运行时做什么**
 
 它们观察真实服务变更后的公开历史，因此证据同时覆盖 Bucket 与投影，而不是只测虚构输入。
 
-##### 关键代码
+**关键代码**
 
 ```python
 assert marker is not None and marker.version_id == "null"
 ```
 
-##### 关键语句理解
+**关键语句理解**
 
 暂停不表示删除变成物理删除。新 Marker 占据公开 `null` 槽，具名历史仍可寻址。
+
+#### 公开导出接线
+
+导出投影结果类型；其行为由上面的投影板块负责。
+
+??? note "查看本板块差异（1 个文件）"
+    **`src/minis3/__init__.py`**
+
+    ```diff
+    diff --git a/src/minis3/__init__.py b/src/minis3/__init__.py
+    index 11378e1..f9c1adf 100644
+    --- a/src/minis3/__init__.py
+    +++ b/src/minis3/__init__.py
+    @@ -4,3 +4,4 @@ from .bucket import SequenceCounter, VersioningState
+     from .model import DeleteMarker, ObjectRecord, Version, content_etag
+     from .store import MiniS3
+     from .storage import InjectedCrash
+    +from .listing import ListedVersion, ListObjectVersionsResult
+    ```
+
 
 ### 验证证据
 
