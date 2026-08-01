@@ -9,6 +9,7 @@ from threading import RLock
 
 from .bucket import Bucket, SequenceCounter, VersioningState
 from .errors import BucketAlreadyExists, BucketNotEmpty, NoSuchBucket
+from .listing import ListObjectVersionsResult, list_object_versions
 from .model import ObjectVersion, Version
 from .storage import DiskStorage
 
@@ -94,6 +95,13 @@ class MiniS3:
             self._storage.persist_bucket(candidate)
             self._buckets[bucket] = candidate
             return result
+
+
+    def list_object_versions(
+        self, bucket: str, *, prefix: str = ""
+    ) -> ListObjectVersionsResult:
+        with self._lock:
+            return list_object_versions(self._bucket(bucket).records, prefix=prefix)
 
 
     def _bucket(self, name: str) -> Bucket:
