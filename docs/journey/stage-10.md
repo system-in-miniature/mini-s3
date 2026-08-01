@@ -4,14 +4,15 @@
 
 Persist private multipart uploads and atomically replace parts without publishing an object.
 
-### Deliverable files / 交付文件
+### Deliverable files
 
-- `src/minis3/__init__.py`
-- `src/minis3/bucket.py`
-- `src/minis3/model.py`
-- `src/minis3/storage/disk.py`
-- `src/minis3/store.py`
-- `tests/test_multipart.py`
+??? note "Show deliverable files"
+    - `src/minis3/__init__.py`
+    - `src/minis3/bucket.py`
+    - `src/minis3/model.py`
+    - `src/minis3/storage/disk.py`
+    - `src/minis3/store.py`
+    - `tests/test_multipart.py`
 
 ### The problem at this point
 

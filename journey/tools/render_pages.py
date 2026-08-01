@@ -63,7 +63,7 @@ CODE_FENCE = re.compile(
 REQUIRED_HEADINGS = {
     False: (
         "### Goal",
-        "### Deliverable files / 交付文件",
+        "### Deliverable files",
         "### The problem at this point",
         "### Failure preview",
         "### Basic concepts",
@@ -298,6 +298,18 @@ def _render_diff(file_patch: FilePatch, *, chinese: bool) -> str:
     return "\n".join(lines)
 
 
+def _collapse_deliverables(prelude: str, *, chinese: bool) -> str:
+    heading = "### 交付文件" if chinese else "### Deliverable files"
+    label = "展开交付文件" if chinese else "Show deliverable files"
+    heading_start = prelude.index(heading)
+    content_start = heading_start + len(heading)
+    next_heading = prelude.index("\n### ", content_start)
+    items = prelude[content_start:next_heading].strip()
+    indented = "\n".join(f"    {line}" if line else "" for line in items.splitlines())
+    collapsed = f'{heading}\n\n??? note "{label}"\n{indented}\n\n'
+    return prelude[:heading_start] + collapsed + prelude[next_heading + 1:]
+
+
 def render_card(card: Card, *, chinese: bool) -> str:
     title = card.chinese_title if chinese else card.english_title
     body = card.chinese if chinese else card.english
@@ -322,7 +334,7 @@ def render_card(card: Card, *, chinese: bool) -> str:
     patch_link = f"{REPO_URL}/blob/main/journey/stages/{card.number:02d}-{card.slug}/stage.patch"
     return (
         f"# Stage {card.number:02d} · {title}\n\n"
-        f"{lesson.pre_walkthrough}\n\n"
+        f"{_collapse_deliverables(lesson.pre_walkthrough, chinese=chinese)}\n\n"
         + "\n\n".join(file_sections)
         + f"\n\n{lesson.post_walkthrough}\n\n"
         f"[{link_label}]({compare_link(card.number)})\n\n"

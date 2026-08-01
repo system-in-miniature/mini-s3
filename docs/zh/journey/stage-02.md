@@ -6,8 +6,9 @@
 
 ### 交付文件
 
-- `src/minis3/bucket.py`
-- `tests/test_bucket.py`
+??? note "展开交付文件"
+    - `src/minis3/bucket.py`
+    - `tests/test_bucket.py`
 
 ### 当前遇到的问题
 

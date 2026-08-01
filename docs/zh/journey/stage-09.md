@@ -6,9 +6,10 @@
 
 ### 交付文件
 
-- `src/minis3/errors.py`
-- `src/minis3/multipart.py`
-- `tests/test_multipart_domain.py`
+??? note "展开交付文件"
+    - `src/minis3/errors.py`
+    - `src/minis3/multipart.py`
+    - `tests/test_multipart_domain.py`
 
 ### 当前遇到的问题
 

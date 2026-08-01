@@ -8,7 +8,7 @@
 
 Verify directory-entry durability and recovery cleanup for temporary and unreferenced crash debris.
 
-### Deliverable files / 交付文件
+### Deliverable files
 
 - `tests/test_storage.py`
 

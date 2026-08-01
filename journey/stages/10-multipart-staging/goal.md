@@ -8,7 +8,7 @@
 
 Persist private multipart uploads and atomically replace parts without publishing an object.
 
-### Deliverable files / 交付文件
+### Deliverable files
 
 - `src/minis3/__init__.py`
 - `src/minis3/bucket.py`

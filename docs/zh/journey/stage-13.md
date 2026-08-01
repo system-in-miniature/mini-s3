@@ -6,11 +6,12 @@
 
 ### 交付文件
 
-- `src/minis3/__init__.py`
-- `src/minis3/conditional.py`
-- `src/minis3/errors.py`
-- `src/minis3/store.py`
-- `tests/test_conditional.py`
+??? note "展开交付文件"
+    - `src/minis3/__init__.py`
+    - `src/minis3/conditional.py`
+    - `src/minis3/errors.py`
+    - `src/minis3/store.py`
+    - `tests/test_conditional.py`
 
 ### 当前遇到的问题
 

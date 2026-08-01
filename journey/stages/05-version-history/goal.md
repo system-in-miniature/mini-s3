@@ -8,7 +8,7 @@
 
 Project complete histories without collapsing null versions, named versions, and delete markers.
 
-### Deliverable files / 交付文件
+### Deliverable files
 
 - `src/minis3/__init__.py`
 - `src/minis3/listing.py`

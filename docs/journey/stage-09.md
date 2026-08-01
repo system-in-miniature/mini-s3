@@ -4,11 +4,12 @@
 
 Model multipart upload identity, staged parts, ordered completion rules, and composite ETags before storage orchestration.
 
-### Deliverable files / 交付文件
+### Deliverable files
 
-- `src/minis3/errors.py`
-- `src/minis3/multipart.py`
-- `tests/test_multipart_domain.py`
+??? note "Show deliverable files"
+    - `src/minis3/errors.py`
+    - `src/minis3/multipart.py`
+    - `tests/test_multipart_domain.py`
 
 ### The problem at this point
 

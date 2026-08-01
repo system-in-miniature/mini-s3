@@ -26,7 +26,7 @@ Each `## English` and `## 中文` body must contain these headings in order:
 
 ```markdown
 ### Goal / 目标
-### Deliverable files / 交付文件
+### Deliverable files
 ### The problem at this point / 当前遇到的问题
 ### Failure preview / 先看会坏在哪里
 ### Basic concepts / 基本概念

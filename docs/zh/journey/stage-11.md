@@ -6,8 +6,9 @@
 
 ### 交付文件
 
-- `src/minis3/store.py`
-- `tests/test_multipart.py`
+??? note "展开交付文件"
+    - `src/minis3/store.py`
+    - `tests/test_multipart.py`
 
 ### 当前遇到的问题
 

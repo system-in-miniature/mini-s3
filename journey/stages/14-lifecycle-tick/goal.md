@@ -8,7 +8,7 @@
 
 Separate pure expiration decisions from an explicit mutation tick driven by an injected clock.
 
-### Deliverable files / 交付文件
+### Deliverable files
 
 - `src/minis3/__init__.py`
 - `src/minis3/lifecycle.py`

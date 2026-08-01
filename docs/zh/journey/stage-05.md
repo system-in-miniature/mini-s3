@@ -6,10 +6,11 @@
 
 ### 交付文件
 
-- `src/minis3/__init__.py`
-- `src/minis3/listing.py`
-- `src/minis3/store.py`
-- `tests/test_versioning.py`
+??? note "展开交付文件"
+    - `src/minis3/__init__.py`
+    - `src/minis3/listing.py`
+    - `src/minis3/store.py`
+    - `tests/test_versioning.py`
 
 ### 当前遇到的问题
 

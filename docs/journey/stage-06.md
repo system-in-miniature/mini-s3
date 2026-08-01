@@ -4,12 +4,13 @@
 
 Derive current contents and common prefixes from flat keys, with query-bound opaque pagination tokens.
 
-### Deliverable files / 交付文件
+### Deliverable files
 
-- `src/minis3/__init__.py`
-- `src/minis3/listing.py`
-- `src/minis3/store.py`
-- `tests/test_listing.py`
+??? note "Show deliverable files"
+    - `src/minis3/__init__.py`
+    - `src/minis3/listing.py`
+    - `src/minis3/store.py`
+    - `tests/test_listing.py`
 
 ### The problem at this point
 

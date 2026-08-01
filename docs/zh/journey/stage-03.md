@@ -6,10 +6,11 @@
 
 ### 交付文件
 
-- `src/minis3/storage/__init__.py`
-- `src/minis3/storage/atomic.py`
-- `src/minis3/storage/disk.py`
-- `tests/test_storage_boundary.py`
+??? note "展开交付文件"
+    - `src/minis3/storage/__init__.py`
+    - `src/minis3/storage/atomic.py`
+    - `src/minis3/storage/disk.py`
+    - `tests/test_storage_boundary.py`
 
 ### 当前遇到的问题
 

@@ -6,7 +6,8 @@
 
 ### 交付文件
 
-- `src/minis3/__init__.py`
+??? note "展开交付文件"
+    - `src/minis3/__init__.py`
 
 ### 当前遇到的问题
 

@@ -8,7 +8,7 @@
 
 Create an installable package and the immutable values that every later object operation will carry.
 
-### Deliverable files / 交付文件
+### Deliverable files
 
 - `README.md`
 - `pyproject.toml`

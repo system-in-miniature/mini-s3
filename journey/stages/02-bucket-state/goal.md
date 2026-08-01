@@ -8,7 +8,7 @@
 
 Introduce the Bucket aggregate, legal versioning transitions, and deterministic identities.
 
-### Deliverable files / 交付文件
+### Deliverable files
 
 - `src/minis3/bucket.py`
 - `tests/test_bucket.py`

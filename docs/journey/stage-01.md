@@ -4,15 +4,16 @@
 
 Create an installable package and the immutable values that every later object operation will carry.
 
-### Deliverable files / 交付文件
+### Deliverable files
 
-- `README.md`
-- `pyproject.toml`
-- `src/minis3/__init__.py`
-- `src/minis3/errors.py`
-- `src/minis3/model.py`
-- `tests/test_model.py`
-- `uv.lock`
+??? note "Show deliverable files"
+    - `README.md`
+    - `pyproject.toml`
+    - `src/minis3/__init__.py`
+    - `src/minis3/errors.py`
+    - `src/minis3/model.py`
+    - `tests/test_model.py`
+    - `uv.lock`
 
 ### The problem at this point
 

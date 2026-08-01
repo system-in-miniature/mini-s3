@@ -8,7 +8,7 @@
 
 Join Bucket and DiskStorage behind one locked public service for bucket and object operations.
 
-### Deliverable files / 交付文件
+### Deliverable files
 
 - `src/minis3/__init__.py`
 - `src/minis3/store.py`

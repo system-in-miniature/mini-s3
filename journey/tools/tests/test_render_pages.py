@@ -90,7 +90,7 @@ class RenderPagesTest(unittest.TestCase):
         )
         valid = """### Goal
 
-### Deliverable files / 交付文件
+### Deliverable files
 
 ### The problem at this point
 
@@ -188,6 +188,15 @@ Book.
                 )
                 self.assertIn("Complete reference patch / 完整参考补丁", page)
                 self.assertEqual(page.count("diff --git "), self.stage_one.patch.count("diff --git "))
+
+    def test_deliverable_file_lists_are_collapsed_in_browser_pages(self) -> None:
+        english = render_pages.render_card(self.stage_one, chinese=False)
+        chinese = render_pages.render_card(self.stage_one, chinese=True)
+
+        self.assertIn('### Deliverable files\n\n??? note "Show deliverable files"', english)
+        self.assertIn('### 交付文件\n\n??? note "展开交付文件"', chinese)
+        self.assertIn("    - `src/minis3/model.py`", english)
+        self.assertIn("    - `src/minis3/model.py`", chinese)
 
     def test_all_stages_have_bilingual_authored_teaching_content(self) -> None:
         self.assertEqual(len(self.cards), 15)

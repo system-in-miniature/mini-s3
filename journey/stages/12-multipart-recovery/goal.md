@@ -8,7 +8,7 @@
 
 Prove retryable staging before multipart publication and cleanup after publication.
 
-### Deliverable files / 交付文件
+### Deliverable files
 
 - `tests/test_storage.py`
 

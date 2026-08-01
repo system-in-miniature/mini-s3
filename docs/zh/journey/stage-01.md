@@ -6,13 +6,14 @@
 
 ### 交付文件
 
-- `README.md`
-- `pyproject.toml`
-- `src/minis3/__init__.py`
-- `src/minis3/errors.py`
-- `src/minis3/model.py`
-- `tests/test_model.py`
-- `uv.lock`
+??? note "展开交付文件"
+    - `README.md`
+    - `pyproject.toml`
+    - `src/minis3/__init__.py`
+    - `src/minis3/errors.py`
+    - `src/minis3/model.py`
+    - `tests/test_model.py`
+    - `uv.lock`
 
 ### 当前遇到的问题
 

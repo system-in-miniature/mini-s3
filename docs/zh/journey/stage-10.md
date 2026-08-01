@@ -6,12 +6,13 @@
 
 ### 交付文件
 
-- `src/minis3/__init__.py`
-- `src/minis3/bucket.py`
-- `src/minis3/model.py`
-- `src/minis3/storage/disk.py`
-- `src/minis3/store.py`
-- `tests/test_multipart.py`
+??? note "展开交付文件"
+    - `src/minis3/__init__.py`
+    - `src/minis3/bucket.py`
+    - `src/minis3/model.py`
+    - `src/minis3/storage/disk.py`
+    - `src/minis3/store.py`
+    - `tests/test_multipart.py`
 
 ### 当前遇到的问题
 

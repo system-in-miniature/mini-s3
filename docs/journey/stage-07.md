@@ -4,9 +4,10 @@
 
 Prove the manifest rename is the single visibility boundary by crashing immediately before and after it.
 
-### Deliverable files / 交付文件
+### Deliverable files
 
-- `tests/test_storage.py`
+??? note "Show deliverable files"
+    - `tests/test_storage.py`
 
 ### The problem at this point
 
