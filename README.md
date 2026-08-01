@@ -74,14 +74,14 @@ groups matching strings.
 2. **[Self-Guided Rebuild](docs/journey/index.md)** — follow 15 complete browser
    lessons that explain the problem, one failure preview, the concepts, every
    changed file, and its critical statements.
-3. **[Agent-Guided Rebuild](docs/agent-guided.md)** — run
-   `python journey/tools/build_journey.py agent N`, open the prepared workspace
-   in Codex, and learn Stage N through interactive screening, implementation,
-   guided code reading, and parity verification.
+3. **[Agent-Guided Rebuild](docs/agent-guided.md)** — open Codex in this
+   repository and say `开始 Agent 带教 Stage NN`; Codex prepares or resumes the
+   Stage automatically, then guides screening, implementation, code reading,
+   and parity verification.
 
 Tests are executable motivation and final evidence, not a required test-first
 teaching sequence. The Agent-Guided web page is only a usage guide; its actual
-teaching behavior comes from `AGENTS.md` plus the selected Stage context.
+teaching behavior comes from `AGENTS.md` plus the canonical Stage sources.
 
 ## Repository tour
 

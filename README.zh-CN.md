@@ -67,12 +67,12 @@ print(stored.version_id, stored.etag)
 1. **[机制教程](docs/zh/tutorial/index.md)**：按主题理解对象存储机制。
 2. **[自主重建](docs/zh/journey/index.md)**：通过 15 个完整浏览课程，依次理解当前
    问题、一条失败预览、基本概念、每个变更文件与关键语句。
-3. **[Agent 带教](docs/zh/agent-guided.md)**：运行
-   `python journey/tools/build_journey.py agent N`，在 Codex 中进入准备好的工作区，
-   通过互动筛查、实现、小片段代码走读与 parity 验收完成 Stage N。
+3. **[Agent 带教](docs/zh/agent-guided.md)**：在当前仓库打开 Codex，直接说
+   `开始 Agent 带教 Stage NN`；Codex 会自动准备或续接 Stage，再通过互动筛查、实现、
+   小片段代码走读与 parity 验收完成学习。
 
 测试是可执行的问题动机和最终证据，不要求把整套课程写成测试优先。Agent 带教网页
-只提供使用教程；实际教学行为由 `AGENTS.md` 和选中的 Stage 资料驱动。
+只提供使用教程；实际教学行为由 `AGENTS.md` 和 canonical Stage 资料驱动。
 
 ## 仓库导览
 

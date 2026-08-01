@@ -40,8 +40,8 @@ Multipart、条件请求与生命周期。
 
 ### Agent 带教
 
-按照 [Agent 带教使用教程](agent-guided.md)准备专用工作区中的 `stage-NN`，再由 Codex
-根据 `AGENTS.md` 进行互动带教。
+按照 [Agent 带教使用教程](agent-guided.md)在 MiniS3 中打开 Codex，直接说
+`开始 Agent 带教 Stage NN`，Codex 会自动准备或续接并开始互动带教。
 
 ## 阅读顺序
 

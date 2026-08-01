@@ -18,12 +18,13 @@ import tempfile
 ROOT = Path(__file__).resolve().parents[2]
 STAGES_ROOT = ROOT / "journey" / "stages"
 DEFAULT_LEARNING_WORKSPACE = ROOT.parent / "MiniS3-journey-workspace"
-AGENT_CONTRACT = ROOT / "AGENTS.md"
+DEFAULT_AGENT_WORKSPACES_ROOT = ROOT / ".journey-workspaces"
 STAGE_PATTERN = re.compile(r"^(?P<number>\d{2})-(?P<slug>[a-z0-9-]+)$")
 DIFF_HEADER = re.compile(r"^diff --git a/(.+) b/(.+)$")
 DELIVERY_HEADING = "### Deliverable files / 交付文件"
 DELIVERY_ITEM = re.compile(r"^- `([^`]+)`$")
 WORKSPACE_CONFIG_KEY = "journey.learningWorkspace"
+AGENT_STAGE_CONFIG_KEY = "journey.agentStage"
 PARITY_EXCLUSIONS = {"tests": {"test_docs_homepage.py"}}
 WORKSPACE_EXCLUDES = (
     ".venv/",
@@ -423,17 +424,11 @@ def attempt(stage: Stage, stages: list[Stage], workspace: Path, *, yes: bool) ->
     print(f"Pass: {pass_command}")
 
 
-def agent(stage: Stage, stages: list[Stage], workspace: Path, *, yes: bool) -> None:
-    """Prepare a clean baseline plus ignored, agent-facing Stage context."""
+def default_agent_workspace(stage: Stage) -> Path:
+    return DEFAULT_AGENT_WORKSPACES_ROOT / stage.label
 
-    rebuild_baseline(workspace, stage, stages, yes=yes)
-    support = workspace / ".journey"
-    support.mkdir()
-    shutil.copyfile(AGENT_CONTRACT, workspace / "AGENTS.md")
-    shutil.copyfile(stage.goal, support / "stage.md")
-    shutil.copyfile(stage.patch, support / "reference.patch")
-    shutil.copyfile(stage.tests, support / "tests.txt")
-    (support / "stage-number.txt").write_text(f"{stage.number:02d}\n")
+
+def print_agent_handoff(stage: Stage, workspace: Path, *, status: str) -> None:
     check_command = shlex.join(
         [
             sys.executable,
@@ -444,11 +439,42 @@ def agent(stage: Stage, stages: list[Stage], workspace: Path, *, yes: bool) -> N
             str(workspace.resolve()),
         ]
     )
-    (support / "check-command.txt").write_text(check_command + "\n")
-    print(f"[agent {stage.label}] READY — clean baseline plus tutor context")
-    print(f"Open CLI: cd {shlex.quote(str(workspace.resolve()))} && codex")
-    print(f"Start prompt: 开始 Stage {stage.number:02d}")
-    print(f"Pass: {check_command}")
+    print(f"[agent {stage.label}] {status}")
+    print(f"WORKSPACE: {workspace.resolve()}")
+    print(f"CHECK: {check_command}")
+
+
+def agent(stage: Stage, stages: list[Stage], workspace: Path, *, yes: bool) -> None:
+    """Prepare once, then resume a Stage-specific learner repository."""
+
+    workspace = workspace.resolve()
+    if (workspace / ".git").exists() and not yes:
+        initialize_learning_workspace(workspace)
+        configured = run_result(
+            ["git", "config", "--local", "--get", AGENT_STAGE_CONFIG_KEY],
+            cwd=workspace,
+        )
+        if not configured.returncode and configured.stdout.strip() == f"{stage.number:02d}":
+            print_agent_handoff(stage, workspace, status="RESUME")
+            return
+        if not configured.returncode:
+            raise JourneyError(
+                f"{workspace} is prepared for Stage {configured.stdout.strip()}; "
+                "use its Stage-specific workspace or pass --yes to reset it"
+            )
+
+    rebuild_baseline(workspace, stage, stages, yes=yes)
+    run(
+        [
+            "git",
+            "config",
+            "--local",
+            AGENT_STAGE_CONFIG_KEY,
+            f"{stage.number:02d}",
+        ],
+        cwd=workspace,
+    )
+    print_agent_handoff(stage, workspace, status="READY")
 
 
 def index_tree(
@@ -662,14 +688,19 @@ def main() -> int:
 
     agent_parser = subparsers.add_parser(
         "agent",
-        help="prepare stage N with AGENTS.md and private tutor context",
+        help="prepare or resume a Stage-specific interactive learner workspace",
     )
     agent_parser.add_argument("stage", type=int, metavar="N")
-    add_workspace_argument(agent_parser)
+    agent_parser.add_argument(
+        "--workspace",
+        type=Path,
+        default=None,
+        help="override the Stage-specific internal learner repository",
+    )
     agent_parser.add_argument(
         "--yes",
         action="store_true",
-        help="skip the overwrite confirmation",
+        help="explicitly reset an existing Stage workspace",
     )
 
     check_parser = subparsers.add_parser(
@@ -691,7 +722,8 @@ def main() -> int:
             elif arguments.command == "attempt":
                 attempt(stage, stages, arguments.workspace, yes=arguments.yes)
             elif arguments.command == "agent":
-                agent(stage, stages, arguments.workspace, yes=arguments.yes)
+                workspace = arguments.workspace or default_agent_workspace(stage)
+                agent(stage, stages, workspace, yes=arguments.yes)
             else:
                 check_learning_workspace(stage, stages, arguments.workspace)
     except JourneyError as exc:

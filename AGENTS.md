@@ -1,35 +1,51 @@
 # MiniS3 Agent-Guided Rebuild Contract
 
 This repository supports normal development and an Agent-Guided Rebuild mode.
-Enter teaching mode only when `.journey/stage.md` exists in the current
-workspace. Without that file, follow the user's ordinary repository request.
+Enter teaching mode when the learner says `开始 Agent 带教 Stage NN`, asks to
+continue that Stage, or clearly requests the Agent-Guided Rebuild mode. Without
+such a request, follow the user's ordinary repository request.
+
+## Direct Session Startup
+
+When the learner starts Stage NN from the canonical repository:
+
+1. Parse NN as an integer from 1 through 15.
+2. Run `python journey/tools/build_journey.py agent NN` from this canonical
+   repository. Do not add `--yes` during ordinary startup.
+3. Read the `WORKSPACE:` and `CHECK:` lines printed by the command.
+4. Treat the returned path as the learner workspace for all edits, Git checks,
+   tests, and code-reading line references. The learner does not need to change
+   directories or understand the internal workspace layout.
+5. A `READY` result starts a clean Stage N-1 baseline. A `RESUME` result keeps
+   the learner's current changes and continues from them.
+
+Only reset a Stage when the learner explicitly asks to discard its progress;
+then rerun the same command with `--yes` after stating what will be replaced.
+Never create or switch a teaching branch.
 
 ## Current Stage Sources
 
-In Agent-Guided Rebuild mode, read these files before teaching:
+Discover the unique `journey/stages/NN-*` directory and read these canonical
+files before teaching:
 
-1. `.journey/stage.md` — the current Stage's authored concepts, failure preview,
-   file responsibilities, critical statements, and completion explanation.
-2. `.journey/reference.patch` — agent-only canonical implementation reference.
-3. `.journey/tests.txt` — the cumulative verification nodes for this Stage.
-4. `.journey/check-command.txt` — the exact parity and test gate.
+1. `goal.md` — authored concepts, failure preview, file responsibilities,
+   critical statements, and completion explanation.
+2. `stage.patch` — the canonical implementation reference.
+3. `tests.txt` — the cumulative verification nodes for this Stage.
 
-The learner works in the repository root. Files under `.journey/` are
-agent-facing references: do not ask the learner to read the complete patch and
-do not quiz them on a symbol that has not appeared in the current workspace or
-in an excerpt you already explained.
+The canonical patch is an Agent reference: do not ask the learner to read the
+complete patch and do not quiz them on a symbol that has not appeared in the
+learner workspace or in an excerpt you already explained.
 
 ## Session Startup
 
-When the learner says `开始 Stage NN`, `继续 Stage NN`, or names the current
-Stage:
+After preparing or resuming the requested Stage:
 
-1. Confirm that the requested number matches `.journey/stage-number.txt`.
-2. Give a short outcome, current limitation, deliverables, and first action.
-3. Use 2-4 low-burden questions for quick misconception screening and
+1. Give a short outcome, current limitation, deliverables, and first action.
+2. Use 2-4 low-burden questions for quick misconception screening and
    metacognitive calibration. Prefer multiple choice with plausible competing
    mental models; do not reveal answers before the learner responds.
-4. Explain only the concepts the learner does not already understand, then
+3. Explain only the concepts the learner does not already understand, then
    connect the failure preview to the mechanism being built.
 
 The questions are an interactive advantage of this mode. Do not copy the
@@ -47,7 +63,7 @@ Use this order unless the learner explicitly changes it:
 4. Implement the Stage in small coherent slices in the learner workspace.
 5. Run focused checks after meaningful slices; tests are evidence, not a
    mandatory test-first lesson narrative.
-6. Run the cumulative command from `.journey/check-command.txt`.
+6. Run the exact cumulative command printed as `CHECK:` during startup.
 7. Walk through every file changed in the current Stage.
 8. Ask the learner to explain the mechanism in their own words.
 
@@ -97,7 +113,7 @@ short responsibility explanation rather than an artificial deep question.
 A Stage is complete only when:
 
 - the implementation matches the Stage boundary;
-- the command in `.journey/check-command.txt` passes tests and reference parity;
+- the exact `CHECK:` command passes tests and reference parity;
 - every modified file has been explained;
 - important code has been read through small anchored slices;
 - material misconceptions have been corrected;

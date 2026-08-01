@@ -120,7 +120,7 @@ class LearningWorkspaceTest(unittest.TestCase):
             self.assertIn("stage-02 tests failed", attempt_check.stdout)
             self.assertIn("src/minis3/bucket.py", attempt_check.stdout)
 
-    def test_agent_mode_installs_tutor_contract_and_current_stage_context(self) -> None:
+    def test_agent_mode_prepares_then_resumes_without_copying_tutor_sources(self) -> None:
         with tempfile.TemporaryDirectory(prefix="minis3-agent-test-") as temporary:
             workspace = Path(temporary) / "learner"
             cli = [sys.executable, str(TOOL)]
@@ -130,35 +130,45 @@ class LearningWorkspaceTest(unittest.TestCase):
             ).stdout
 
             self.assertIn("[agent stage-03] READY", output)
-            self.assertIn("Start prompt: 开始 Stage 03", output)
-            self.assertIn("codex", output)
-            self.assertTrue((workspace / "AGENTS.md").is_file())
-            self.assertTrue((workspace / ".journey" / "stage.md").is_file())
-            self.assertTrue((workspace / ".journey" / "reference.patch").is_file())
-            self.assertTrue((workspace / ".journey" / "tests.txt").is_file())
-            self.assertIn(
-                "# Stage 03 · Durable storage boundary",
-                (workspace / ".journey" / "stage.md").read_text(),
-            )
-            self.assertIn(
-                "quick misconception screening",
-                (workspace / "AGENTS.md").read_text(),
-            )
+            self.assertIn(f"WORKSPACE: {workspace.resolve()}", output)
+            self.assertIn("CHECK:", output)
+            self.assertFalse((workspace / "AGENTS.md").exists())
+            self.assertFalse((workspace / ".journey").exists())
             self.assertEqual(
                 run(["git", "status", "--short"], cwd=workspace).stdout,
                 "",
+            )
+            self.assertEqual(
+                run(
+                    ["git", "config", "--local", "--get", "journey.agentStage"],
+                    cwd=workspace,
+                ).stdout.strip(),
+                "03",
             )
 
-            # Existing learning repositories created before agent mode should
-            # gain the support-file excludes on their next preparation.
-            (workspace / ".git" / "info" / "exclude").write_text(
-                ".venv/\n.pytest_cache/\n__pycache__/\n*.pyc\n"
-            )
-            run([*cli, "agent", "4", "--workspace", str(workspace), "--yes"])
-            self.assertEqual(
-                run(["git", "status", "--short"], cwd=workspace).stdout,
-                "",
-            )
+            learner_note = workspace / "learner-note.txt"
+            learner_note.write_text("keep my progress\n")
+            resumed = run(
+                [*cli, "agent", "3", "--workspace", str(workspace)]
+            ).stdout
+
+            self.assertIn("[agent stage-03] RESUME", resumed)
+            self.assertEqual(learner_note.read_text(), "keep my progress\n")
+
+    def test_default_agent_workspace_is_scoped_by_stage(self) -> None:
+        stages = build_journey.discover_stages()
+
+        stage_03 = build_journey.select_stage(3, stages)
+        stage_04 = build_journey.select_stage(4, stages)
+
+        self.assertEqual(
+            build_journey.default_agent_workspace(stage_03),
+            ROOT / ".journey-workspaces" / "stage-03",
+        )
+        self.assertEqual(
+            build_journey.default_agent_workspace(stage_04),
+            ROOT / ".journey-workspaces" / "stage-04",
+        )
 
 
 if __name__ == "__main__":

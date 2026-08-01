@@ -42,11 +42,29 @@ class DocumentationHomepageTest(unittest.TestCase):
         self.assertIn("Mechanism Tutorial:", navigation)
         self.assertIn("Self-Guided Rebuild:", navigation)
         self.assertIn("Agent-Guided Rebuild:", navigation)
-        self.assertIn("build_journey.py agent N", english_agent)
-        self.assertIn("AGENTS.md", english_agent)
-        self.assertIn("开始 Stage NN", chinese_agent)
+        self.assertIn("开始 Agent 带教 Stage 03", english_agent)
+        self.assertIn("开始 Agent 带教 Stage 03", chinese_agent)
+        for internal_detail in (
+            "build_journey.py agent N",
+            ".journey/",
+            "agent-only",
+            "branch",
+        ):
+            self.assertNotIn(internal_detail, english_agent)
+            self.assertNotIn(internal_detail, chinese_agent)
         self.assertNotIn("### Basic concepts", english_agent)
         self.assertNotIn("### 基本概念", chinese_agent)
+
+    def test_same_page_language_switch_is_loaded(self) -> None:
+        navigation = Path("mkdocs.yml").read_text(encoding="utf-8")
+        script = Path("docs/assets/javascripts/language-switch.js")
+
+        self.assertIn("assets/javascripts/language-switch.js", navigation)
+        self.assertTrue(script.is_file())
+        source = script.read_text(encoding="utf-8")
+        self.assertIn('"journey/"', source)
+        self.assertIn('"tutorial/"', source)
+        self.assertIn('"zh/"', source)
 
 
 if __name__ == "__main__":

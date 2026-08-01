@@ -60,11 +60,11 @@ through every changed file and its critical statements.
 
 ### Agent-Guided Rebuild / Agent 带教
 
-Use the [Agent-Guided Rebuild tutorial](agent-guided.md) to prepare `stage-NN`
-in a dedicated workspace and learn interactively with Codex through `AGENTS.md`.
+Open Codex in MiniS3 and follow the [Agent-Guided Rebuild tutorial](agent-guided.md):
+say `开始 Agent 带教 Stage NN` and Codex prepares or resumes the Stage automatically.
 
-按照 [Agent 带教使用教程](zh/agent-guided.md)准备专用工作区中的 `stage-NN`，再由
-Codex 根据 `AGENTS.md` 进行互动带教。
+按照 [Agent 带教使用教程](zh/agent-guided.md)在 MiniS3 中打开 Codex，直接说
+`开始 Agent 带教 Stage NN`，Codex 会自动准备或续接并开始互动带教。
 
 ## Reading path / 阅读顺序
 

@@ -71,22 +71,23 @@ stage。`attempt 3` 回到同一干净基线供你自己实现，`check 3` 运�
 
 ## Learn with a CLI agent / 使用 CLI Agent 带教
 
-Prepare a clean Stage N-1 baseline together with ignored agent-only context:
+Open Codex in the canonical MiniS3 repository:
 
 ```bash
-python journey/tools/build_journey.py agent 3
-cd ../MiniS3-journey-workspace
 codex
 ```
 
-Then say `开始 Stage 03`. The workspace-root `AGENTS.md` tells the agent to use
-quick misconception screening, guided 5-15 line code slices, every-file
-walkthrough, and the exact Stage parity gate. Full setup instructions are in
-[`docs/agent-guided.md`](../docs/agent-guided.md).
+Then say `开始 Agent 带教 Stage 03`. The root `AGENTS.md` prepares or resumes a
+Stage-specific learner repository automatically, then uses quick misconception
+screening, guided 5-15 line code slices, every-file walkthrough, and the exact
+Stage parity gate. Full usage instructions are in
+[`docs/agent-guided.md`](../docs/agent-guided.md). The `agent N` helper remains
+an internal handoff used by the Agent; learners do not need to run it.
 
-准备命令会创建干净 Stage N-1 基线，并放入被 Git 忽略的 agent-only 资料。进入
-Codex 后发送 `开始 Stage 03`；详细步骤见
-[`docs/zh/agent-guided.md`](../docs/zh/agent-guided.md)。
+在 canonical MiniS3 仓库中打开 Codex，直接发送
+`开始 Agent 带教 Stage 03`。根目录 `AGENTS.md` 会自动创建或续接 Stage 独立学习
+仓库，再执行快速理解筛查、小片段代码走读、逐文件讲解和精确 parity 验收。详细使用
+步骤见 [`docs/zh/agent-guided.md`](../docs/zh/agent-guided.md)。
 
 Verify without changing refs:
 

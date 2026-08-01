@@ -1,55 +1,33 @@
 # Agent-Guided Rebuild
 
-Use this mode when you want Codex to guide one MiniS3 Stage interactively in a
-terminal. The command prepares a clean Stage N-1 baseline, installs `AGENTS.md`,
-and places the current Stage's agent-only context in `.journey/`.
+Use this mode when you want Codex to guide one MiniS3 Stage interactively in
+the terminal.
 
-## 1. Prepare a Stage
-
-From the MiniS3 repository:
+## 1. Open Codex in MiniS3
 
 ```bash
-python journey/tools/build_journey.py agent N
-```
-
-Replace `N` with a number from 1 to 15. For example:
-
-```bash
-python journey/tools/build_journey.py agent 3
-```
-
-The default learning repository is `../MiniS3-journey-workspace`. Rebuilding an
-existing workspace asks for confirmation; add `--yes` only when you intend to
-replace its current Stage work.
-
-## 2. Open the CLI Agent
-
-```bash
-cd ../MiniS3-journey-workspace
+cd MiniS3
 codex
 ```
 
-Then send:
+## 2. Ask to start a Stage
+
+Send this directly to Codex:
 
 ```text
-开始 Stage 03
+开始 Agent 带教 Stage 03
 ```
 
-Use the two-digit Stage number printed by the preparation command.
+Replace `03` with any Stage from `01` through `15`. Codex prepares the correct
+starting state automatically and begins with a short understanding check before
+teaching and implementing the Stage.
 
-## 3. Continue and Verify
+## 3. Continue or return later
 
-The agent reads `AGENTS.md` and `.journey/stage.md`, uses quick questions to
-calibrate your current understanding, implements the Stage in small slices,
-and guides the code walkthrough. Ask `继续` to move on or ask for a direct
-explanation whenever a question is not useful.
+Answer Codex's question, ask for a direct explanation, or say `继续`. If you
+leave and later send the same Stage request again, Codex resumes your existing
+progress automatically.
 
-At the end, the agent runs the exact command stored in
-`.journey/check-command.txt`. It verifies both cumulative tests and parity with
-the canonical Stage tree.
-
-To use a different workspace:
-
-```bash
-python journey/tools/build_journey.py agent 3 --workspace /absolute/path/to/workspace
-```
+When the Stage is complete, Codex runs its cumulative tests and checks the
+result against the canonical Stage boundary. Ask to reset the Stage only when
+you intentionally want to discard that Stage's current progress.
