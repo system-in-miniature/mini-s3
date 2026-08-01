@@ -4,10 +4,6 @@
 
 Turn ETags into cache validators and serialized compare-and-swap preconditions.
 
-### Hands-on task
-
-Starting from stage-12, Implement ETag matching plus `if_match`/`if_none_match` on object operations while holding `_lock`. Keep all behavior inside the listed source-like boundaries; do not copy the patch first.
-
 ### Deliverable files / 交付文件
 
 - `src/minis3/__init__.py`
@@ -351,23 +347,27 @@ Calls the learner-visible boundary and records the expected state or failure; st
     +
     ```
 
-### Self-check
-
-1. Where is this stage's visibility or state transition owned?
-
-    ??? note "Answer"
-        The comparison and publication must share one critical section or two writers can both win.
-
-2. Which test would fail first if the new boundary were bypassed?
-
-    ??? note "Answer"
-        Read `tests.txt`, identify the narrowest new node, and name the public call it exercises.
-
-### Pass command
+### Verification evidence
 
 `uv run pytest -q $(cat journey/stages/13-conditional-cas/tests.txt)`
 
-### The real S3 lesson
+This stage adds 4 executable case(s), anchored at `test_get_if_none_match_has_304_semantics_and_if_match_has_412`, `test_put_and_delete_if_match_compare_against_current_visible_etag`, `test_if_match_wildcard_requires_a_current_visible_object`, `test_two_conditional_writers_have_exactly_one_winner`. Run them after the mechanism walkthrough; the cumulative gate also reruns every earlier stage contract.
+
+### Concept check
+
+Which invariant must remain true after this stage?
+
+??? note "Answer"
+    The comparison and publication must share one critical section or two writers can both win.
+
+### Code-reading check
+
+Start at `etag_matches` in `src/minis3/conditional.py`: what state or value enters this boundary, and which owner consumes the result next?
+
+??? note "Answer"
+    Called by `MiniS3` as a policy function; receives explicit values and returns a decision for the service to apply.
+
+### Interview-ready summary
 
 The comparison and publication must share one critical section or two writers can both win.
 

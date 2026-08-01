@@ -462,6 +462,13 @@ def check_learning_workspace(
         raise JourneyError(
             f"{stage.label} tests failed with exit code {result.returncode}"
         )
+    print(f"[check {stage.label}] TESTS PASS")
+    if stat:
+        print("[reference parity] INCOMPLETE")
+        raise JourneyError(
+            f"{stage.label} implementation differs from its canonical stage tree"
+        )
+    print("[reference parity] PASS")
     print(f"[check {stage.label}] PASS")
 
 
@@ -604,7 +611,7 @@ def main() -> int:
 
     check_parser = subparsers.add_parser(
         "check",
-        help="run stage N tests and show a reference diff stat",
+        help="run stage N tests and require parity with its reference tree",
     )
     check_parser.add_argument("stage", type=int, metavar="N")
     add_workspace_argument(check_parser)

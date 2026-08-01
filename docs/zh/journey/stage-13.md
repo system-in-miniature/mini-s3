@@ -4,10 +4,6 @@
 
 把 ETag 变成缓存校验器与串行化的 compare-and-swap 前置条件。
 
-### 动手任务
-
-从stage-12开始，实现 ETag 匹配，并在持有 `_lock` 时处理对象操作的 `if_match`/`if_none_match`。 行为必须留在下列源码同构边界中；不要先复制补丁。
-
 ### 交付文件
 
 - `src/minis3/__init__.py`
@@ -351,23 +347,27 @@ ETag 前置条件匹配规则。
     +
     ```
 
-### 自查
-
-1. 本阶段的可见性或状态迁移由谁负责？
-
-    ??? note "答案"
-        比较与发布必须处于同一临界区，否则两个写者都可能成功。
-
-2. 如果绕过新边界，哪个测试会最先失败？
-
-    ??? note "答案"
-        阅读 `tests.txt`，找出最窄的新节点，并说出它覆盖的公开调用。
-
-### 通关命令
+### 验证证据
 
 `uv run pytest -q $(cat journey/stages/13-conditional-cas/tests.txt)`
 
-### 对应真实 S3 的一课
+本阶段新增 4 个可执行用例，入口为 `test_get_if_none_match_has_304_semantics_and_if_match_has_412`、`test_put_and_delete_if_match_compare_against_current_visible_etag`、`test_if_match_wildcard_requires_a_current_visible_object`、`test_two_conditional_writers_have_exactly_one_winner`。它们在机制走读之后运行，并与此前 Stage 的用例一起守住累计行为。
+
+### 概念检查
+
+本阶段完成后，哪条不变量必须保持成立？
+
+??? note "答案"
+    比较与发布必须处于同一临界区，否则两个写者都可能成功。
+
+### 代码阅读检查
+
+从 `src/minis3/conditional.py` 的 `etag_matches` 开始：进入这个边界的状态或值是什么，结果又交给哪个所有者？
+
+??? note "答案"
+    由 `MiniS3` 作为策略函数调用；接收显式值并返回由服务执行的决策。
+
+### 面试表达
 
 比较与发布必须处于同一临界区，否则两个写者都可能成功。
 

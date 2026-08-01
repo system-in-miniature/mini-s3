@@ -55,6 +55,37 @@ class RenderPagesTest(unittest.TestCase):
                 self.assertIn("#### 所有权与数据流", card.chinese)
                 self.assertIn("#### 失败与排查", card.chinese)
 
+    def test_every_implementation_stage_adds_executable_evidence(self) -> None:
+        for card in self.cards[:-1]:
+            with self.subTest(stage=card.number):
+                paths = [item.path for item in render_pages.split_file_patches(card.patch)]
+                self.assertTrue(
+                    any(path.startswith("tests/") for path in paths),
+                    f"stage-{card.number:02d} changes behavior without stage-owned tests",
+                )
+
+    def test_pages_close_with_verification_code_reading_and_interview_sections(self) -> None:
+        expectations = (
+            (
+                False,
+                "### Verification evidence",
+                "### Code-reading check",
+                "### Interview-ready summary",
+            ),
+            (True, "### 验证证据", "### 代码阅读检查", "### 面试表达"),
+        )
+        for card in self.cards:
+            for chinese, verification, reading, interview in expectations:
+                with self.subTest(stage=card.number, chinese=chinese):
+                    page = render_pages.render_card(card, chinese=chinese)
+                    self.assertIn(verification, page)
+                    self.assertIn(reading, page)
+                    self.assertIn(interview, page)
+                    self.assertLess(page.index(verification), page.index(reading))
+                    self.assertLess(page.index(reading), page.index(interview))
+                    self.assertNotIn("do not copy the patch first", page.lower())
+                    self.assertNotIn("不要先复制补丁", page)
+
     def test_all_stage_pages_cover_every_canonical_file_once(self) -> None:
         for card in self.cards:
             expected_paths = [item.path for item in render_pages.split_file_patches(card.patch)]

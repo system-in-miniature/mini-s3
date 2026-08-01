@@ -39,6 +39,7 @@ class FilePatch:
 
 PATCH_HEADER = re.compile(r"^diff --git a/(.+?) b/(.+?)$", re.MULTILINE)
 PYTHON_SYMBOL = re.compile(r"^\+\s*(?:async\s+)?(?:def|class)\s+(\w+)", re.MULTILINE)
+TEST_SYMBOL = re.compile(r"^\+def\s+(test_\w+)", re.MULTILINE)
 
 
 def role_rank(path: str) -> int:
@@ -139,6 +140,16 @@ def split_lesson(body: str, *, chinese: bool) -> tuple[str, str, str]:
         body[mechanism_start:checks_start].strip(),
         body[checks_start:].strip(),
     )
+
+
+def browser_prelude(prelude: str, *, chinese: bool) -> str:
+    """Keep the browser lesson explanatory; self-implementation stays in attempt mode."""
+
+    task_heading = "### 动手任务" if chinese else "### Hands-on task"
+    deliverable_heading = "### 交付文件" if chinese else "### Deliverable files / 交付文件"
+    task_start = prelude.index(task_heading)
+    deliverable_start = prelude.index(deliverable_heading, task_start)
+    return (prelude[:task_start].rstrip() + "\n\n" + prelude[deliverable_start:]).strip()
 
 
 def file_role(path: str, *, chinese: bool) -> str:
@@ -253,6 +264,101 @@ def render_file_walkthrough(card: Card, *, chinese: bool) -> str:
     return "\n".join(lines).rstrip()
 
 
+def code_reading_target(card: Card) -> FilePatch:
+    candidates = [
+        item
+        for item in order_file_patches(split_file_patches(card.patch))
+        if item.path.startswith("src/")
+        and not item.path.endswith("/__init__.py")
+        and item.path != "src/minis3/errors.py"
+    ]
+    if not candidates:
+        candidates = [
+            item
+            for item in order_file_patches(split_file_patches(card.patch))
+            if item.path.startswith("src/")
+        ]
+    if not candidates:
+        candidates = order_file_patches(split_file_patches(card.patch))
+    return candidates[0]
+
+
+def render_closeout(card: Card, checks: str, *, chinese: bool) -> str:
+    lesson_heading = "### 对应真实 S3 的一课" if chinese else "### The real S3 lesson"
+    textbook_heading = "### 教材" if chinese else "### Textbook"
+    lesson = section(checks, lesson_heading, textbook_heading)
+    textbook = checks[checks.index(textbook_heading):].strip()
+    target = code_reading_target(card)
+    anchor = (
+        target.changed_symbols[0]
+        if target.changed_symbols
+        else "the public export list"
+        if target.path.endswith("/__init__.py")
+        else "the changed hunk"
+    )
+    tests = tuple(dict.fromkeys(TEST_SYMBOL.findall(card.patch)))
+    command = (
+        f"`uv run pytest -q $(cat journey/stages/{card.number:02d}-{card.slug}/tests.txt)`"
+    )
+
+    if chinese:
+        if tests:
+            proof = (
+                f"本阶段新增 {card.tests_added} 个可执行用例，入口为 "
+                + "、".join(f"`{name}`" for name in tests)
+                + "。它们在机制走读之后运行，并与此前 Stage 的用例一起守住累计行为。"
+            )
+        else:
+            proof = (
+                "本阶段不再新增行为用例；累计测试守住公开导出，"
+                "`python journey/tools/build_journey.py --check` 另外证明最终源码与 Journey 所有测试逐字节一致。"
+            )
+        return "\n\n".join(
+            [
+                "### 验证证据\n\n" + command + "\n\n" + proof,
+                (
+                    "### 概念检查\n\n本阶段完成后，哪条不变量必须保持成立？\n\n"
+                    '??? note "答案"\n    ' + lesson
+                ),
+                (
+                    f"### 代码阅读检查\n\n从 `{target.path}` 的 `{anchor}` 开始："
+                    "进入这个边界的状态或值是什么，结果又交给哪个所有者？\n\n"
+                    '??? note "答案"\n    ' + file_flow(target.path, chinese=True)
+                ),
+                "### 面试表达\n\n" + lesson,
+                textbook,
+            ]
+        )
+
+    if tests:
+        proof = (
+            f"This stage adds {card.tests_added} executable case(s), anchored at "
+            + ", ".join(f"`{name}`" for name in tests)
+            + ". Run them after the mechanism walkthrough; the cumulative gate also reruns every earlier stage contract."
+        )
+    else:
+        proof = (
+            "This stage adds no new behavior case: the cumulative suite guards the public exports, while "
+            "`python journey/tools/build_journey.py --check` separately proves byte-for-byte final source and Journey-test parity."
+        )
+    return "\n\n".join(
+        [
+            "### Verification evidence\n\n" + command + "\n\n" + proof,
+            (
+                "### Concept check\n\nWhich invariant must remain true after this stage?\n\n"
+                '??? note "Answer"\n    ' + lesson
+            ),
+            (
+                f"### Code-reading check\n\nStart at `{anchor}` in `{target.path}`: "
+                "what state or value enters this boundary, and which owner consumes the result next?\n\n"
+                '??? note "Answer"\n    ' + file_flow(target.path, chinese=False)
+            ),
+            "### Interview-ready summary\n\n" + lesson,
+            textbook,
+        ]
+    )
+
+
 def render_card(card: Card, *, chinese: bool) -> str:
     title = card.chinese_title if chinese else card.english_title
     body = card.chinese if chinese else card.english
@@ -267,13 +373,15 @@ def render_card(card: Card, *, chinese: bool) -> str:
         f"{card.number:02d}-{card.slug}/stage.patch"
     )
     prelude, mechanism, checks = split_lesson(body, chinese=chinese)
+    prelude = browser_prelude(prelude, chinese=chinese)
     walkthrough = render_file_walkthrough(card, chinese=chinese)
+    closeout = render_closeout(card, checks, chinese=chinese)
     return (
         f"# Stage {card.number:02d} · {title}\n\n"
         f"{prelude}\n\n"
         f"{mechanism}\n\n"
         f"{walkthrough}\n\n"
-        f"{checks}\n\n"
+        f"{closeout}\n\n"
         f"[{link_label}]({compare_link(card.number)})\n\n"
         f"{checkout}\n\n"
         f"[Complete reference patch / 完整参考补丁]({patch_link})\n"

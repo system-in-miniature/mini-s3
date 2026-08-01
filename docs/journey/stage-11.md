@@ -4,10 +4,6 @@
 
 Validate an ordered client manifest, assemble bytes, and publish exactly one visible object.
 
-### Hands-on task
-
-Starting from stage-10, Implement `MiniS3.complete_multipart_upload(...)` and connect composite ETags to `Bucket.put(...)`. Keep all behavior inside the listed source-like boundaries; do not copy the patch first.
-
 ### Deliverable files / 交付文件
 
 - `src/minis3/store.py`
@@ -209,23 +205,27 @@ Calls the learner-visible boundary and records the expected state or failure; st
     +
     ```
 
-### Self-check
-
-1. Where is this stage's visibility or state transition owned?
-
-    ??? note "Answer"
-        Completion becomes visible only through the same bucket-manifest publication boundary as PUT.
-
-2. Which test would fail first if the new boundary were bypassed?
-
-    ??? note "Answer"
-        Read `tests.txt`, identify the narrowest new node, and name the public call it exercises.
-
-### Pass command
+### Verification evidence
 
 `uv run pytest -q $(cat journey/stages/11-multipart-complete/tests.txt)`
 
-### The real S3 lesson
+This stage adds 4 executable case(s), anchored at `test_multipart_is_invisible_until_ordered_atomic_complete`, `test_uploading_same_part_number_replaces_the_staged_part`, `test_complete_validates_order_presence_etag_and_nonfinal_size`, `test_abort_removes_upload_and_restart_preserves_unfinished_parts`. Run them after the mechanism walkthrough; the cumulative gate also reruns every earlier stage contract.
+
+### Concept check
+
+Which invariant must remain true after this stage?
+
+??? note "Answer"
+    Completion becomes visible only through the same bucket-manifest publication boundary as PUT.
+
+### Code-reading check
+
+Start at `complete_multipart_upload` in `src/minis3/store.py`: what state or value enters this boundary, and which owner consumes the result next?
+
+??? note "Answer"
+    Receives public calls, owns locking and orchestration, then delegates to domain, projection, and storage boundaries.
+
+### Interview-ready summary
 
 Completion becomes visible only through the same bucket-manifest publication boundary as PUT.
 

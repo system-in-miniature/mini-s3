@@ -4,10 +4,6 @@
 
 Prove both sides of a completion crash: keep retryable staging before publish, clean it after publish.
 
-### Hands-on task
-
-Starting from stage-11, Exercise `_recover_uploads(...)` with crashes before and after manifest publication. Keep all behavior inside the listed source-like boundaries; do not copy the patch first.
-
 ### Deliverable files / 交付文件
 
 - `tests/test_storage.py`
@@ -114,23 +110,27 @@ Calls the learner-visible boundary and records the expected state or failure; st
     +        reopened.abort_multipart_upload("b", "movie", upload.upload_id)
     ```
 
-### Self-check
-
-1. Where is this stage's visibility or state transition owned?
-
-    ??? note "Answer"
-        Recovery correlates a published object with its upload ID to make cleanup idempotent.
-
-2. Which test would fail first if the new boundary were bypassed?
-
-    ??? note "Answer"
-        Read `tests.txt`, identify the narrowest new node, and name the public call it exercises.
-
-### Pass command
+### Verification evidence
 
 `uv run pytest -q $(cat journey/stages/12-multipart-recovery/tests.txt)`
 
-### The real S3 lesson
+This stage adds 2 executable case(s), anchored at `test_multipart_complete_crash_before_publish_keeps_upload_not_object`, `test_multipart_complete_crash_after_publish_recovers_object_and_cleans_upload`. Run them after the mechanism walkthrough; the cumulative gate also reruns every earlier stage contract.
+
+### Concept check
+
+Which invariant must remain true after this stage?
+
+??? note "Answer"
+    Recovery correlates a published object with its upload ID to make cleanup idempotent.
+
+### Code-reading check
+
+Start at `test_multipart_complete_crash_before_publish_keeps_upload_not_object` in `tests/test_storage.py`: what state or value enters this boundary, and which owner consumes the result next?
+
+??? note "Answer"
+    Calls the learner-visible boundary and records the expected state or failure; start here only when verifying the mechanism.
+
+### Interview-ready summary
 
 Recovery correlates a published object with its upload ID to make cleanup idempotent.
 

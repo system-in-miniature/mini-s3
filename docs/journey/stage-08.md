@@ -4,10 +4,6 @@
 
 Verify parent-directory durability and remove temporary or unreferenced crash debris on startup.
 
-### Hands-on task
-
-Starting from stage-07, Harden and test `atomic_write`, `durable_mkdir`, `DiskStorage.load_buckets`, and cleanup paths. Keep all behavior inside the listed source-like boundaries; do not copy the patch first.
-
 ### Deliverable files / 交付文件
 
 - `tests/test_storage.py`
@@ -110,23 +106,27 @@ Calls the learner-visible boundary and records the expected state or failure; st
     +    assert not stray.exists()
     ```
 
-### Self-check
-
-1. Where is this stage's visibility or state transition owned?
-
-    ??? note "Answer"
-        Atomic rename is not durable publication until the containing directory is fsynced.
-
-2. Which test would fail first if the new boundary were bypassed?
-
-    ??? note "Answer"
-        Read `tests.txt`, identify the narrowest new node, and name the public call it exercises.
-
-### Pass command
+### Verification evidence
 
 `uv run pytest -q $(cat journey/stages/08-fsync-recovery/tests.txt)`
 
-### The real S3 lesson
+This stage adds 3 executable case(s), anchored at `test_atomic_write_fsyncs_each_new_directory_parent`, `test_storage_and_bucket_directory_creation_fsync_parent_chains`, `test_recovery_removes_spurious_tmp_files`. Run them after the mechanism walkthrough; the cumulative gate also reruns every earlier stage contract.
+
+### Concept check
+
+Which invariant must remain true after this stage?
+
+??? note "Answer"
+    Atomic rename is not durable publication until the containing directory is fsynced.
+
+### Code-reading check
+
+Start at `test_atomic_write_fsyncs_each_new_directory_parent` in `tests/test_storage.py`: what state or value enters this boundary, and which owner consumes the result next?
+
+??? note "Answer"
+    Calls the learner-visible boundary and records the expected state or failure; start here only when verifying the mechanism.
+
+### Interview-ready summary
 
 Atomic rename is not durable publication until the containing directory is fsynced.
 

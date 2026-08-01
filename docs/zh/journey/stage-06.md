@@ -4,10 +4,6 @@
 
 从扁平 Key 推导 contents 与 common prefixes，并加入绑定查询的 opaque 分页 token。
 
-### 动手任务
-
-从stage-05开始，实现 `list_objects(...)`、token 编解码与 `MiniS3.list_objects(...)`。 行为必须留在下列源码同构边界中；不要先复制补丁。
-
 ### 交付文件
 
 - `src/minis3/__init__.py`
@@ -488,23 +484,27 @@
     +        )
     ```
 
-### 自查
-
-1. 本阶段的可见性或状态迁移由谁负责？
-
-    ??? note "答案"
-        S3 目录是 delimiter 投影；对象与公共前缀共享同一页额度。
-
-2. 如果绕过新边界，哪个测试会最先失败？
-
-    ??? note "答案"
-        阅读 `tests.txt`，找出最窄的新节点，并说出它覆盖的公开调用。
-
-### 通关命令
+### 验证证据
 
 `uv run pytest -q $(cat journey/stages/06-directory-illusion/tests.txt)`
 
-### 对应真实 S3 的一课
+本阶段新增 5 个可执行用例，入口为 `test_delimiter_derives_common_prefixes_from_flat_keys`、`test_pagination_counts_contents_and_prefixes_and_token_is_opaque`、`test_current_listing_hides_key_behind_delete_marker`、`test_version_listing_flattens_versions_and_marks_latest`、`test_malformed_or_query_mismatched_tokens_are_rejected`。它们在机制走读之后运行，并与此前 Stage 的用例一起守住累计行为。
+
+### 概念检查
+
+本阶段完成后，哪条不变量必须保持成立？
+
+??? note "答案"
+    S3 目录是 delimiter 投影；对象与公共前缀共享同一页额度。
+
+### 代码阅读检查
+
+从 `src/minis3/listing.py` 的 `ListedObject` 开始：进入这个边界的状态或值是什么，结果又交给哪个所有者？
+
+??? note "答案"
+    由服务读取路径调用；把存储历史转换成排序、分页的响应值，不修改状态。
+
+### 面试表达
 
 S3 目录是 delimiter 投影；对象与公共前缀共享同一页额度。
 

@@ -70,6 +70,16 @@ class LearningWorkspaceTest(unittest.TestCase):
             self.assertIn("[reference diff --stat]", checked)
             self.assertIn("(no differences)", checked)
 
+            readme = workspace / "README.md"
+            readme.write_text(readme.read_text() + "\nlearner drift\n")
+            drifted_check = run(
+                [*cli, "check", "2", "--workspace", str(workspace)],
+                check=False,
+            )
+            self.assertNotEqual(drifted_check.returncode, 0)
+            self.assertIn("[check stage-02] TESTS PASS", drifted_check.stdout)
+            self.assertIn("[reference parity] INCOMPLETE", drifted_check.stdout)
+
             run([*cli, "study", "2", "--workspace", str(workspace), "--yes"])
             second_status = run(
                 ["git", "status", "--short"], cwd=workspace
@@ -101,10 +111,12 @@ class LearningWorkspaceTest(unittest.TestCase):
                 "journey baseline: stage-01",
             )
             attempt_check = run(
-                [*cli, "check", "2", "--workspace", str(workspace)]
-            ).stdout
-            self.assertIn("[check stage-02] PASS", attempt_check)
-            self.assertIn("src/minis3/bucket.py", attempt_check)
+                [*cli, "check", "2", "--workspace", str(workspace)],
+                check=False,
+            )
+            self.assertNotEqual(attempt_check.returncode, 0)
+            self.assertIn("stage-02 tests failed", attempt_check.stdout)
+            self.assertIn("src/minis3/bucket.py", attempt_check.stdout)
 
 
 if __name__ == "__main__":

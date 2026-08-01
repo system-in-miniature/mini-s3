@@ -1,6 +1,6 @@
 # Stage 02 · Bucket state and deterministic IDs / Bucket 状态与确定性 ID
 
-<!-- journey: chapter=3 tests_added=0 -->
+<!-- journey: chapter=3 tests_added=1 -->
 
 ## English
 
@@ -15,6 +15,7 @@ Starting from stage-01, Implement `VersioningState`, `SequenceCounter`, and `Buc
 ### Deliverable files / 交付文件
 
 - `src/minis3/bucket.py`
+- `tests/test_bucket.py`
 
 ### Mechanism walkthrough
 

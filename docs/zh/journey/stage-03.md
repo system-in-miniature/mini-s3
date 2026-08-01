@@ -4,10 +4,6 @@
 
 让 Bucket 通过单一存储所有者拥有持久 manifest 与不可变对象制品。
 
-### 动手任务
-
-从stage-02开始，实现 `DiskStorage`、`atomic_write`、`durable_mkdir` 与面向恢复的路径辅助函数。 行为必须留在下列源码同构边界中；不要先复制补丁。
-
 ### 交付文件
 
 - `src/minis3/storage/__init__.py`
@@ -373,23 +369,63 @@
     +                path.rmdir()
     ```
 
-### 自查
+#### `tests/test_storage_boundary.py`
 
-1. 本阶段的可见性或状态迁移由谁负责？
+本阶段行为的可执行证明。
 
-    ??? note "答案"
-        manifest 引用可见的不可变制品；发布顺序决定可见性。
+调用学习者可见边界并记录预期状态或失败；验证机制时再从这里进入。
 
-2. 如果绕过新边界，哪个测试会最先失败？
+**变化锚点:** `test_disk_storage_publishes_and_recovers_one_complete_bucket`
 
-    ??? note "答案"
-        阅读 `tests.txt`，找出最窄的新节点，并说出它覆盖的公开调用。
+??? note "文件差异：tests/test_storage_boundary.py"
+    ```diff
+    diff --git a/tests/test_storage_boundary.py b/tests/test_storage_boundary.py
+    new file mode 100644
+    index 0000000..74c9d9e
+    --- /dev/null
+    +++ b/tests/test_storage_boundary.py
+    @@ -0,0 +1,18 @@
+    +"""Focused contract for manifest publication before service wiring."""
+    +
+    +from minis3.bucket import Bucket, SequenceCounter, VersioningState
+    +from minis3.storage import DiskStorage
+    +
+    +
+    +def test_disk_storage_publishes_and_recovers_one_complete_bucket(tmp_path) -> None:
+    +    storage = DiskStorage(tmp_path)
+    +    bucket = Bucket("b", versioning=VersioningState.ENABLED)
+    +    version = bucket.put("key", b"value", SequenceCounter())
+    +
+    +    storage.create_bucket(Bucket("b"))
+    +    storage.persist_bucket(bucket)
+    +    recovered, maximum_sequence = DiskStorage(tmp_path).load_buckets()
+    +
+    +    assert recovered["b"].get("key") == version
+    +    assert maximum_sequence == version.sequence
+    +    assert not list(tmp_path.rglob("*.tmp-*"))
+    ```
 
-### 通关命令
+### 验证证据
 
 `uv run pytest -q $(cat journey/stages/03-durable-storage-boundary/tests.txt)`
 
-### 对应真实 S3 的一课
+本阶段新增 1 个可执行用例，入口为 `test_disk_storage_publishes_and_recovers_one_complete_bucket`。它们在机制走读之后运行，并与此前 Stage 的用例一起守住累计行为。
+
+### 概念检查
+
+本阶段完成后，哪条不变量必须保持成立？
+
+??? note "答案"
+    manifest 引用可见的不可变制品；发布顺序决定可见性。
+
+### 代码阅读检查
+
+从 `src/minis3/storage/atomic.py` 的 `InjectedCrash` 开始：进入这个边界的状态或值是什么，结果又交给哪个所有者？
+
+??? note "答案"
+    在领域变更后调用；把内存状态变成持久 Artifact，并在启动时重建。
+
+### 面试表达
 
 manifest 引用可见的不可变制品；发布顺序决定可见性。
 

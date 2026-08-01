@@ -7,14 +7,14 @@
 | Stage | 主题 | 新增测试 | 教材章节 |
 |---:|---|---:|---:|
 | [01](stage-01.md) | 脚手架与对象值 | 3 | [1](../tutorial/01-getting-started.md) |
-| [02](stage-02.md) | Bucket 状态与确定性 ID | 0 | [3](../tutorial/03-versioning.md) |
-| [03](stage-03.md) | 持久化存储边界 | 0 | [5](../tutorial/05-crash-atomicity.md) |
+| [02](stage-02.md) | Bucket 状态与确定性 ID | 1 | [3](../tutorial/03-versioning.md) |
+| [03](stage-03.md) | 持久化存储边界 | 1 | [5](../tutorial/05-crash-atomicity.md) |
 | [04](stage-04.md) | 对象服务门面 | 15 | [2](../tutorial/02-objects-etag.md) |
 | [05](stage-05.md) | 版本历史投影 | 3 | [3](../tutorial/03-versioning.md) |
 | [06](stage-06.md) | Listing 与目录幻觉 | 5 | [4](../tutorial/04-listing.md) |
 | [07](stage-07.md) | Manifest 发布崩溃矩阵 | 5 | [5](../tutorial/05-crash-atomicity.md) |
 | [08](stage-08.md) | 目录 fsync 与启动清理 | 3 | [5](../tutorial/05-crash-atomicity.md) |
-| [09](stage-09.md) | Multipart 领域与校验 | 0 | [6](../tutorial/06-multipart.md) |
+| [09](stage-09.md) | Multipart 领域与校验 | 1 | [6](../tutorial/06-multipart.md) |
 | [10](stage-10.md) | Multipart 持久暂存 | 1 | [6](../tutorial/06-multipart.md) |
 | [11](stage-11.md) | Multipart 原子完成 | 4 | [6](../tutorial/06-multipart.md) |
 | [12](stage-12.md) | Multipart 崩溃恢复 | 2 | [6](../tutorial/06-multipart.md) |

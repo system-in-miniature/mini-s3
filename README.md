@@ -67,6 +67,17 @@ groups matching strings.
   time: current versioned data gains a marker, while eligible noncurrent data
   versions are physically removed.
 
+## Rebuild Journey
+
+[Build MiniS3 through 15 cumulative stages](docs/journey/index.md). Each stage
+is a complete browser lesson: understand the mechanism and ownership flow,
+inspect every changed file separately, then run the focused verification and
+close with code-reading and interview checks. Tests are evidence at the end,
+not a required test-first teaching sequence.
+
+Use `python journey/tools/build_journey.py study N` when you also want the
+current stage displayed as uncommitted editor changes in a dedicated workspace.
+
 ## Repository tour
 
 ```text

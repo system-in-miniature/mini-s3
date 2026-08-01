@@ -4,10 +4,6 @@
 
 建模上传身份、暂存 Part、完成清单、尺寸规则与组合 ETag。
 
-### 动手任务
-
-从stage-08开始，实现 `MultipartUpload`、`StagedPart`、回执与 `validate_completion(...)`。 行为必须留在下列源码同构边界中；不要先复制补丁。
-
 ### 交付文件
 
 - `src/minis3/errors.py`
@@ -187,23 +183,85 @@ Multipart 领域值与完成规则。
     +    return tuple(selected), f'"{composite}-{len(selected)}"'
     ```
 
-### 自查
+#### `tests/test_multipart_domain.py`
 
-1. 本阶段的可见性或状态迁移由谁负责？
+本阶段行为的可执行证明。
 
-    ??? note "答案"
-        只有完成时才能知道最后一个 Part，因此最小尺寸也在完成时校验。
+调用学习者可见边界并记录预期状态或失败；验证机制时再从这里进入。
 
-2. 如果绕过新边界，哪个测试会最先失败？
+**变化锚点:** `test_completion_validation_orders_parts_and_hashes_binary_digests`
 
-    ??? note "答案"
-        阅读 `tests.txt`，找出最窄的新节点，并说出它覆盖的公开调用。
+??? note "文件差异：tests/test_multipart_domain.py"
+    ```diff
+    diff --git a/tests/test_multipart_domain.py b/tests/test_multipart_domain.py
+    new file mode 100644
+    index 0000000..9b7026a
+    --- /dev/null
+    +++ b/tests/test_multipart_domain.py
+    @@ -0,0 +1,40 @@
+    +"""Focused contract for multipart validation before storage orchestration."""
+    +
+    +from hashlib import md5
+    +
+    +import pytest
+    +
+    +from minis3.errors import EntityTooSmall, InvalidPartOrder
+    +from minis3.multipart import StagedPart, validate_completion
+    +
+    +
+    +def test_completion_validation_orders_parts_and_hashes_binary_digests() -> None:
+    +    first = StagedPart(1, b"abc")
+    +    last = StagedPart(2, b"x")
+    +    staged = {1: first, 2: last}
+    +
+    +    selected, etag = validate_completion(
+    +        staged,
+    +        [first.receipt, last.receipt],
+    +        minimum_part_size=3,
+    +    )
+    +
+    +    binary_digests = b"".join(
+    +        md5(part.body, usedforsecurity=False).digest() for part in selected
+    +    )
+    +    expected = md5(binary_digests, usedforsecurity=False).hexdigest()
+    +    assert selected == (first, last)
+    +    assert etag == f'"{expected}-2"'
+    +
+    +    with pytest.raises(InvalidPartOrder):
+    +        validate_completion(
+    +            staged,
+    +            [last.receipt, first.receipt],
+    +            minimum_part_size=3,
+    +        )
+    +    with pytest.raises(EntityTooSmall):
+    +        validate_completion(
+    +            {1: StagedPart(1, b"a"), 2: last},
+    +            [StagedPart(1, b"a").receipt, last.receipt],
+    +            minimum_part_size=3,
+    +        )
+    ```
 
-### 通关命令
+### 验证证据
 
 `uv run pytest -q $(cat journey/stages/09-multipart-domain/tests.txt)`
 
-### 对应真实 S3 的一课
+本阶段新增 1 个可执行用例，入口为 `test_completion_validation_orders_parts_and_hashes_binary_digests`。它们在机制走读之后运行，并与此前 Stage 的用例一起守住累计行为。
+
+### 概念检查
+
+本阶段完成后，哪条不变量必须保持成立？
+
+??? note "答案"
+    只有完成时才能知道最后一个 Part，因此最小尺寸也在完成时校验。
+
+### 代码阅读检查
+
+从 `src/minis3/multipart.py` 的 `MultipartUpload` 开始：进入这个边界的状态或值是什么，结果又交给哪个所有者？
+
+??? note "答案"
+    由 `MiniS3` 作为策略函数调用；接收显式值并返回由服务执行的决策。
+
+### 面试表达
 
 只有完成时才能知道最后一个 Part，因此最小尺寸也在完成时校验。
 

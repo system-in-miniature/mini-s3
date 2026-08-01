@@ -4,15 +4,12 @@
 
 Give buckets a durable manifest and immutable object artifacts behind one storage owner.
 
-### Hands-on task
-
-Starting from stage-02, Implement `DiskStorage`, `atomic_write`, `durable_mkdir`, and recovery-oriented path helpers. Keep all behavior inside the listed source-like boundaries; do not copy the patch first.
-
 ### Deliverable files / 交付文件
 
 - `src/minis3/storage/__init__.py`
 - `src/minis3/storage/atomic.py`
 - `src/minis3/storage/disk.py`
+- `tests/test_storage_boundary.py`
 
 ### Mechanism walkthrough
 
@@ -373,23 +370,63 @@ Called after a domain mutation; turns in-memory state into durable artifacts and
     +                path.rmdir()
     ```
 
-### Self-check
+#### `tests/test_storage_boundary.py`
 
-1. Where is this stage's visibility or state transition owned?
+Executable proof of the stage behavior.
 
-    ??? note "Answer"
-        A manifest names visible immutable artifacts; publication order defines visibility.
+Calls the learner-visible boundary and records the expected state or failure; start here only when verifying the mechanism.
 
-2. Which test would fail first if the new boundary were bypassed?
+**Changed anchors:** `test_disk_storage_publishes_and_recovers_one_complete_bucket`
 
-    ??? note "Answer"
-        Read `tests.txt`, identify the narrowest new node, and name the public call it exercises.
+??? note "File diff: tests/test_storage_boundary.py"
+    ```diff
+    diff --git a/tests/test_storage_boundary.py b/tests/test_storage_boundary.py
+    new file mode 100644
+    index 0000000..74c9d9e
+    --- /dev/null
+    +++ b/tests/test_storage_boundary.py
+    @@ -0,0 +1,18 @@
+    +"""Focused contract for manifest publication before service wiring."""
+    +
+    +from minis3.bucket import Bucket, SequenceCounter, VersioningState
+    +from minis3.storage import DiskStorage
+    +
+    +
+    +def test_disk_storage_publishes_and_recovers_one_complete_bucket(tmp_path) -> None:
+    +    storage = DiskStorage(tmp_path)
+    +    bucket = Bucket("b", versioning=VersioningState.ENABLED)
+    +    version = bucket.put("key", b"value", SequenceCounter())
+    +
+    +    storage.create_bucket(Bucket("b"))
+    +    storage.persist_bucket(bucket)
+    +    recovered, maximum_sequence = DiskStorage(tmp_path).load_buckets()
+    +
+    +    assert recovered["b"].get("key") == version
+    +    assert maximum_sequence == version.sequence
+    +    assert not list(tmp_path.rglob("*.tmp-*"))
+    ```
 
-### Pass command
+### Verification evidence
 
 `uv run pytest -q $(cat journey/stages/03-durable-storage-boundary/tests.txt)`
 
-### The real S3 lesson
+This stage adds 1 executable case(s), anchored at `test_disk_storage_publishes_and_recovers_one_complete_bucket`. Run them after the mechanism walkthrough; the cumulative gate also reruns every earlier stage contract.
+
+### Concept check
+
+Which invariant must remain true after this stage?
+
+??? note "Answer"
+    A manifest names visible immutable artifacts; publication order defines visibility.
+
+### Code-reading check
+
+Start at `InjectedCrash` in `src/minis3/storage/atomic.py`: what state or value enters this boundary, and which owner consumes the result next?
+
+??? note "Answer"
+    Called after a domain mutation; turns in-memory state into durable artifacts and reconstructs it on startup.
+
+### Interview-ready summary
 
 A manifest names visible immutable artifacts; publication order defines visibility.
 

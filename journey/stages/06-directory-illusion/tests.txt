@@ -1,4 +1,6 @@
 tests/test_model.py
+tests/test_bucket.py
+tests/test_storage_boundary.py
 tests/test_storage.py::test_restart_restores_versions_bodies_and_counter
 tests/test_versioning.py::test_versioning_state_machine_exhaustive
 tests/test_versioning.py::test_unversioned_delete_defensively_preserves_named_history

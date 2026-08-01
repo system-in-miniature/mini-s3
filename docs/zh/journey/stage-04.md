@@ -4,10 +4,6 @@
 
 用加锁服务连接 Bucket 与存储，支持版本化 PUT、GET、HEAD 与 DELETE。
 
-### 动手任务
-
-从stage-03开始，实现 `MiniS3.__init__`、Bucket 操作、对象操作与 `_bucket(name)`。 行为必须留在下列源码同构边界中；不要先复制补丁。
-
 ### 交付文件
 
 - `src/minis3/__init__.py`
@@ -351,23 +347,27 @@
     +        store.delete_bucket("b")
     ```
 
-### 自查
-
-1. 本阶段的可见性或状态迁移由谁负责？
-
-    ??? note "答案"
-        强一致性来自单一变更锁，以及先发布再替换候选状态。
-
-2. 如果绕过新边界，哪个测试会最先失败？
-
-    ??? note "答案"
-        阅读 `tests.txt`，找出最窄的新节点，并说出它覆盖的公开调用。
-
-### 通关命令
+### 验证证据
 
 `uv run pytest -q $(cat journey/stages/04-object-service/tests.txt)`
 
-### 对应真实 S3 的一课
+本阶段新增 15 个可执行用例，入口为 `test_restart_restores_versions_bodies_and_counter`、`test_versioning_state_machine_exhaustive`、`test_unversioned_delete_defensively_preserves_named_history`、`test_enabled_puts_stack_and_delete_marker_hides_history`、`test_specific_delete_removes_only_addressed_version`、`test_latest_marker_is_404_even_when_older_data_exists`、`test_nonempty_bucket_cannot_be_deleted`。它们在机制走读之后运行，并与此前 Stage 的用例一起守住累计行为。
+
+### 概念检查
+
+本阶段完成后，哪条不变量必须保持成立？
+
+??? note "答案"
+    强一致性来自单一变更锁，以及先发布再替换候选状态。
+
+### 代码阅读检查
+
+从 `src/minis3/store.py` 的 `MiniS3` 开始：进入这个边界的状态或值是什么，结果又交给哪个所有者？
+
+??? note "答案"
+    接收公开调用，拥有加锁与编排，再委托给领域、投影和存储边界。
+
+### 面试表达
 
 强一致性来自单一变更锁，以及先发布再替换候选状态。
 

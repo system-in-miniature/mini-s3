@@ -4,10 +4,6 @@
 
 Create an installable package and immutable values for bytes, ETags, opaque keys, and delete markers.
 
-### Hands-on task
-
-Starting from an empty tree, Implement `content_etag(body: bytes) -> str`, `Version`, `DeleteMarker`, and `ObjectRecord`. Keep all behavior inside the listed source-like boundaries; do not copy the patch first.
-
 ### Deliverable files / 交付文件
 
 - `README.md`
@@ -407,23 +403,27 @@ Supports installation or orientation rather than the runtime data path; debug it
     +]
     ```
 
-### Self-check
-
-1. Where is this stage's visibility or state transition owned?
-
-    ??? note "Answer"
-        S3 stores whole object values; a slash in a key is data, not a directory.
-
-2. Which test would fail first if the new boundary were bypassed?
-
-    ??? note "Answer"
-        Read `tests.txt`, identify the narrowest new node, and name the public call it exercises.
-
-### Pass command
+### Verification evidence
 
 `uv run pytest -q $(cat journey/stages/01-scaffold-object-model/tests.txt)`
 
-### The real S3 lesson
+This stage adds 3 executable case(s), anchored at `test_etag_is_quoted_lowercase_content_md5`, `test_keys_are_opaque_even_when_they_contain_slashes`, `test_delete_marker_has_no_object_body`. Run them after the mechanism walkthrough; the cumulative gate also reruns every earlier stage contract.
+
+### Concept check
+
+Which invariant must remain true after this stage?
+
+??? note "Answer"
+    S3 stores whole object values; a slash in a key is data, not a directory.
+
+### Code-reading check
+
+Start at `content_etag` in `src/minis3/model.py`: what state or value enters this boundary, and which owner consumes the result next?
+
+??? note "Answer"
+    Constructed by bucket/service code and returned upward without owning I/O; inspect field values when state is correct but results look wrong.
+
+### Interview-ready summary
 
 S3 stores whole object values; a slash in a key is data, not a directory.
 

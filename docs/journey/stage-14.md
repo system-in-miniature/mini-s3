@@ -4,10 +4,6 @@
 
 Separate pure expiration decisions from an explicit, injected-clock mutation tick.
 
-### Hands-on task
-
-Starting from stage-13, Implement `ExpirationRule`, `evaluate_expiration(...)`, timestamps, and `MiniS3.lifecycle_tick(...)`. Keep all behavior inside the listed source-like boundaries; do not copy the patch first.
-
 ### Deliverable files / 交付文件
 
 - `src/minis3/__init__.py`
@@ -552,23 +548,27 @@ Calls the learner-visible boundary and records the expected state or failure; st
     +
     ```
 
-### Self-check
-
-1. Where is this stage's visibility or state transition owned?
-
-    ??? note "Answer"
-        Lifecycle is deterministic when evaluation is pure and time enters only through the service boundary.
-
-2. Which test would fail first if the new boundary were bypassed?
-
-    ??? note "Answer"
-        Read `tests.txt`, identify the narrowest new node, and name the public call it exercises.
-
-### Pass command
+### Verification evidence
 
 `uv run pytest -q $(cat journey/stages/14-lifecycle-tick/tests.txt)`
 
-### The real S3 lesson
+This stage adds 4 executable case(s), anchored at `test_rule_evaluation_is_pure_prefix_filtered_and_boundary_inclusive`, `test_tick_expires_current_to_marker_and_noncurrent_physically`, `test_tick_uses_injected_time_and_persists_timestamps_across_restart`, `test_expiration_rule_rejects_empty_or_negative_policy`. Run them after the mechanism walkthrough; the cumulative gate also reruns every earlier stage contract.
+
+### Concept check
+
+Which invariant must remain true after this stage?
+
+??? note "Answer"
+    Lifecycle is deterministic when evaluation is pure and time enters only through the service boundary.
+
+### Code-reading check
+
+Start at `ExpirationRule` in `src/minis3/lifecycle.py`: what state or value enters this boundary, and which owner consumes the result next?
+
+??? note "Answer"
+    Called by `MiniS3` as a policy function; receives explicit values and returns a decision for the service to apply.
+
+### Interview-ready summary
 
 Lifecycle is deterministic when evaluation is pure and time enters only through the service boundary.
 

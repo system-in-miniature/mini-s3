@@ -4,10 +4,6 @@
 
 Pin the manifest rename as the linearization point by crashing immediately before and after it.
 
-### Hands-on task
-
-Starting from stage-06, Exercise `DiskStorage.persist_bucket` through `CrashOnce` at every publication boundary. Keep all behavior inside the listed source-like boundaries; do not copy the patch first.
-
 ### Deliverable files / 交付文件
 
 - `tests/test_storage.py`
@@ -112,23 +108,27 @@ Calls the learner-visible boundary and records the expected state or failure; st
     +    assert visible.etag == '"2063c1608d6e0baf80249c42e2be5804"'
     ```
 
-### Self-check
-
-1. Where is this stage's visibility or state transition owned?
-
-    ??? note "Answer"
-        Before rename, recovery sees the old state; after rename, it sees the complete new state.
-
-2. Which test would fail first if the new boundary were bypassed?
-
-    ??? note "Answer"
-        Read `tests.txt`, identify the narrowest new node, and name the public call it exercises.
-
-### Pass command
+### Verification evidence
 
 `uv run pytest -q $(cat journey/stages/07-publication-crash-matrix/tests.txt)`
 
-### The real S3 lesson
+This stage adds 5 executable case(s), anchored at `test_crash_before_manifest_publish_leaves_old_state`, `test_crash_before_manifest_publication_matrix_leaves_old_state`, `test_crash_after_manifest_publish_exposes_complete_new_state`. Run them after the mechanism walkthrough; the cumulative gate also reruns every earlier stage contract.
+
+### Concept check
+
+Which invariant must remain true after this stage?
+
+??? note "Answer"
+    Before rename, recovery sees the old state; after rename, it sees the complete new state.
+
+### Code-reading check
+
+Start at `test_crash_before_manifest_publish_leaves_old_state` in `tests/test_storage.py`: what state or value enters this boundary, and which owner consumes the result next?
+
+??? note "Answer"
+    Calls the learner-visible boundary and records the expected state or failure; start here only when verifying the mechanism.
+
+### Interview-ready summary
 
 Before rename, recovery sees the old state; after rename, it sees the complete new state.
 

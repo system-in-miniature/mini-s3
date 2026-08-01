@@ -4,10 +4,6 @@
 
 Derive contents and common prefixes from flat keys, with opaque query-bound pagination tokens.
 
-### Hands-on task
-
-Starting from stage-05, Implement `list_objects(...)`, token encode/decode, and `MiniS3.list_objects(...)`. Keep all behavior inside the listed source-like boundaries; do not copy the patch first.
-
 ### Deliverable files / 交付文件
 
 - `src/minis3/__init__.py`
@@ -488,23 +484,27 @@ Calls the learner-visible boundary and records the expected state or failure; st
     +        )
     ```
 
-### Self-check
-
-1. Where is this stage's visibility or state transition owned?
-
-    ??? note "Answer"
-        S3 directories are a delimiter projection; contents and prefixes share one page budget.
-
-2. Which test would fail first if the new boundary were bypassed?
-
-    ??? note "Answer"
-        Read `tests.txt`, identify the narrowest new node, and name the public call it exercises.
-
-### Pass command
+### Verification evidence
 
 `uv run pytest -q $(cat journey/stages/06-directory-illusion/tests.txt)`
 
-### The real S3 lesson
+This stage adds 5 executable case(s), anchored at `test_delimiter_derives_common_prefixes_from_flat_keys`, `test_pagination_counts_contents_and_prefixes_and_token_is_opaque`, `test_current_listing_hides_key_behind_delete_marker`, `test_version_listing_flattens_versions_and_marks_latest`, `test_malformed_or_query_mismatched_tokens_are_rejected`. Run them after the mechanism walkthrough; the cumulative gate also reruns every earlier stage contract.
+
+### Concept check
+
+Which invariant must remain true after this stage?
+
+??? note "Answer"
+    S3 directories are a delimiter projection; contents and prefixes share one page budget.
+
+### Code-reading check
+
+Start at `ListedObject` in `src/minis3/listing.py`: what state or value enters this boundary, and which owner consumes the result next?
+
+??? note "Answer"
+    Called by the service read path; converts stored histories into sorted, paginated response values without mutation.
+
+### Interview-ready summary
 
 S3 directories are a delimiter projection; contents and prefixes share one page budget.
 

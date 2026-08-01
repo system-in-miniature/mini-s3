@@ -1,6 +1,6 @@
 # Stage 03 · Durable storage boundary / 持久化存储边界
 
-<!-- journey: chapter=5 tests_added=0 -->
+<!-- journey: chapter=5 tests_added=1 -->
 
 ## English
 
@@ -17,6 +17,7 @@ Starting from stage-02, Implement `DiskStorage`, `atomic_write`, `durable_mkdir`
 - `src/minis3/storage/__init__.py`
 - `src/minis3/storage/atomic.py`
 - `src/minis3/storage/disk.py`
+- `tests/test_storage_boundary.py`
 
 ### Mechanism walkthrough
 

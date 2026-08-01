@@ -4,14 +4,11 @@
 
 Model upload identity, staged parts, completion manifests, size rules, and composite ETags.
 
-### Hands-on task
-
-Starting from stage-08, Implement `MultipartUpload`, `StagedPart`, receipts, and `validate_completion(...)`. Keep all behavior inside the listed source-like boundaries; do not copy the patch first.
-
 ### Deliverable files / 交付文件
 
 - `src/minis3/errors.py`
 - `src/minis3/multipart.py`
+- `tests/test_multipart_domain.py`
 
 ### Mechanism walkthrough
 
@@ -187,23 +184,85 @@ Called by `MiniS3` as a policy function; receives explicit values and returns a 
     +    return tuple(selected), f'"{composite}-{len(selected)}"'
     ```
 
-### Self-check
+#### `tests/test_multipart_domain.py`
 
-1. Where is this stage's visibility or state transition owned?
+Executable proof of the stage behavior.
 
-    ??? note "Answer"
-        Minimum size is checked at completion because only then is the final part known.
+Calls the learner-visible boundary and records the expected state or failure; start here only when verifying the mechanism.
 
-2. Which test would fail first if the new boundary were bypassed?
+**Changed anchors:** `test_completion_validation_orders_parts_and_hashes_binary_digests`
 
-    ??? note "Answer"
-        Read `tests.txt`, identify the narrowest new node, and name the public call it exercises.
+??? note "File diff: tests/test_multipart_domain.py"
+    ```diff
+    diff --git a/tests/test_multipart_domain.py b/tests/test_multipart_domain.py
+    new file mode 100644
+    index 0000000..9b7026a
+    --- /dev/null
+    +++ b/tests/test_multipart_domain.py
+    @@ -0,0 +1,40 @@
+    +"""Focused contract for multipart validation before storage orchestration."""
+    +
+    +from hashlib import md5
+    +
+    +import pytest
+    +
+    +from minis3.errors import EntityTooSmall, InvalidPartOrder
+    +from minis3.multipart import StagedPart, validate_completion
+    +
+    +
+    +def test_completion_validation_orders_parts_and_hashes_binary_digests() -> None:
+    +    first = StagedPart(1, b"abc")
+    +    last = StagedPart(2, b"x")
+    +    staged = {1: first, 2: last}
+    +
+    +    selected, etag = validate_completion(
+    +        staged,
+    +        [first.receipt, last.receipt],
+    +        minimum_part_size=3,
+    +    )
+    +
+    +    binary_digests = b"".join(
+    +        md5(part.body, usedforsecurity=False).digest() for part in selected
+    +    )
+    +    expected = md5(binary_digests, usedforsecurity=False).hexdigest()
+    +    assert selected == (first, last)
+    +    assert etag == f'"{expected}-2"'
+    +
+    +    with pytest.raises(InvalidPartOrder):
+    +        validate_completion(
+    +            staged,
+    +            [last.receipt, first.receipt],
+    +            minimum_part_size=3,
+    +        )
+    +    with pytest.raises(EntityTooSmall):
+    +        validate_completion(
+    +            {1: StagedPart(1, b"a"), 2: last},
+    +            [StagedPart(1, b"a").receipt, last.receipt],
+    +            minimum_part_size=3,
+    +        )
+    ```
 
-### Pass command
+### Verification evidence
 
 `uv run pytest -q $(cat journey/stages/09-multipart-domain/tests.txt)`
 
-### The real S3 lesson
+This stage adds 1 executable case(s), anchored at `test_completion_validation_orders_parts_and_hashes_binary_digests`. Run them after the mechanism walkthrough; the cumulative gate also reruns every earlier stage contract.
+
+### Concept check
+
+Which invariant must remain true after this stage?
+
+??? note "Answer"
+    Minimum size is checked at completion because only then is the final part known.
+
+### Code-reading check
+
+Start at `MultipartUpload` in `src/minis3/multipart.py`: what state or value enters this boundary, and which owner consumes the result next?
+
+??? note "Answer"
+    Called by `MiniS3` as a policy function; receives explicit values and returns a decision for the service to apply.
+
+### Interview-ready summary
 
 Minimum size is checked at completion because only then is the final part known.
 

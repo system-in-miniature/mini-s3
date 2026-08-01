@@ -4,10 +4,6 @@
 
 Expose the complete teaching API and prove the reconstructed source and Journey-owned tests equal main byte for byte.
 
-### Hands-on task
-
-Starting from stage-14, Finalize `minis3.__init__` exports and run the complete 49-test contract. Keep all behavior inside the listed source-like boundaries; do not copy the patch first.
-
 ### Deliverable files / 交付文件
 
 - `src/minis3/__init__.py`
@@ -81,23 +77,27 @@ Reached by user imports; wiring errors appear as missing names before any runtim
     +]
     ```
 
-### Self-check
-
-1. Where is this stage's visibility or state transition owned?
-
-    ??? note "Answer"
-        A rebuild journey stays trustworthy only when CI guards both behavior and final-source parity.
-
-2. Which test would fail first if the new boundary were bypassed?
-
-    ??? note "Answer"
-        Read `tests.txt`, identify the narrowest new node, and name the public call it exercises.
-
-### Pass command
+### Verification evidence
 
 `uv run pytest -q $(cat journey/stages/15-public-api-parity/tests.txt)`
 
-### The real S3 lesson
+This stage adds no new behavior case: the cumulative suite guards the public exports, while `python journey/tools/build_journey.py --check` separately proves byte-for-byte final source and Journey-test parity.
+
+### Concept check
+
+Which invariant must remain true after this stage?
+
+??? note "Answer"
+    A rebuild journey stays trustworthy only when CI guards both behavior and final-source parity.
+
+### Code-reading check
+
+Start at `the public export list` in `src/minis3/__init__.py`: what state or value enters this boundary, and which owner consumes the result next?
+
+??? note "Answer"
+    Reached by user imports; wiring errors appear as missing names before any runtime flow starts.
+
+### Interview-ready summary
 
 A rebuild journey stays trustworthy only when CI guards both behavior and final-source parity.
 

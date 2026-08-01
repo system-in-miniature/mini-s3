@@ -4,10 +4,6 @@
 
 Expose complete histories so null versions, named versions, and markers remain distinguishable.
 
-### Hands-on task
-
-Starting from stage-04, Implement `list_object_versions(records, prefix=...)` and `MiniS3.list_object_versions`. Keep all behavior inside the listed source-like boundaries; do not copy the patch first.
-
 ### Deliverable files / 交付文件
 
 - `src/minis3/__init__.py`
@@ -273,23 +269,27 @@ Calls the learner-visible boundary and records the expected state or failure; st
          store.create_bucket("b")
     ```
 
-### Self-check
-
-1. Where is this stage's visibility or state transition owned?
-
-    ??? note "Answer"
-        Current visibility and retained history are different projections of the same record.
-
-2. Which test would fail first if the new boundary were bypassed?
-
-    ??? note "Answer"
-        Read `tests.txt`, identify the narrowest new node, and name the public call it exercises.
-
-### Pass command
+### Verification evidence
 
 `uv run pytest -q $(cat journey/stages/05-version-history/tests.txt)`
 
-### The real S3 lesson
+This stage adds 3 executable case(s), anchored at `test_unversioned_put_replaces_null_and_delete_removes_it`, `test_suspended_put_replaces_null_but_preserves_named_history`, `test_suspended_delete_replaces_null_with_null_marker`. Run them after the mechanism walkthrough; the cumulative gate also reruns every earlier stage contract.
+
+### Concept check
+
+Which invariant must remain true after this stage?
+
+??? note "Answer"
+    Current visibility and retained history are different projections of the same record.
+
+### Code-reading check
+
+Start at `ListedVersion` in `src/minis3/listing.py`: what state or value enters this boundary, and which owner consumes the result next?
+
+??? note "Answer"
+    Called by the service read path; converts stored histories into sorted, paginated response values without mutation.
+
+### Interview-ready summary
 
 Current visibility and retained history are different projections of the same record.
 

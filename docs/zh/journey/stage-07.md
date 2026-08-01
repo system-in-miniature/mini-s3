@@ -4,10 +4,6 @@
 
 在 manifest rename 前后注入崩溃，钉死其线性化点。
 
-### 动手任务
-
-从stage-06开始，通过 `CrashOnce` 覆盖 `DiskStorage.persist_bucket` 的每个发布边界。 行为必须留在下列源码同构边界中；不要先复制补丁。
-
 ### 交付文件
 
 - `tests/test_storage.py`
@@ -112,23 +108,27 @@
     +    assert visible.etag == '"2063c1608d6e0baf80249c42e2be5804"'
     ```
 
-### 自查
-
-1. 本阶段的可见性或状态迁移由谁负责？
-
-    ??? note "答案"
-        rename 前恢复到旧状态；rename 后看到完整新状态。
-
-2. 如果绕过新边界，哪个测试会最先失败？
-
-    ??? note "答案"
-        阅读 `tests.txt`，找出最窄的新节点，并说出它覆盖的公开调用。
-
-### 通关命令
+### 验证证据
 
 `uv run pytest -q $(cat journey/stages/07-publication-crash-matrix/tests.txt)`
 
-### 对应真实 S3 的一课
+本阶段新增 5 个可执行用例，入口为 `test_crash_before_manifest_publish_leaves_old_state`、`test_crash_before_manifest_publication_matrix_leaves_old_state`、`test_crash_after_manifest_publish_exposes_complete_new_state`。它们在机制走读之后运行，并与此前 Stage 的用例一起守住累计行为。
+
+### 概念检查
+
+本阶段完成后，哪条不变量必须保持成立？
+
+??? note "答案"
+    rename 前恢复到旧状态；rename 后看到完整新状态。
+
+### 代码阅读检查
+
+从 `tests/test_storage.py` 的 `test_crash_before_manifest_publish_leaves_old_state` 开始：进入这个边界的状态或值是什么，结果又交给哪个所有者？
+
+??? note "答案"
+    调用学习者可见边界并记录预期状态或失败；验证机制时再从这里进入。
+
+### 面试表达
 
 rename 前恢复到旧状态；rename 后看到完整新状态。
 

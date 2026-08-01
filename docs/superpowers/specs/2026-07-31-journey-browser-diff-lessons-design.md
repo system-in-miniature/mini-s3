@@ -26,6 +26,11 @@ test-first teaching sequence. A stage may naturally be test-heavy (for example
 crash characterization), but the site does not force every stage into a
 Red/Green/Refactor story.
 
+Every behavior-building stage owns at least one focused executable check by
+the end of that stage. This is a completion gate, not an instruction to begin
+the lesson from the test. The final public-API stage is the sole exception: it
+closes the already-complete cumulative suite and proves final tree parity.
+
 ## Content and rendering
 
 `journey/stages/NN-*/goal.md`, `stage.patch`, and `tests.txt` remain the only

@@ -4,10 +4,6 @@
 
 建立可安装包，以及表示字节、ETag、不透明 Key 和删除标记的不可变值。
 
-### 动手任务
-
-从空目录开始，实现 `content_etag(body: bytes) -> str`、`Version`、`DeleteMarker` 与 `ObjectRecord`。 行为必须留在下列源码同构边界中；不要先复制补丁。
-
 ### 交付文件
 
 - `README.md`
@@ -407,23 +403,27 @@ Journey 工作区入口说明。
     +]
     ```
 
-### 自查
-
-1. 本阶段的可见性或状态迁移由谁负责？
-
-    ??? note "答案"
-        S3 保存完整对象值；Key 中的斜杠只是数据，不是目录。
-
-2. 如果绕过新边界，哪个测试会最先失败？
-
-    ??? note "答案"
-        阅读 `tests.txt`，找出最窄的新节点，并说出它覆盖的公开调用。
-
-### 通关命令
+### 验证证据
 
 `uv run pytest -q $(cat journey/stages/01-scaffold-object-model/tests.txt)`
 
-### 对应真实 S3 的一课
+本阶段新增 3 个可执行用例，入口为 `test_etag_is_quoted_lowercase_content_md5`、`test_keys_are_opaque_even_when_they_contain_slashes`、`test_delete_marker_has_no_object_body`。它们在机制走读之后运行，并与此前 Stage 的用例一起守住累计行为。
+
+### 概念检查
+
+本阶段完成后，哪条不变量必须保持成立？
+
+??? note "答案"
+    S3 保存完整对象值；Key 中的斜杠只是数据，不是目录。
+
+### 代码阅读检查
+
+从 `src/minis3/model.py` 的 `content_etag` 开始：进入这个边界的状态或值是什么，结果又交给哪个所有者？
+
+??? note "答案"
+    由 Bucket/服务代码构造并向上返回，不拥有 I/O；状态正确但结果异常时检查这些字段。
+
+### 面试表达
 
 S3 保存完整对象值；Key 中的斜杠只是数据，不是目录。
 

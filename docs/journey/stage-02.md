@@ -4,13 +4,10 @@
 
 Introduce the bucket aggregate, legal versioning transitions, and an injectable monotonic sequence.
 
-### Hands-on task
-
-Starting from stage-01, Implement `VersioningState`, `SequenceCounter`, and `Bucket.set_versioning(state)`. Keep all behavior inside the listed source-like boundaries; do not copy the patch first.
-
 ### Deliverable files / 交付文件
 
 - `src/minis3/bucket.py`
+- `tests/test_bucket.py`
 
 ### Mechanism walkthrough
 
@@ -203,23 +200,66 @@ Called by `MiniS3`; turns one command plus the current record into the next in-m
     +        return marker
     ```
 
-### Self-check
+#### `tests/test_bucket.py`
 
-1. Where is this stage's visibility or state transition owned?
+Executable proof of the stage behavior.
 
-    ??? note "Answer"
-        Versioning can be enabled and suspended, but never reset to the never-enabled state.
+Calls the learner-visible boundary and records the expected state or failure; start here only when verifying the mechanism.
 
-2. Which test would fail first if the new boundary were bypassed?
+**Changed anchors:** `test_bucket_owns_versioning_transitions_and_deterministic_ids`
 
-    ??? note "Answer"
-        Read `tests.txt`, identify the narrowest new node, and name the public call it exercises.
+??? note "File diff: tests/test_bucket.py"
+    ```diff
+    diff --git a/tests/test_bucket.py b/tests/test_bucket.py
+    new file mode 100644
+    index 0000000..139fcf0
+    --- /dev/null
+    +++ b/tests/test_bucket.py
+    @@ -0,0 +1,21 @@
+    +"""Focused contracts for the bucket aggregate before service wiring."""
+    +
+    +import pytest
+    +
+    +from minis3.bucket import Bucket, SequenceCounter, VersioningState
+    +
+    +
+    +def test_bucket_owns_versioning_transitions_and_deterministic_ids() -> None:
+    +    bucket = Bucket("b")
+    +    counter = SequenceCounter()
+    +
+    +    null = bucket.put("key", b"before", counter)
+    +    bucket.set_versioning(VersioningState.ENABLED)
+    +    named = bucket.put("key", b"after", counter)
+    +    bucket.set_versioning(VersioningState.SUSPENDED)
+    +
+    +    assert (null.version_id, null.storage_id) == ("null", "e00000001")
+    +    assert (named.version_id, named.storage_id) == ("v00000002", "e00000002")
+    +    assert bucket.get("key").body == b"after"
+    +    with pytest.raises(ValueError):
+    +        bucket.set_versioning(VersioningState.UNVERSIONED)
+    ```
 
-### Pass command
+### Verification evidence
 
 `uv run pytest -q $(cat journey/stages/02-bucket-state/tests.txt)`
 
-### The real S3 lesson
+This stage adds 1 executable case(s), anchored at `test_bucket_owns_versioning_transitions_and_deterministic_ids`. Run them after the mechanism walkthrough; the cumulative gate also reruns every earlier stage contract.
+
+### Concept check
+
+Which invariant must remain true after this stage?
+
+??? note "Answer"
+    Versioning can be enabled and suspended, but never reset to the never-enabled state.
+
+### Code-reading check
+
+Start at `VersioningState` in `src/minis3/bucket.py`: what state or value enters this boundary, and which owner consumes the result next?
+
+??? note "Answer"
+    Called by `MiniS3`; turns one command plus the current record into the next in-memory history.
+
+### Interview-ready summary
 
 Versioning can be enabled and suspended, but never reset to the never-enabled state.
 

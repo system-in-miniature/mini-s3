@@ -4,10 +4,6 @@
 
 证明完成崩溃的两侧：发布前保留可重试暂存，发布后清理暂存。
 
-### 动手任务
-
-从stage-11开始，用 manifest 发布前后的崩溃测试 `_recover_uploads(...)`。 行为必须留在下列源码同构边界中；不要先复制补丁。
-
 ### 交付文件
 
 - `tests/test_storage.py`
@@ -114,23 +110,27 @@
     +        reopened.abort_multipart_upload("b", "movie", upload.upload_id)
     ```
 
-### 自查
-
-1. 本阶段的可见性或状态迁移由谁负责？
-
-    ??? note "答案"
-        恢复逻辑用已发布对象的 upload ID 建立关联，使清理具备幂等性。
-
-2. 如果绕过新边界，哪个测试会最先失败？
-
-    ??? note "答案"
-        阅读 `tests.txt`，找出最窄的新节点，并说出它覆盖的公开调用。
-
-### 通关命令
+### 验证证据
 
 `uv run pytest -q $(cat journey/stages/12-multipart-recovery/tests.txt)`
 
-### 对应真实 S3 的一课
+本阶段新增 2 个可执行用例，入口为 `test_multipart_complete_crash_before_publish_keeps_upload_not_object`、`test_multipart_complete_crash_after_publish_recovers_object_and_cleans_upload`。它们在机制走读之后运行，并与此前 Stage 的用例一起守住累计行为。
+
+### 概念检查
+
+本阶段完成后，哪条不变量必须保持成立？
+
+??? note "答案"
+    恢复逻辑用已发布对象的 upload ID 建立关联，使清理具备幂等性。
+
+### 代码阅读检查
+
+从 `tests/test_storage.py` 的 `test_multipart_complete_crash_before_publish_keeps_upload_not_object` 开始：进入这个边界的状态或值是什么，结果又交给哪个所有者？
+
+??? note "答案"
+    调用学习者可见边界并记录预期状态或失败；验证机制时再从这里进入。
+
+### 面试表达
 
 恢复逻辑用已发布对象的 upload ID 建立关联，使清理具备幂等性。
 

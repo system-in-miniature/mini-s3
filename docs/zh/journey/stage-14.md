@@ -4,10 +4,6 @@
 
 把纯过期决策与显式、注入时钟的变更 tick 分离。
 
-### 动手任务
-
-从stage-13开始，实现 `ExpirationRule`、`evaluate_expiration(...)`、时间戳与 `MiniS3.lifecycle_tick(...)`。 行为必须留在下列源码同构边界中；不要先复制补丁。
-
 ### 交付文件
 
 - `src/minis3/__init__.py`
@@ -552,23 +548,27 @@
     +
     ```
 
-### 自查
-
-1. 本阶段的可见性或状态迁移由谁负责？
-
-    ??? note "答案"
-        当评估保持纯函数、时间只从服务边界注入时，生命周期行为才可确定复现。
-
-2. 如果绕过新边界，哪个测试会最先失败？
-
-    ??? note "答案"
-        阅读 `tests.txt`，找出最窄的新节点，并说出它覆盖的公开调用。
-
-### 通关命令
+### 验证证据
 
 `uv run pytest -q $(cat journey/stages/14-lifecycle-tick/tests.txt)`
 
-### 对应真实 S3 的一课
+本阶段新增 4 个可执行用例，入口为 `test_rule_evaluation_is_pure_prefix_filtered_and_boundary_inclusive`、`test_tick_expires_current_to_marker_and_noncurrent_physically`、`test_tick_uses_injected_time_and_persists_timestamps_across_restart`、`test_expiration_rule_rejects_empty_or_negative_policy`。它们在机制走读之后运行，并与此前 Stage 的用例一起守住累计行为。
+
+### 概念检查
+
+本阶段完成后，哪条不变量必须保持成立？
+
+??? note "答案"
+    当评估保持纯函数、时间只从服务边界注入时，生命周期行为才可确定复现。
+
+### 代码阅读检查
+
+从 `src/minis3/lifecycle.py` 的 `ExpirationRule` 开始：进入这个边界的状态或值是什么，结果又交给哪个所有者？
+
+??? note "答案"
+    由 `MiniS3` 作为策略函数调用；接收显式值并返回由服务执行的决策。
+
+### 面试表达
 
 当评估保持纯函数、时间只从服务边界注入时，生命周期行为才可确定复现。
 

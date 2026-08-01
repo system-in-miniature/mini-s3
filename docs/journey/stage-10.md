@@ -4,10 +4,6 @@
 
 Persist invisible uploads and replace parts atomically without creating object records.
 
-### Hands-on task
-
-Starting from stage-09, Implement create/load/write/remove upload methods and `MiniS3.create_multipart_upload`, `upload_part`, `abort_multipart_upload`. Keep all behavior inside the listed source-like boundaries; do not copy the patch first.
-
 ### Deliverable files / 交付文件
 
 - `src/minis3/__init__.py`
@@ -676,23 +672,27 @@ Calls the learner-visible boundary and records the expected state or failure; st
     +        store.upload_part("b", "right", upload.upload_id, 10_001, b"x")
     ```
 
-### Self-check
-
-1. Where is this stage's visibility or state transition owned?
-
-    ??? note "Answer"
-        An unfinished upload lives outside the visible object manifest.
-
-2. Which test would fail first if the new boundary were bypassed?
-
-    ??? note "Answer"
-        Read `tests.txt`, identify the narrowest new node, and name the public call it exercises.
-
-### Pass command
+### Verification evidence
 
 `uv run pytest -q $(cat journey/stages/10-multipart-staging/tests.txt)`
 
-### The real S3 lesson
+This stage adds 1 executable case(s), anchored at `test_upload_identity_and_part_number_are_validated`. Run them after the mechanism walkthrough; the cumulative gate also reruns every earlier stage contract.
+
+### Concept check
+
+Which invariant must remain true after this stage?
+
+??? note "Answer"
+    An unfinished upload lives outside the visible object manifest.
+
+### Code-reading check
+
+Start at `the changed hunk` in `src/minis3/model.py`: what state or value enters this boundary, and which owner consumes the result next?
+
+??? note "Answer"
+    Constructed by bucket/service code and returned upward without owning I/O; inspect field values when state is correct but results look wrong.
+
+### Interview-ready summary
 
 An unfinished upload lives outside the visible object manifest.
 

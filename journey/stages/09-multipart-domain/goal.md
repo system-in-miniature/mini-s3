@@ -1,6 +1,6 @@
 # Stage 09 · Multipart domain and validation / Multipart 领域与校验
 
-<!-- journey: chapter=6 tests_added=0 -->
+<!-- journey: chapter=6 tests_added=1 -->
 
 ## English
 
@@ -16,6 +16,7 @@ Starting from stage-08, Implement `MultipartUpload`, `StagedPart`, receipts, and
 
 - `src/minis3/errors.py`
 - `src/minis3/multipart.py`
+- `tests/test_multipart_domain.py`
 
 ### Mechanism walkthrough
 

@@ -4,10 +4,6 @@
 
 校验有序客户端清单、组装字节，并只发布一个可见对象。
 
-### 动手任务
-
-从stage-10开始，实现 `MiniS3.complete_multipart_upload(...)`，并把组合 ETag 接入 `Bucket.put(...)`。 行为必须留在下列源码同构边界中；不要先复制补丁。
-
 ### 交付文件
 
 - `src/minis3/store.py`
@@ -209,23 +205,27 @@
     +
     ```
 
-### 自查
-
-1. 本阶段的可见性或状态迁移由谁负责？
-
-    ??? note "答案"
-        完成操作只通过与 PUT 相同的 Bucket manifest 发布边界变为可见。
-
-2. 如果绕过新边界，哪个测试会最先失败？
-
-    ??? note "答案"
-        阅读 `tests.txt`，找出最窄的新节点，并说出它覆盖的公开调用。
-
-### 通关命令
+### 验证证据
 
 `uv run pytest -q $(cat journey/stages/11-multipart-complete/tests.txt)`
 
-### 对应真实 S3 的一课
+本阶段新增 4 个可执行用例，入口为 `test_multipart_is_invisible_until_ordered_atomic_complete`、`test_uploading_same_part_number_replaces_the_staged_part`、`test_complete_validates_order_presence_etag_and_nonfinal_size`、`test_abort_removes_upload_and_restart_preserves_unfinished_parts`。它们在机制走读之后运行，并与此前 Stage 的用例一起守住累计行为。
+
+### 概念检查
+
+本阶段完成后，哪条不变量必须保持成立？
+
+??? note "答案"
+    完成操作只通过与 PUT 相同的 Bucket manifest 发布边界变为可见。
+
+### 代码阅读检查
+
+从 `src/minis3/store.py` 的 `complete_multipart_upload` 开始：进入这个边界的状态或值是什么，结果又交给哪个所有者？
+
+??? note "答案"
+    接收公开调用，拥有加锁与编排，再委托给领域、投影和存储边界。
+
+### 面试表达
 
 完成操作只通过与 PUT 相同的 Bucket manifest 发布边界变为可见。
 

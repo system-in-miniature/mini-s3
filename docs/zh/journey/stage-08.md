@@ -4,10 +4,6 @@
 
 验证父目录持久性，并在启动时清理临时或未引用的崩溃残留。
 
-### 动手任务
-
-从stage-07开始，强化并测试 `atomic_write`、`durable_mkdir`、`DiskStorage.load_buckets` 与清理路径。 行为必须留在下列源码同构边界中；不要先复制补丁。
-
 ### 交付文件
 
 - `tests/test_storage.py`
@@ -110,23 +106,27 @@
     +    assert not stray.exists()
     ```
 
-### 自查
-
-1. 本阶段的可见性或状态迁移由谁负责？
-
-    ??? note "答案"
-        只有对所在目录执行 fsync，原子 rename 才成为持久发布。
-
-2. 如果绕过新边界，哪个测试会最先失败？
-
-    ??? note "答案"
-        阅读 `tests.txt`，找出最窄的新节点，并说出它覆盖的公开调用。
-
-### 通关命令
+### 验证证据
 
 `uv run pytest -q $(cat journey/stages/08-fsync-recovery/tests.txt)`
 
-### 对应真实 S3 的一课
+本阶段新增 3 个可执行用例，入口为 `test_atomic_write_fsyncs_each_new_directory_parent`、`test_storage_and_bucket_directory_creation_fsync_parent_chains`、`test_recovery_removes_spurious_tmp_files`。它们在机制走读之后运行，并与此前 Stage 的用例一起守住累计行为。
+
+### 概念检查
+
+本阶段完成后，哪条不变量必须保持成立？
+
+??? note "答案"
+    只有对所在目录执行 fsync，原子 rename 才成为持久发布。
+
+### 代码阅读检查
+
+从 `tests/test_storage.py` 的 `test_atomic_write_fsyncs_each_new_directory_parent` 开始：进入这个边界的状态或值是什么，结果又交给哪个所有者？
+
+??? note "答案"
+    调用学习者可见边界并记录预期状态或失败；验证机制时再从这里进入。
+
+### 面试表达
 
 只有对所在目录执行 fsync，原子 rename 才成为持久发布。
 

@@ -4,10 +4,6 @@
 
 引入 Bucket 聚合、合法版本化迁移，以及可注入的单调序列。
 
-### 动手任务
-
-从stage-01开始，实现 `VersioningState`、`SequenceCounter` 与 `Bucket.set_versioning(state)`。 行为必须留在下列源码同构边界中；不要先复制补丁。
-
 ### 交付文件
 
 - `src/minis3/bucket.py`
@@ -203,23 +199,66 @@
     +        return marker
     ```
 
-### 自查
+#### `tests/test_bucket.py`
 
-1. 本阶段的可见性或状态迁移由谁负责？
+本阶段行为的可执行证明。
 
-    ??? note "答案"
-        版本化可启用、可暂停，但不能回到从未启用状态。
+调用学习者可见边界并记录预期状态或失败；验证机制时再从这里进入。
 
-2. 如果绕过新边界，哪个测试会最先失败？
+**变化锚点:** `test_bucket_owns_versioning_transitions_and_deterministic_ids`
 
-    ??? note "答案"
-        阅读 `tests.txt`，找出最窄的新节点，并说出它覆盖的公开调用。
+??? note "文件差异：tests/test_bucket.py"
+    ```diff
+    diff --git a/tests/test_bucket.py b/tests/test_bucket.py
+    new file mode 100644
+    index 0000000..139fcf0
+    --- /dev/null
+    +++ b/tests/test_bucket.py
+    @@ -0,0 +1,21 @@
+    +"""Focused contracts for the bucket aggregate before service wiring."""
+    +
+    +import pytest
+    +
+    +from minis3.bucket import Bucket, SequenceCounter, VersioningState
+    +
+    +
+    +def test_bucket_owns_versioning_transitions_and_deterministic_ids() -> None:
+    +    bucket = Bucket("b")
+    +    counter = SequenceCounter()
+    +
+    +    null = bucket.put("key", b"before", counter)
+    +    bucket.set_versioning(VersioningState.ENABLED)
+    +    named = bucket.put("key", b"after", counter)
+    +    bucket.set_versioning(VersioningState.SUSPENDED)
+    +
+    +    assert (null.version_id, null.storage_id) == ("null", "e00000001")
+    +    assert (named.version_id, named.storage_id) == ("v00000002", "e00000002")
+    +    assert bucket.get("key").body == b"after"
+    +    with pytest.raises(ValueError):
+    +        bucket.set_versioning(VersioningState.UNVERSIONED)
+    ```
 
-### 通关命令
+### 验证证据
 
 `uv run pytest -q $(cat journey/stages/02-bucket-state/tests.txt)`
 
-### 对应真实 S3 的一课
+本阶段新增 1 个可执行用例，入口为 `test_bucket_owns_versioning_transitions_and_deterministic_ids`。它们在机制走读之后运行，并与此前 Stage 的用例一起守住累计行为。
+
+### 概念检查
+
+本阶段完成后，哪条不变量必须保持成立？
+
+??? note "答案"
+    版本化可启用、可暂停，但不能回到从未启用状态。
+
+### 代码阅读检查
+
+从 `src/minis3/bucket.py` 的 `VersioningState` 开始：进入这个边界的状态或值是什么，结果又交给哪个所有者？
+
+??? note "答案"
+    由 `MiniS3` 调用；把一次命令和当前记录转换为下一份内存历史。
+
+### 面试表达
 
 版本化可启用、可暂停，但不能回到从未启用状态。
 

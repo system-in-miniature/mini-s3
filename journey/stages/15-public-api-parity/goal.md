@@ -10,7 +10,7 @@ Expose the complete teaching API and prove the reconstructed source and Journey-
 
 ### Hands-on task
 
-Starting from stage-14, Finalize `minis3.__init__` exports and run the complete 49-test contract. Keep all behavior inside the listed source-like boundaries; do not copy the patch first.
+Starting from stage-14, Finalize `minis3.__init__` exports and run the complete cumulative test contract. Keep all behavior inside the listed source-like boundaries; do not copy the patch first.
 
 ### Deliverable files / 交付文件
 
@@ -58,7 +58,7 @@ A rebuild journey stays trustworthy only when CI guards both behavior and final-
 
 ### 动手任务
 
-从stage-14开始，完成 `minis3.__init__` 导出，并运行完整 49 项测试契约。 行为必须留在下列源码同构边界中；不要先复制补丁。
+从stage-14开始，完成 `minis3.__init__` 导出，并运行完整累计测试契约。 行为必须留在下列源码同构边界中；不要先复制补丁。
 
 ### 交付文件
 

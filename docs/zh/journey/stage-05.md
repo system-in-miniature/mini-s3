@@ -4,10 +4,6 @@
 
 公开完整历史，使 null 版本、具名版本与删除标记保持可区分。
 
-### 动手任务
-
-从stage-04开始，实现 `list_object_versions(records, prefix=...)` 与 `MiniS3.list_object_versions`。 行为必须留在下列源码同构边界中；不要先复制补丁。
-
 ### 交付文件
 
 - `src/minis3/__init__.py`
@@ -273,23 +269,27 @@
          store.create_bucket("b")
     ```
 
-### 自查
-
-1. 本阶段的可见性或状态迁移由谁负责？
-
-    ??? note "答案"
-        当前可见性与保留历史，是同一记录的两种投影。
-
-2. 如果绕过新边界，哪个测试会最先失败？
-
-    ??? note "答案"
-        阅读 `tests.txt`，找出最窄的新节点，并说出它覆盖的公开调用。
-
-### 通关命令
+### 验证证据
 
 `uv run pytest -q $(cat journey/stages/05-version-history/tests.txt)`
 
-### 对应真实 S3 的一课
+本阶段新增 3 个可执行用例，入口为 `test_unversioned_put_replaces_null_and_delete_removes_it`、`test_suspended_put_replaces_null_but_preserves_named_history`、`test_suspended_delete_replaces_null_with_null_marker`。它们在机制走读之后运行，并与此前 Stage 的用例一起守住累计行为。
+
+### 概念检查
+
+本阶段完成后，哪条不变量必须保持成立？
+
+??? note "答案"
+    当前可见性与保留历史，是同一记录的两种投影。
+
+### 代码阅读检查
+
+从 `src/minis3/listing.py` 的 `ListedVersion` 开始：进入这个边界的状态或值是什么，结果又交给哪个所有者？
+
+??? note "答案"
+    由服务读取路径调用；把存储历史转换成排序、分页的响应值，不修改状态。
+
+### 面试表达
 
 当前可见性与保留历史，是同一记录的两种投影。
 

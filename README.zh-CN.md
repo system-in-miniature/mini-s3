@@ -62,6 +62,15 @@ print(stored.version_id, stored.etag)
 - 纯 expiration 规则只在注入时间的显式 `lifecycle_tick` 中执行：当前版本化数据
   产生 delete marker，符合条件的 noncurrent 数据版本被物理删除。
 
+## 逐 Stage 重建 Journey
+
+[通过 15 个累计 Stage 重建 MiniS3](docs/zh/journey/index.md)。每个 Stage 都是可
+独立浏览的完整课程：先理解机制、所有权与数据流，再逐文件阅读本次 Diff，最后运行
+聚焦验证，并完成代码阅读与面试表达。测试是机制讲解后的证据，不要求测试优先。
+
+如果还想在编辑器中把当前 Stage 显示为未提交变更，可运行
+`python journey/tools/build_journey.py study N`，它只操作专用学习工作区。
+
 ## 仓库导览
 
 ```text

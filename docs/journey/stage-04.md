@@ -4,10 +4,6 @@
 
 Join buckets and storage through a locked service that supports versioned PUT, GET, HEAD, and DELETE.
 
-### Hands-on task
-
-Starting from stage-03, Implement `MiniS3.__init__`, bucket operations, object operations, and `_bucket(name)`. Keep all behavior inside the listed source-like boundaries; do not copy the patch first.
-
 ### Deliverable files / 交付文件
 
 - `src/minis3/__init__.py`
@@ -351,23 +347,27 @@ Calls the learner-visible boundary and records the expected state or failure; st
     +        store.delete_bucket("b")
     ```
 
-### Self-check
-
-1. Where is this stage's visibility or state transition owned?
-
-    ??? note "Answer"
-        Strong consistency comes from one mutation lock plus publish-before-swap candidate state.
-
-2. Which test would fail first if the new boundary were bypassed?
-
-    ??? note "Answer"
-        Read `tests.txt`, identify the narrowest new node, and name the public call it exercises.
-
-### Pass command
+### Verification evidence
 
 `uv run pytest -q $(cat journey/stages/04-object-service/tests.txt)`
 
-### The real S3 lesson
+This stage adds 15 executable case(s), anchored at `test_restart_restores_versions_bodies_and_counter`, `test_versioning_state_machine_exhaustive`, `test_unversioned_delete_defensively_preserves_named_history`, `test_enabled_puts_stack_and_delete_marker_hides_history`, `test_specific_delete_removes_only_addressed_version`, `test_latest_marker_is_404_even_when_older_data_exists`, `test_nonempty_bucket_cannot_be_deleted`. Run them after the mechanism walkthrough; the cumulative gate also reruns every earlier stage contract.
+
+### Concept check
+
+Which invariant must remain true after this stage?
+
+??? note "Answer"
+    Strong consistency comes from one mutation lock plus publish-before-swap candidate state.
+
+### Code-reading check
+
+Start at `MiniS3` in `src/minis3/store.py`: what state or value enters this boundary, and which owner consumes the result next?
+
+??? note "Answer"
+    Receives public calls, owns locking and orchestration, then delegates to domain, projection, and storage boundaries.
+
+### Interview-ready summary
 
 Strong consistency comes from one mutation lock plus publish-before-swap candidate state.
 

@@ -12,14 +12,14 @@ Journey Mode 把 MiniS3 成品系统拆成 15 个可累积、可测试的重建�
 | Stage | Topic / 主题 | New tests / 新增测试 | Book / 教材 |
 |---:|---|---:|---:|
 | 01 | Scaffold and object values / 脚手架与对象值 | 3 | 1 |
-| 02 | Bucket state and deterministic IDs / Bucket 状态与确定性 ID | 0 | 3 |
-| 03 | Durable storage boundary / 持久化存储边界 | 0 | 5 |
+| 02 | Bucket state and deterministic IDs / Bucket 状态与确定性 ID | 1 | 3 |
+| 03 | Durable storage boundary / 持久化存储边界 | 1 | 5 |
 | 04 | Object service facade / 对象服务门面 | 15 | 2 |
 | 05 | Version history projection / 版本历史投影 | 3 | 3 |
 | 06 | Listing and directory illusion / Listing 与目录幻觉 | 5 | 4 |
 | 07 | Manifest publication crash matrix / Manifest 发布崩溃矩阵 | 5 | 5 |
 | 08 | Directory fsync and cleanup / 目录 fsync 与启动清理 | 3 | 5 |
-| 09 | Multipart domain and validation / Multipart 领域与校验 | 0 | 6 |
+| 09 | Multipart domain and validation / Multipart 领域与校验 | 1 | 6 |
 | 10 | Durable multipart staging / Multipart 持久暂存 | 1 | 6 |
 | 11 | Atomic multipart completion / Multipart 原子完成 | 4 | 6 |
 | 12 | Multipart crash recovery / Multipart 崩溃恢复 | 2 | 6 |
