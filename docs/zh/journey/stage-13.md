@@ -16,45 +16,30 @@
 - `src/minis3/store.py`
 - `tests/test_conditional.py`
 
-### 自查
+### 机制走读
 
-1. 本阶段的可见性或状态迁移由谁负责？
+#### 所有权与数据流
 
-    ??? note "答案"
-        比较与发布必须处于同一临界区，否则两个写者都可能成功。
+纯辅助函数评估 ETag 语法；`MiniS3` 用同一把锁覆盖读取当前可见 ETag、检查前置条件和发布变更。
 
-2. 如果绕过新边界，哪个测试会最先失败？
+#### 失败与排查
 
-    ??? note "答案"
-        阅读 `tests.txt`，找出最窄的新节点，并说出它覆盖的公开调用。
+区分匹配语义问题与串行化问题；若两个条件写者都成功，说明比较与变更没有处于同一临界区。
 
-### 通关命令
+### 逐文件 Diff 走读
 
-`uv run pytest -q $(cat journey/stages/13-conditional-cas/tests.txt)`
+按运行时职责阅读，而不是按补丁存储顺序阅读。每个代码块都直接来自 canonical `stage.patch`。
 
-### 对应真实 S3 的一课
+#### `src/minis3/conditional.py`
 
-比较与发布必须处于同一临界区，否则两个写者都可能成功。
+ETag 前置条件匹配规则。
 
-### 教材
+由 `MiniS3` 作为策略函数调用；接收显式值并返回由服务执行的决策。
 
-[第 7 章](https://github.com/system-in-miniature/mini-s3/blob/main/docs/zh/tutorial/07-conditional.md)
+**变化锚点:** `etag_matches`, `require_if_match`, `require_if_none_match`
 
-[在 GitHub 查看阶段差异](https://github.com/system-in-miniature/mini-s3/compare/stage-12...stage-13)
-
-完成后可运行 `git checkout stage-13` 对照你的结果。
-
-??? note "先做后看：stage.patch"
+??? note "文件差异：src/minis3/conditional.py"
     ```diff
-    diff --git a/src/minis3/__init__.py b/src/minis3/__init__.py
-    index 0c23aea..3f6e582 100644
-    --- a/src/minis3/__init__.py
-    +++ b/src/minis3/__init__.py
-    @@ -7,3 +7,4 @@ from .storage import InjectedCrash
-     from .listing import ListedObject, ListedVersion, ListObjectsResult, ListObjectVersionsResult
-     from .errors import EntityTooSmall, InvalidPart, InvalidPartOrder, NoSuchUpload
-     from .multipart import MIN_PART_SIZE, MultipartPart, MultipartUpload
-    +from .errors import NotModified, PreconditionFailed
     diff --git a/src/minis3/conditional.py b/src/minis3/conditional.py
     new file mode 100644
     index 0000000..d13ccf3
@@ -96,12 +81,24 @@
     +
     +    if condition is not None and etag_matches(condition, current_etag):
     +        raise NotModified(condition)
+    ```
+
+#### `src/minis3/errors.py`
+
+共享的领域失败词汇。
+
+由 Bucket/服务代码构造并向上返回，不拥有 I/O；状态正确但结果异常时检查这些字段。
+
+**变化锚点:** `PreconditionFailed`, `NotModified`
+
+??? note "文件差异：src/minis3/errors.py"
+    ```diff
     diff --git a/src/minis3/errors.py b/src/minis3/errors.py
     index 9db3b4c..5f255e0 100644
     --- a/src/minis3/errors.py
     +++ b/src/minis3/errors.py
     @@ -43,3 +43,11 @@ class InvalidPartOrder(MiniS3Error):
-     
+
      class EntityTooSmall(MiniS3Error):
          """A non-final multipart part is below the configured minimum size."""
     +
@@ -112,6 +109,18 @@
     +
     +class NotModified(MiniS3Error):
     +    """An If-None-Match condition matched (the HTTP 304 control outcome)."""
+    ```
+
+#### `src/minis3/store.py`
+
+协调领域逻辑与持久化的应用服务。
+
+接收公开调用，拥有加锁与编排，再委托给领域、投影和存储边界。
+
+**变化锚点:** `put_object`, `_current_etag`, `_addressed_etag`, `_bucket`
+
+??? note "文件差异：src/minis3/store.py"
+    ```diff
     diff --git a/src/minis3/store.py b/src/minis3/store.py
     index 9b50aa2..e47e1ac 100644
     --- a/src/minis3/store.py
@@ -119,7 +128,7 @@
     @@ -8,8 +8,9 @@ from pathlib import Path
      from threading import RLock
      from time import time
-     
+
     +from .conditional import require_if_match, require_if_none_match
      from .bucket import Bucket, SequenceCounter, VersioningState
     -from .errors import BucketAlreadyExists, BucketNotEmpty, NoSuchBucket
@@ -129,8 +138,8 @@
      from .multipart import (
     @@ -78,20 +79,39 @@ class MiniS3:
                  self._buckets[name] = candidate
-     
-     
+
+
     -    def put_object(self, bucket: str, key: str, body: bytes) -> Version:
     +    def put_object(
     +        self,
@@ -150,8 +159,8 @@
                  self._storage.persist_bucket(candidate)
                  self._buckets[bucket] = candidate
                  return result
-     
-     
+
+
          def get_object(
     -        self, bucket: str, key: str, *, version_id: str | None = None
     +        self,
@@ -168,12 +177,12 @@
     +            require_if_match(result.etag, if_match)
     +            require_if_none_match(result.etag, if_none_match)
     +            return result
-     
-     
+
+
          def head_object(
     @@ -103,11 +123,21 @@ class MiniS3:
-     
-     
+
+
          def delete_object(
     -        self, bucket: str, key: str, *, version_id: str | None = None
     +        self,
@@ -197,8 +206,8 @@
                  return result
     @@ -220,6 +250,24 @@ class MiniS3:
                  self._storage.remove_multipart_upload(bucket, key, upload_id)
-     
-     
+
+
     +    @staticmethod
     +    def _current_etag(bucket: Bucket, key: str) -> str | None:
     +        try:
@@ -220,6 +229,39 @@
          def _bucket(self, name: str) -> Bucket:
              try:
                  return self._buckets[name]
+    ```
+
+#### `src/minis3/__init__.py`
+
+受支持的包级公开接口。
+
+由用户导入触达；接线错误会在运行时流程开始前表现为名称缺失。
+
+**变化锚点:** 配置、导出或文档变化
+
+??? note "文件差异：src/minis3/__init__.py"
+    ```diff
+    diff --git a/src/minis3/__init__.py b/src/minis3/__init__.py
+    index 0c23aea..3f6e582 100644
+    --- a/src/minis3/__init__.py
+    +++ b/src/minis3/__init__.py
+    @@ -7,3 +7,4 @@ from .storage import InjectedCrash
+     from .listing import ListedObject, ListedVersion, ListObjectsResult, ListObjectVersionsResult
+     from .errors import EntityTooSmall, InvalidPart, InvalidPartOrder, NoSuchUpload
+     from .multipart import MIN_PART_SIZE, MultipartPart, MultipartUpload
+    +from .errors import NotModified, PreconditionFailed
+    ```
+
+#### `tests/test_conditional.py`
+
+本阶段行为的可执行证明。
+
+调用学习者可见边界并记录预期状态或失败；验证机制时再从这里进入。
+
+**变化锚点:** `test_get_if_none_match_has_304_semantics_and_if_match_has_412`, `test_put_and_delete_if_match_compare_against_current_visible_etag`, `test_if_match_wildcard_requires_a_current_visible_object`, `test_two_conditional_writers_have_exactly_one_winner`, `writer`
+
+??? note "文件差异：tests/test_conditional.py"
+    ```diff
     diff --git a/tests/test_conditional.py b/tests/test_conditional.py
     new file mode 100644
     index 0000000..137e7a1
@@ -308,3 +350,33 @@
     +    assert store.get_object("b", "counter").body in {b"writer-a", b"writer-b"}
     +
     ```
+
+### 自查
+
+1. 本阶段的可见性或状态迁移由谁负责？
+
+    ??? note "答案"
+        比较与发布必须处于同一临界区，否则两个写者都可能成功。
+
+2. 如果绕过新边界，哪个测试会最先失败？
+
+    ??? note "答案"
+        阅读 `tests.txt`，找出最窄的新节点，并说出它覆盖的公开调用。
+
+### 通关命令
+
+`uv run pytest -q $(cat journey/stages/13-conditional-cas/tests.txt)`
+
+### 对应真实 S3 的一课
+
+比较与发布必须处于同一临界区，否则两个写者都可能成功。
+
+### 教材
+
+[第 7 章](https://github.com/system-in-miniature/mini-s3/blob/main/docs/zh/tutorial/07-conditional.md)
+
+[在 GitHub 查看阶段差异](https://github.com/system-in-miniature/mini-s3/compare/stage-12...stage-13)
+
+完成后可运行 `git checkout stage-13` 对照你的结果。
+
+[Complete reference patch / 完整参考补丁](https://github.com/system-in-miniature/mini-s3/blob/main/journey/stages/13-conditional-cas/stage.patch)

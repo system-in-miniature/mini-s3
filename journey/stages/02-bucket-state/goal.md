@@ -16,6 +16,16 @@ Starting from stage-01, Implement `VersioningState`, `SequenceCounter`, and `Buc
 
 - `src/minis3/bucket.py`
 
+### Mechanism walkthrough
+
+#### Ownership and flow
+
+`Bucket` owns per-key history and legal versioning transitions. An injected `SequenceCounter` turns each PUT or marker into deterministic public and internal identities.
+
+#### Failure and debugging
+
+Inspect the bucket state before the branch, then compare `version_id`, `storage_id`, and record order after it. Illegal transitions should fail before mutating state.
+
 ### Self-check
 
 1. Where is this stage's visibility or state transition owned?
@@ -53,6 +63,16 @@ Versioning can be enabled and suspended, but never reset to the never-enabled st
 ### 交付文件
 
 - `src/minis3/bucket.py`
+
+### 机制走读
+
+#### 所有权与数据流
+
+`Bucket` 拥有每个 Key 的历史与合法版本状态迁移；注入的 `SequenceCounter` 为每次 PUT 或删除标记生成确定性的公开与内部身份。
+
+#### 失败与排查
+
+先看分支前的 Bucket 状态，再比较变更后的 `version_id`、`storage_id` 与记录顺序；非法迁移必须在修改状态前失败。
 
 ### 自查
 

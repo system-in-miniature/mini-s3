@@ -19,6 +19,16 @@ Starting from stage-04, Implement `list_object_versions(records, prefix=...)` an
 - `src/minis3/store.py`
 - `tests/test_versioning.py`
 
+### Mechanism walkthrough
+
+#### Ownership and flow
+
+Mutation remains in `Bucket`; `listing.py` flattens ordered histories into read-only `ListedVersion` rows while preserving latest and delete-marker flags.
+
+#### Failure and debugging
+
+Inspect the stored tuple before blaming projection. Wrong null-slot replacement is a mutation bug; correct history with wrong ordering/flags is a listing bug.
+
 ### Self-check
 
 1. Where is this stage's visibility or state transition owned?
@@ -59,6 +69,16 @@ Current visibility and retained history are different projections of the same re
 - `src/minis3/listing.py`
 - `src/minis3/store.py`
 - `tests/test_versioning.py`
+
+### 机制走读
+
+#### 所有权与数据流
+
+变更仍由 `Bucket` 负责；`listing.py` 把有序历史展平成只读 `ListedVersion` 行，同时保留 latest 与 delete-marker 标记。
+
+#### 失败与排查
+
+先检查存储的 Tuple，再判断投影；null 槽替换错误属于变更问题，历史正确但顺序或标记错误才属于 Listing 问题。
 
 ### 自查
 

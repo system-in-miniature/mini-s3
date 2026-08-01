@@ -13,35 +13,29 @@
 - `src/minis3/errors.py`
 - `src/minis3/multipart.py`
 
-### 自查
+### 机制走读
 
-1. 本阶段的可见性或状态迁移由谁负责？
+#### 所有权与数据流
 
-    ??? note "答案"
-        只有完成时才能知道最后一个 Part，因此最小尺寸也在完成时校验。
+`multipart.py` 拥有 Upload/Part 值和纯完成校验：客户端清单选择暂存 Part，校验顺序与尺寸，再生成组合 ETag。
 
-2. 如果绕过新边界，哪个测试会最先失败？
+#### 失败与排查
 
-    ??? note "答案"
-        阅读 `tests.txt`，找出最窄的新节点，并说出它覆盖的公开调用。
+组装前对照客户端身份与暂存回执；乱序、缺失 Part、ETag 不匹配和非末尾 Part 过小必须分别失败。
 
-### 通关命令
+### 逐文件 Diff 走读
 
-`uv run pytest -q $(cat journey/stages/09-multipart-domain/tests.txt)`
+按运行时职责阅读，而不是按补丁存储顺序阅读。每个代码块都直接来自 canonical `stage.patch`。
 
-### 对应真实 S3 的一课
+#### `src/minis3/errors.py`
 
-只有完成时才能知道最后一个 Part，因此最小尺寸也在完成时校验。
+共享的领域失败词汇。
 
-### 教材
+由 Bucket/服务代码构造并向上返回，不拥有 I/O；状态正确但结果异常时检查这些字段。
 
-[第 6 章](https://github.com/system-in-miniature/mini-s3/blob/main/docs/zh/tutorial/06-multipart.md)
+**变化锚点:** `NoSuchUpload`, `InvalidPart`, `InvalidPartOrder`, `EntityTooSmall`
 
-[在 GitHub 查看阶段差异](https://github.com/system-in-miniature/mini-s3/compare/stage-08...stage-09)
-
-完成后可运行 `git checkout stage-09` 对照你的结果。
-
-??? note "先做后看：stage.patch"
+??? note "文件差异：src/minis3/errors.py"
     ```diff
     diff --git a/src/minis3/errors.py b/src/minis3/errors.py
     index e1a2230..9db3b4c 100644
@@ -50,7 +44,7 @@
     @@ -28,3 +28,18 @@ class NoSuchVersion(MiniS3Error):
      class InvalidContinuationToken(MiniS3Error):
          """The list continuation token was malformed or belongs to another query."""
-     
+
     +
     +class NoSuchUpload(MiniS3Error):
     +    """The addressed multipart upload does not exist or no longer exists."""
@@ -66,6 +60,18 @@
     +
     +class EntityTooSmall(MiniS3Error):
     +    """A non-final multipart part is below the configured minimum size."""
+    ```
+
+#### `src/minis3/multipart.py`
+
+Multipart 领域值与完成规则。
+
+由 `MiniS3` 作为策略函数调用；接收显式值并返回由服务执行的决策。
+
+**变化锚点:** `MultipartUpload`, `MultipartPart`, `StagedPart`, `etag`, `size`, `receipt`, `_entry_identity`, `validate_completion`
+
+??? note "文件差异：src/minis3/multipart.py"
+    ```diff
     diff --git a/src/minis3/multipart.py b/src/minis3/multipart.py
     new file mode 100644
     index 0000000..c10ab02
@@ -180,3 +186,33 @@
     +    composite = md5(digests, usedforsecurity=False).hexdigest()
     +    return tuple(selected), f'"{composite}-{len(selected)}"'
     ```
+
+### 自查
+
+1. 本阶段的可见性或状态迁移由谁负责？
+
+    ??? note "答案"
+        只有完成时才能知道最后一个 Part，因此最小尺寸也在完成时校验。
+
+2. 如果绕过新边界，哪个测试会最先失败？
+
+    ??? note "答案"
+        阅读 `tests.txt`，找出最窄的新节点，并说出它覆盖的公开调用。
+
+### 通关命令
+
+`uv run pytest -q $(cat journey/stages/09-multipart-domain/tests.txt)`
+
+### 对应真实 S3 的一课
+
+只有完成时才能知道最后一个 Part，因此最小尺寸也在完成时校验。
+
+### 教材
+
+[第 6 章](https://github.com/system-in-miniature/mini-s3/blob/main/docs/zh/tutorial/06-multipart.md)
+
+[在 GitHub 查看阶段差异](https://github.com/system-in-miniature/mini-s3/compare/stage-08...stage-09)
+
+完成后可运行 `git checkout stage-09` 对照你的结果。
+
+[Complete reference patch / 完整参考补丁](https://github.com/system-in-miniature/mini-s3/blob/main/journey/stages/09-multipart-domain/stage.patch)

@@ -18,84 +18,30 @@
 - `tests/test_model.py`
 - `uv.lock`
 
-### 自查
+### 机制走读
 
-1. 本阶段的可见性或状态迁移由谁负责？
+#### 所有权与数据流
 
-    ??? note "答案"
-        S3 保存完整对象值；Key 中的斜杠只是数据，不是目录。
+`model.py` 拥有不可变完整对象值：字节进入 `content_etag` 形成带引号指纹，再随 `Version` 进入 `ObjectRecord`；`DeleteMarker` 只遮蔽历史，不携带 Body。
 
-2. 如果绕过新边界，哪个测试会最先失败？
+#### 失败与排查
 
-    ??? note "答案"
-        阅读 `tests.txt`，找出最窄的新节点，并说出它覆盖的公开调用。
+从值构造器与 ETag 断言开始排查。`key` 中的斜杠必须原样保留，对象必须不可变，删除标记不能意外获得对象字节。
 
-### 通关命令
+### 逐文件 Diff 走读
 
-`uv run pytest -q $(cat journey/stages/01-scaffold-object-model/tests.txt)`
+按运行时职责阅读，而不是按补丁存储顺序阅读。每个代码块都直接来自 canonical `stage.patch`。
 
-### 对应真实 S3 的一课
+#### `src/minis3/errors.py`
 
-S3 保存完整对象值；Key 中的斜杠只是数据，不是目录。
+共享的领域失败词汇。
 
-### 教材
+由 Bucket/服务代码构造并向上返回，不拥有 I/O；状态正确但结果异常时检查这些字段。
 
-[第 1 章](https://github.com/system-in-miniature/mini-s3/blob/main/docs/zh/tutorial/01-getting-started.md)
+**变化锚点:** `MiniS3Error`, `BucketAlreadyExists`, `NoSuchBucket`, `BucketNotEmpty`, `NoSuchKey`, `NoSuchVersion`, `InvalidContinuationToken`
 
-[在 GitHub 查看阶段差异](https://github.com/system-in-miniature/mini-s3/tree/stage-01)
-
-完成后可运行 `git checkout stage-01` 对照你的结果。
-
-??? note "先做后看：stage.patch"
+??? note "文件差异：src/minis3/errors.py"
     ```diff
-    diff --git a/README.md b/README.md
-    new file mode 100644
-    index 0000000..55f857c
-    --- /dev/null
-    +++ b/README.md
-    @@ -0,0 +1,3 @@
-    +# MiniS3 Journey workspace
-    +
-    +Build the object store one verified stage at a time.
-    diff --git a/pyproject.toml b/pyproject.toml
-    new file mode 100644
-    index 0000000..9167f50
-    --- /dev/null
-    +++ b/pyproject.toml
-    @@ -0,0 +1,24 @@
-    +[build-system]
-    +requires = ["hatchling"]
-    +build-backend = "hatchling.build"
-    +
-    +[project]
-    +name = "minis3"
-    +version = "0.1.0"
-    +description = "A deterministic S3 system-in-miniature for teaching"
-    +readme = "README.md"
-    +requires-python = ">=3.12"
-    +dependencies = []
-    +
-    +[dependency-groups]
-    +dev = [
-    +    "pytest>=9,<10",
-    +]
-    +
-    +[tool.hatch.build.targets.wheel]
-    +packages = ["src/minis3"]
-    +
-    +[tool.pytest.ini_options]
-    +pythonpath = ["src", "."]
-    +testpaths = ["tests"]
-    +
-    diff --git a/src/minis3/__init__.py b/src/minis3/__init__.py
-    new file mode 100644
-    index 0000000..8a3d1c7
-    --- /dev/null
-    +++ b/src/minis3/__init__.py
-    @@ -0,0 +1,3 @@
-    +"""Public API for the MiniS3 teaching implementation."""
-    +from .errors import BucketAlreadyExists, BucketNotEmpty, InvalidContinuationToken, MiniS3Error, NoSuchBucket, NoSuchKey, NoSuchVersion
-    +from .model import DeleteMarker, ObjectRecord, Version, content_etag
     diff --git a/src/minis3/errors.py b/src/minis3/errors.py
     new file mode 100644
     index 0000000..e1a2230
@@ -132,6 +78,18 @@ S3 保存完整对象值；Key 中的斜杠只是数据，不是目录。
     +class InvalidContinuationToken(MiniS3Error):
     +    """The list continuation token was malformed or belongs to another query."""
     +
+    ```
+
+#### `src/minis3/model.py`
+
+贯穿系统的不可变领域值。
+
+由 Bucket/服务代码构造并向上返回，不拥有 I/O；状态正确但结果异常时检查这些字段。
+
+**变化锚点:** `content_etag`, `Version`, `size`, `is_delete_marker`, `DeleteMarker`, `ObjectRecord`
+
+??? note "文件差异：src/minis3/model.py"
+    ```diff
     diff --git a/src/minis3/model.py b/src/minis3/model.py
     new file mode 100644
     index 0000000..da662fc
@@ -213,6 +171,39 @@ S3 保存完整对象值；Key 中的斜杠只是数据，不是目录。
     +    key: str
     +    versions: tuple[ObjectVersion, ...] = ()
     +
+    ```
+
+#### `src/minis3/__init__.py`
+
+受支持的包级公开接口。
+
+由用户导入触达；接线错误会在运行时流程开始前表现为名称缺失。
+
+**变化锚点:** 配置、导出或文档变化
+
+??? note "文件差异：src/minis3/__init__.py"
+    ```diff
+    diff --git a/src/minis3/__init__.py b/src/minis3/__init__.py
+    new file mode 100644
+    index 0000000..8a3d1c7
+    --- /dev/null
+    +++ b/src/minis3/__init__.py
+    @@ -0,0 +1,3 @@
+    +"""Public API for the MiniS3 teaching implementation."""
+    +from .errors import BucketAlreadyExists, BucketNotEmpty, InvalidContinuationToken, MiniS3Error, NoSuchBucket, NoSuchKey, NoSuchVersion
+    +from .model import DeleteMarker, ObjectRecord, Version, content_etag
+    ```
+
+#### `tests/test_model.py`
+
+本阶段行为的可执行证明。
+
+调用学习者可见边界并记录预期状态或失败；验证机制时再从这里进入。
+
+**变化锚点:** `test_etag_is_quoted_lowercase_content_md5`, `test_keys_are_opaque_even_when_they_contain_slashes`, `test_delete_marker_has_no_object_body`
+
+??? note "文件差异：tests/test_model.py"
+    ```diff
     diff --git a/tests/test_model.py b/tests/test_model.py
     new file mode 100644
     index 0000000..01151ba
@@ -254,6 +245,81 @@ S3 保存完整对象值；Key 中的斜杠只是数据，不是目录。
     +    )
     +    assert marker.is_delete_marker is True
     +
+    ```
+
+#### `README.md`
+
+Journey 工作区入口说明。
+
+支撑安装或入口说明，不属于运行时数据流；导入、构建或命令执行前失败时从这里排查。
+
+**变化锚点:** 配置、导出或文档变化
+
+??? note "文件差异：README.md"
+    ```diff
+    diff --git a/README.md b/README.md
+    new file mode 100644
+    index 0000000..27585a5
+    --- /dev/null
+    +++ b/README.md
+    @@ -0,0 +1,3 @@
+    +# MiniS3 Journey workspace
+    +
+    +Build the object store one verified stage at a time.
+    ```
+
+#### `pyproject.toml`
+
+安装与测试配置。
+
+支撑安装或入口说明，不属于运行时数据流；导入、构建或命令执行前失败时从这里排查。
+
+**变化锚点:** 配置、导出或文档变化
+
+??? note "文件差异：pyproject.toml"
+    ```diff
+    diff --git a/pyproject.toml b/pyproject.toml
+    new file mode 100644
+    index 0000000..9167f50
+    --- /dev/null
+    +++ b/pyproject.toml
+    @@ -0,0 +1,24 @@
+    +[build-system]
+    +requires = ["hatchling"]
+    +build-backend = "hatchling.build"
+    +
+    +[project]
+    +name = "minis3"
+    +version = "0.1.0"
+    +description = "A deterministic S3 system-in-miniature for teaching"
+    +readme = "README.md"
+    +requires-python = ">=3.12"
+    +dependencies = []
+    +
+    +[dependency-groups]
+    +dev = [
+    +    "pytest>=9,<10",
+    +]
+    +
+    +[tool.hatch.build.targets.wheel]
+    +packages = ["src/minis3"]
+    +
+    +[tool.pytest.ini_options]
+    +pythonpath = ["src", "."]
+    +testpaths = ["tests"]
+    +
+    ```
+
+#### `uv.lock`
+
+可复现依赖锁。
+
+支撑安装或入口说明，不属于运行时数据流；导入、构建或命令执行前失败时从这里排查。
+
+**变化锚点:** 配置、导出或文档变化
+
+??? note "文件差异：uv.lock"
+    ```diff
     diff --git a/uv.lock b/uv.lock
     new file mode 100644
     index 0000000..90ad0d9
@@ -340,3 +406,33 @@ S3 保存完整对象值；Key 中的斜杠只是数据，不是目录。
     +    { url = "https://files.pythonhosted.org/packages/24/25/1de2678b631f5a49215c6c96fff41ba892b0a34df68d6d80292b1b48aa7f/pytest-9.1.1-py3-none-any.whl", hash = "sha256:37a86b45efb9a47a61a36449063e8e18d0cab3161329fc099eb21783169c4f0c", size = 386536, upload-time = "2026-06-19T10:58:31.347Z" },
     +]
     ```
+
+### 自查
+
+1. 本阶段的可见性或状态迁移由谁负责？
+
+    ??? note "答案"
+        S3 保存完整对象值；Key 中的斜杠只是数据，不是目录。
+
+2. 如果绕过新边界，哪个测试会最先失败？
+
+    ??? note "答案"
+        阅读 `tests.txt`，找出最窄的新节点，并说出它覆盖的公开调用。
+
+### 通关命令
+
+`uv run pytest -q $(cat journey/stages/01-scaffold-object-model/tests.txt)`
+
+### 对应真实 S3 的一课
+
+S3 保存完整对象值；Key 中的斜杠只是数据，不是目录。
+
+### 教材
+
+[第 1 章](https://github.com/system-in-miniature/mini-s3/blob/main/docs/zh/tutorial/01-getting-started.md)
+
+[在 GitHub 查看阶段差异](https://github.com/system-in-miniature/mini-s3/tree/stage-01)
+
+完成后可运行 `git checkout stage-01` 对照你的结果。
+
+[Complete reference patch / 完整参考补丁](https://github.com/system-in-miniature/mini-s3/blob/main/journey/stages/01-scaffold-object-model/stage.patch)

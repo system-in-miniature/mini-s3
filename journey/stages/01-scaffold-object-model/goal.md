@@ -22,6 +22,16 @@ Starting from an empty tree, Implement `content_etag(body: bytes) -> str`, `Vers
 - `tests/test_model.py`
 - `uv.lock`
 
+### Mechanism walkthrough
+
+#### Ownership and flow
+
+`model.py` owns immutable whole-object values: bytes enter `content_etag`, become a quoted fingerprint, and travel with `Version` inside an `ObjectRecord`; a `DeleteMarker` hides history without carrying a body.
+
+#### Failure and debugging
+
+Start at the value constructor and ETag assertion. A slash in `key` must remain untouched, mutation must raise, and delete markers must never acquire object bytes.
+
 ### Self-check
 
 1. Where is this stage's visibility or state transition owned?
@@ -65,6 +75,16 @@ S3 stores whole object values; a slash in a key is data, not a directory.
 - `src/minis3/model.py`
 - `tests/test_model.py`
 - `uv.lock`
+
+### 机制走读
+
+#### 所有权与数据流
+
+`model.py` 拥有不可变完整对象值：字节进入 `content_etag` 形成带引号指纹，再随 `Version` 进入 `ObjectRecord`；`DeleteMarker` 只遮蔽历史，不携带 Body。
+
+#### 失败与排查
+
+从值构造器与 ETag 断言开始排查。`key` 中的斜杠必须原样保留，对象必须不可变，删除标记不能意外获得对象字节。
 
 ### 自查
 

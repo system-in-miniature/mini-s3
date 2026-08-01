@@ -1,27 +1,8 @@
 # MiniS3 Journey
 
-从空目录开始，依次完成任务卡；先动手，卡住时再展开补丁。
+每个 Stage 都是一节可独立浏览的完整课：先理解 S3 问题与机制，再按运行时职责逐文件阅读 Diff，最后用测试、自查题与面试表达完成闭环。
 
-## 在 VSCode 中学习
-
-使用专用学习仓库，让 VSCode gutter 与 Source Control 只显示当前 stage；
-主工作区始终不会被修改。
-
-```bash
-python journey/tools/build_journey.py study 3
-code ../MiniS3-journey-workspace
-```
-
-如果要自己实现，先准备上一 stage 的干净基线，再检查当前成果：
-
-```bash
-python journey/tools/build_journey.py attempt 3
-python journey/tools/build_journey.py check 3
-```
-
-`check` 会运行该 stage 的累计 `tests.txt` 子集，并输出当前树相对补丁直接
-累积出的参考树的 `git diff --stat`。`study` 和 `attempt` 覆盖已有学习内容前
-会明确确认；用 `--yes` 跳过提示，或用 `--workspace PATH` 选择其他专用仓库。
+如果希望在编辑器里聚焦当前增量，运行 `python journey/tools/build_journey.py study N`，再打开 `../MiniS3-journey-workspace`。Agent 导师可以增强互动，但不是完成课程的前提。
 
 | Stage | 主题 | 新增测试 | 教材章节 |
 |---:|---|---:|---:|
@@ -40,6 +21,3 @@ python journey/tools/build_journey.py check 3
 | [13](stage-13.md) | 条件请求与 CAS | 4 | [7](../tutorial/07-conditional.md) |
 | [14](stage-14.md) | 确定性生命周期过期 | 4 | [8](../tutorial/08-lifecycle.md) |
 | [15](stage-15.md) | 公开 API 与守链收官 | 0 | [9](../tutorial/09-methodology.md) |
-
-
-> `journey attempt` 目前为实验性占位；未来将按 CS336 范式重写为测试驱动作业（预置测试与接口桩，实现至转绿，`check` 即评分器）。

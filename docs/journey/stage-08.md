@@ -12,35 +12,29 @@ Starting from stage-07, Harden and test `atomic_write`, `durable_mkdir`, `DiskSt
 
 - `tests/test_storage.py`
 
-### Self-check
+### Mechanism walkthrough
 
-1. Where is this stage's visibility or state transition owned?
+#### Ownership and flow
 
-    ??? note "Answer"
-        Atomic rename is not durable publication until the containing directory is fsynced.
+This proof stage records directory fsync boundaries and creates interrupted-write debris, then checks that startup cleanup preserves referenced artifacts and removes temporary names.
 
-2. Which test would fail first if the new boundary were bypassed?
+#### Failure and debugging
 
-    ??? note "Answer"
-        Read `tests.txt`, identify the narrowest new node, and name the public call it exercises.
+Match every created or renamed directory entry with its parent fsync. During recovery, compare each deletion candidate against manifest references before removing it.
 
-### Pass command
+### File-by-file diff walkthrough
 
-`uv run pytest -q $(cat journey/stages/08-fsync-recovery/tests.txt)`
+Read by runtime responsibility, not patch storage order. Every block comes directly from the canonical `stage.patch`.
 
-### The real S3 lesson
+#### `tests/test_storage.py`
 
-Atomic rename is not durable publication until the containing directory is fsynced.
+Executable proof of the stage behavior.
 
-### Textbook
+Calls the learner-visible boundary and records the expected state or failure; start here only when verifying the mechanism.
 
-[Chapter 5](https://github.com/system-in-miniature/mini-s3/blob/main/docs/tutorial/05-crash-atomicity.md)
+**Changed anchors:** `test_atomic_write_fsyncs_each_new_directory_parent`, `recording_fsync_directory`, `test_storage_and_bucket_directory_creation_fsync_parent_chains`, `test_recovery_removes_spurious_tmp_files`
 
-[Compare this stage on GitHub](https://github.com/system-in-miniature/mini-s3/compare/stage-07...stage-08)
-
-After finishing, use `git checkout stage-08` to compare your result.
-
-??? note "Try first, then peek: stage.patch"
+??? note "File diff: tests/test_storage.py"
     ```diff
     diff --git a/tests/test_storage.py b/tests/test_storage.py
     index 5faad97..afc9a8a 100644
@@ -48,7 +42,7 @@ After finishing, use `git checkout stage-08` to compare your result.
     +++ b/tests/test_storage.py
     @@ -1,7 +1,9 @@
      """Disk tests pin the manifest publication crash boundary."""
-     
+
      from pathlib import Path
     +
      import pytest
@@ -115,3 +109,33 @@ After finishing, use `git checkout stage-08` to compare your result.
     +
     +    assert not stray.exists()
     ```
+
+### Self-check
+
+1. Where is this stage's visibility or state transition owned?
+
+    ??? note "Answer"
+        Atomic rename is not durable publication until the containing directory is fsynced.
+
+2. Which test would fail first if the new boundary were bypassed?
+
+    ??? note "Answer"
+        Read `tests.txt`, identify the narrowest new node, and name the public call it exercises.
+
+### Pass command
+
+`uv run pytest -q $(cat journey/stages/08-fsync-recovery/tests.txt)`
+
+### The real S3 lesson
+
+Atomic rename is not durable publication until the containing directory is fsynced.
+
+### Textbook
+
+[Chapter 5](https://github.com/system-in-miniature/mini-s3/blob/main/docs/tutorial/05-crash-atomicity.md)
+
+[Compare this stage on GitHub](https://github.com/system-in-miniature/mini-s3/compare/stage-07...stage-08)
+
+After finishing, use `git checkout stage-08` to compare your result.
+
+[Complete reference patch / 完整参考补丁](https://github.com/system-in-miniature/mini-s3/blob/main/journey/stages/08-fsync-recovery/stage.patch)

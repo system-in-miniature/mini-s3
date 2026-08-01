@@ -14,35 +14,29 @@
 - `src/minis3/storage/atomic.py`
 - `src/minis3/storage/disk.py`
 
-### 自查
+### 机制走读
 
-1. 本阶段的可见性或状态迁移由谁负责？
+#### 所有权与数据流
 
-    ??? note "答案"
-        manifest 引用可见的不可变制品；发布顺序决定可见性。
+`DiskStorage` 先写不可变数据与元数据 Artifact，最后发布 `manifest.json`；`atomic_write` 让 rename 成为可见性点，fsync 让目录项持久化。
 
-2. 如果绕过新边界，哪个测试会最先失败？
+#### 失败与排查
 
-    ??? note "答案"
-        阅读 `tests.txt`，找出最窄的新节点，并说出它覆盖的公开调用。
+按 Artifact 路径、临时名、rename、父目录 fsync 的顺序追踪；重启时对照 Manifest 引用与恢复文件，未引用 Artifact 不能变得可见。
 
-### 通关命令
+### 逐文件 Diff 走读
 
-`uv run pytest -q $(cat journey/stages/03-durable-storage-boundary/tests.txt)`
+按运行时职责阅读，而不是按补丁存储顺序阅读。每个代码块都直接来自 canonical `stage.patch`。
 
-### 对应真实 S3 的一课
+#### `src/minis3/storage/__init__.py`
 
-manifest 引用可见的不可变制品；发布顺序决定可见性。
+存储适配器边界导出。
 
-### 教材
+在领域变更后调用；把内存状态变成持久 Artifact，并在启动时重建。
 
-[第 5 章](https://github.com/system-in-miniature/mini-s3/blob/main/docs/zh/tutorial/05-crash-atomicity.md)
+**变化锚点:** 配置、导出或文档变化
 
-[在 GitHub 查看阶段差异](https://github.com/system-in-miniature/mini-s3/compare/stage-02...stage-03)
-
-完成后可运行 `git checkout stage-03` 对照你的结果。
-
-??? note "先做后看：stage.patch"
+??? note "文件差异：src/minis3/storage/__init__.py"
     ```diff
     diff --git a/src/minis3/storage/__init__.py b/src/minis3/storage/__init__.py
     new file mode 100644
@@ -57,6 +51,18 @@ manifest 引用可见的不可变制品；发布顺序决定可见性。
     +
     +__all__ = ["DiskStorage", "InjectedCrash"]
     +
+    ```
+
+#### `src/minis3/storage/atomic.py`
+
+可复用的 write/fsync/rename 持久性原语。
+
+在领域变更后调用；把内存状态变成持久 Artifact，并在启动时重建。
+
+**变化锚点:** `InjectedCrash`, `fsync_directory`, `durable_mkdir`, `atomic_write`
+
+??? note "文件差异：src/minis3/storage/atomic.py"
+    ```diff
     diff --git a/src/minis3/storage/atomic.py b/src/minis3/storage/atomic.py
     new file mode 100644
     index 0000000..d7d741b
@@ -120,6 +126,18 @@ manifest 引用可见的不可变制品；发布顺序决定可见性。
     +        os.fsync(handle.fileno())
     +    os.replace(temporary, path)
     +    fsync_directory(path.parent)
+    ```
+
+#### `src/minis3/storage/disk.py`
+
+磁盘布局、发布与恢复的所有者。
+
+在领域变更后调用；把内存状态变成持久 Artifact，并在启动时重建。
+
+**变化锚点:** `_encoded_name`, `_object_directory`, `DiskStorage`, `__init__`, `load_buckets`, `create_bucket`, `delete_bucket`, `persist_bucket`, `_bucket_directory`, `_manifest_bytes`, `_write_artifact`, `_load_bucket`, `_load_artifact`, `_clean_bucket`
+
+??? note "文件差异：src/minis3/storage/disk.py"
+    ```diff
     diff --git a/src/minis3/storage/disk.py b/src/minis3/storage/disk.py
     new file mode 100644
     index 0000000..8ad143f
@@ -354,3 +372,33 @@ manifest 引用可见的不可变制品；发布顺序决定可见性。
     +            if path.is_dir() and not any(path.iterdir()):
     +                path.rmdir()
     ```
+
+### 自查
+
+1. 本阶段的可见性或状态迁移由谁负责？
+
+    ??? note "答案"
+        manifest 引用可见的不可变制品；发布顺序决定可见性。
+
+2. 如果绕过新边界，哪个测试会最先失败？
+
+    ??? note "答案"
+        阅读 `tests.txt`，找出最窄的新节点，并说出它覆盖的公开调用。
+
+### 通关命令
+
+`uv run pytest -q $(cat journey/stages/03-durable-storage-boundary/tests.txt)`
+
+### 对应真实 S3 的一课
+
+manifest 引用可见的不可变制品；发布顺序决定可见性。
+
+### 教材
+
+[第 5 章](https://github.com/system-in-miniature/mini-s3/blob/main/docs/zh/tutorial/05-crash-atomicity.md)
+
+[在 GitHub 查看阶段差异](https://github.com/system-in-miniature/mini-s3/compare/stage-02...stage-03)
+
+完成后可运行 `git checkout stage-03` 对照你的结果。
+
+[Complete reference patch / 完整参考补丁](https://github.com/system-in-miniature/mini-s3/blob/main/journey/stages/03-durable-storage-boundary/stage.patch)

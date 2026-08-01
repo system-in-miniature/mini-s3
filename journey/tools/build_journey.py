@@ -23,6 +23,7 @@ DIFF_HEADER = re.compile(r"^diff --git a/(.+) b/(.+)$")
 DELIVERY_HEADING = "### Deliverable files / 交付文件"
 DELIVERY_ITEM = re.compile(r"^- `([^`]+)`$")
 WORKSPACE_CONFIG_KEY = "journey.learningWorkspace"
+PARITY_EXCLUSIONS = {"tests": {"test_docs_homepage.py"}}
 
 
 class JourneyError(RuntimeError):
@@ -201,10 +202,21 @@ def tree_bytes(root: Path, relative: str) -> dict[str, bytes]:
     }
 
 
+def parity_tree_bytes(root: Path, relative: str) -> dict[str, bytes]:
+    """Return files owned by the source-rebuild Journey parity contract."""
+
+    excluded = PARITY_EXCLUSIONS.get(relative, set())
+    return {
+        path: payload
+        for path, payload in tree_bytes(root, relative).items()
+        if path not in excluded
+    }
+
+
 def assert_final_parity(worktree: Path) -> None:
     for relative in ("src/minis3", "tests"):
-        expected = tree_bytes(ROOT, relative)
-        actual = tree_bytes(worktree, relative)
+        expected = parity_tree_bytes(ROOT, relative)
+        actual = parity_tree_bytes(worktree, relative)
         if actual != expected:
             missing = sorted(expected.keys() - actual.keys())
             extra = sorted(actual.keys() - expected.keys())
@@ -370,9 +382,8 @@ def study(stage: Stage, stages: list[Stage], workspace: Path, *, yes: bool) -> N
     print(f"Open in VSCode: {shlex.join(['code', str(workspace.resolve())])}")
 
 
-# TODO(CS336): redesign attempt as test-driven assignments — ship stage tests +
-# interface stubs, learner implements until green, `check` acts as grader.
-# Experimental placeholder until then (see JOURNEY-AGENTS.md "Modes").
+# Experimental self-implementation path; independent browser study and the
+# tutor-led path are complete without requiring a test-first assignment mode.
 def attempt(stage: Stage, stages: list[Stage], workspace: Path, *, yes: bool) -> None:
     rebuild_baseline(workspace, stage, stages, yes=yes)
     print(f"[attempt {stage.label}] READY — implement this stage yourself")
@@ -530,7 +541,7 @@ def build(*, check: bool) -> None:
             )
 
         assert_final_parity(worktree)
-        print("[guard-chain] PASS src/minis3 and tests are byte-identical to main")
+        print("[guard-chain] PASS src/minis3 and Journey-owned tests match main")
         print("[goal-parity] PASS every patch file is declared by its goal")
         if check:
             print("[refs] SKIP --check leaves journey branch and stage tags untouched")

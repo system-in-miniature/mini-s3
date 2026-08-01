@@ -13,35 +13,29 @@
 - `src/minis3/store.py`
 - `tests/test_multipart.py`
 
-### 自查
+### 机制走读
 
-1. 本阶段的可见性或状态迁移由谁负责？
+#### 所有权与数据流
 
-    ??? note "答案"
-        完成操作只通过与 PUT 相同的 Bucket manifest 发布边界变为可见。
+完成操作加载私有 Part、校验有序客户端清单、拼接字节，通过普通 `Bucket.put` 只发布一次，最后删除暂存。
 
-2. 如果绕过新边界，哪个测试会最先失败？
+#### 失败与排查
 
-    ??? note "答案"
-        阅读 `tests.txt`，找出最窄的新节点，并说出它覆盖的公开调用。
+先检查组装前校验，再检查清理前 Manifest 发布；出现部分可见对象说明发布被拆开，丢失重试状态说明清理过早。
 
-### 通关命令
+### 逐文件 Diff 走读
 
-`uv run pytest -q $(cat journey/stages/11-multipart-complete/tests.txt)`
+按运行时职责阅读，而不是按补丁存储顺序阅读。每个代码块都直接来自 canonical `stage.patch`。
 
-### 对应真实 S3 的一课
+#### `src/minis3/store.py`
 
-完成操作只通过与 PUT 相同的 Bucket manifest 发布边界变为可见。
+协调领域逻辑与持久化的应用服务。
 
-### 教材
+接收公开调用，拥有加锁与编排，再委托给领域、投影和存储边界。
 
-[第 6 章](https://github.com/system-in-miniature/mini-s3/blob/main/docs/zh/tutorial/06-multipart.md)
+**变化锚点:** `complete_multipart_upload`, `abort_multipart_upload`
 
-[在 GitHub 查看阶段差异](https://github.com/system-in-miniature/mini-s3/compare/stage-10...stage-11)
-
-完成后可运行 `git checkout stage-11` 对照你的结果。
-
-??? note "先做后看：stage.patch"
+??? note "文件差异：src/minis3/store.py"
     ```diff
     diff --git a/src/minis3/store.py b/src/minis3/store.py
     index 0d7e596..9b50aa2 100644
@@ -49,8 +43,8 @@
     +++ b/src/minis3/store.py
     @@ -177,6 +177,39 @@ class MiniS3:
                  return part.receipt
-     
-     
+
+
     +    def complete_multipart_upload(
     +        self,
     +        bucket: str,
@@ -87,14 +81,26 @@
          def abort_multipart_upload(
              self, bucket: str, key: str, upload_id: str
          ) -> None:
+    ```
+
+#### `tests/test_multipart.py`
+
+本阶段行为的可执行证明。
+
+调用学习者可见边界并记录预期状态或失败；验证机制时再从这里进入。
+
+**变化锚点:** `_md5`, `test_multipart_is_invisible_until_ordered_atomic_complete`, `test_uploading_same_part_number_replaces_the_staged_part`, `test_complete_validates_order_presence_etag_and_nonfinal_size`, `test_abort_removes_upload_and_restart_preserves_unfinished_parts`, `test_upload_identity_and_part_number_are_validated`
+
+??? note "文件差异：tests/test_multipart.py"
+    ```diff
     diff --git a/tests/test_multipart.py b/tests/test_multipart.py
     index 0b61034..adcb3f7 100644
     --- a/tests/test_multipart.py
     +++ b/tests/test_multipart.py
     @@ -17,6 +17,104 @@ from minis3 import (
      )
-     
-     
+
+
     +def _md5(payload: bytes) -> bytes:
     +    return md5(payload, usedforsecurity=False).digest()
     +
@@ -202,3 +208,33 @@
              store.upload_part("b", "right", upload.upload_id, 10_001, b"x")
     +
     ```
+
+### 自查
+
+1. 本阶段的可见性或状态迁移由谁负责？
+
+    ??? note "答案"
+        完成操作只通过与 PUT 相同的 Bucket manifest 发布边界变为可见。
+
+2. 如果绕过新边界，哪个测试会最先失败？
+
+    ??? note "答案"
+        阅读 `tests.txt`，找出最窄的新节点，并说出它覆盖的公开调用。
+
+### 通关命令
+
+`uv run pytest -q $(cat journey/stages/11-multipart-complete/tests.txt)`
+
+### 对应真实 S3 的一课
+
+完成操作只通过与 PUT 相同的 Bucket manifest 发布边界变为可见。
+
+### 教材
+
+[第 6 章](https://github.com/system-in-miniature/mini-s3/blob/main/docs/zh/tutorial/06-multipart.md)
+
+[在 GitHub 查看阶段差异](https://github.com/system-in-miniature/mini-s3/compare/stage-10...stage-11)
+
+完成后可运行 `git checkout stage-11` 对照你的结果。
+
+[Complete reference patch / 完整参考补丁](https://github.com/system-in-miniature/mini-s3/blob/main/journey/stages/11-multipart-complete/stage.patch)

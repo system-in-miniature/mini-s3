@@ -14,35 +14,29 @@ Starting from stage-02, Implement `DiskStorage`, `atomic_write`, `durable_mkdir`
 - `src/minis3/storage/atomic.py`
 - `src/minis3/storage/disk.py`
 
-### Self-check
+### Mechanism walkthrough
 
-1. Where is this stage's visibility or state transition owned?
+#### Ownership and flow
 
-    ??? note "Answer"
-        A manifest names visible immutable artifacts; publication order defines visibility.
+`DiskStorage` writes immutable data/metadata artifacts first and publishes `manifest.json` last. `atomic_write` makes rename the visibility point and fsync makes directory entries durable.
 
-2. Which test would fail first if the new boundary were bypassed?
+#### Failure and debugging
 
-    ??? note "Answer"
-        Read `tests.txt`, identify the narrowest new node, and name the public call it exercises.
+Trace artifact path, temporary name, rename, and parent fsync in order. On restart, compare manifest references with recovered files; unreferenced artifacts must not become visible.
 
-### Pass command
+### File-by-file diff walkthrough
 
-`uv run pytest -q $(cat journey/stages/03-durable-storage-boundary/tests.txt)`
+Read by runtime responsibility, not patch storage order. Every block comes directly from the canonical `stage.patch`.
 
-### The real S3 lesson
+#### `src/minis3/storage/__init__.py`
 
-A manifest names visible immutable artifacts; publication order defines visibility.
+Storage adapter boundary exports.
 
-### Textbook
+Called after a domain mutation; turns in-memory state into durable artifacts and reconstructs it on startup.
 
-[Chapter 5](https://github.com/system-in-miniature/mini-s3/blob/main/docs/tutorial/05-crash-atomicity.md)
+**Changed anchors:** configuration, export, or documentation change
 
-[Compare this stage on GitHub](https://github.com/system-in-miniature/mini-s3/compare/stage-02...stage-03)
-
-After finishing, use `git checkout stage-03` to compare your result.
-
-??? note "Try first, then peek: stage.patch"
+??? note "File diff: src/minis3/storage/__init__.py"
     ```diff
     diff --git a/src/minis3/storage/__init__.py b/src/minis3/storage/__init__.py
     new file mode 100644
@@ -57,6 +51,18 @@ After finishing, use `git checkout stage-03` to compare your result.
     +
     +__all__ = ["DiskStorage", "InjectedCrash"]
     +
+    ```
+
+#### `src/minis3/storage/atomic.py`
+
+Reusable write/fsync/rename durability primitive.
+
+Called after a domain mutation; turns in-memory state into durable artifacts and reconstructs it on startup.
+
+**Changed anchors:** `InjectedCrash`, `fsync_directory`, `durable_mkdir`, `atomic_write`
+
+??? note "File diff: src/minis3/storage/atomic.py"
+    ```diff
     diff --git a/src/minis3/storage/atomic.py b/src/minis3/storage/atomic.py
     new file mode 100644
     index 0000000..d7d741b
@@ -120,6 +126,18 @@ After finishing, use `git checkout stage-03` to compare your result.
     +        os.fsync(handle.fileno())
     +    os.replace(temporary, path)
     +    fsync_directory(path.parent)
+    ```
+
+#### `src/minis3/storage/disk.py`
+
+Disk layout, publication, and recovery owner.
+
+Called after a domain mutation; turns in-memory state into durable artifacts and reconstructs it on startup.
+
+**Changed anchors:** `_encoded_name`, `_object_directory`, `DiskStorage`, `__init__`, `load_buckets`, `create_bucket`, `delete_bucket`, `persist_bucket`, `_bucket_directory`, `_manifest_bytes`, `_write_artifact`, `_load_bucket`, `_load_artifact`, `_clean_bucket`
+
+??? note "File diff: src/minis3/storage/disk.py"
+    ```diff
     diff --git a/src/minis3/storage/disk.py b/src/minis3/storage/disk.py
     new file mode 100644
     index 0000000..8ad143f
@@ -354,3 +372,33 @@ After finishing, use `git checkout stage-03` to compare your result.
     +            if path.is_dir() and not any(path.iterdir()):
     +                path.rmdir()
     ```
+
+### Self-check
+
+1. Where is this stage's visibility or state transition owned?
+
+    ??? note "Answer"
+        A manifest names visible immutable artifacts; publication order defines visibility.
+
+2. Which test would fail first if the new boundary were bypassed?
+
+    ??? note "Answer"
+        Read `tests.txt`, identify the narrowest new node, and name the public call it exercises.
+
+### Pass command
+
+`uv run pytest -q $(cat journey/stages/03-durable-storage-boundary/tests.txt)`
+
+### The real S3 lesson
+
+A manifest names visible immutable artifacts; publication order defines visibility.
+
+### Textbook
+
+[Chapter 5](https://github.com/system-in-miniature/mini-s3/blob/main/docs/tutorial/05-crash-atomicity.md)
+
+[Compare this stage on GitHub](https://github.com/system-in-miniature/mini-s3/compare/stage-02...stage-03)
+
+After finishing, use `git checkout stage-03` to compare your result.
+
+[Complete reference patch / 完整参考补丁](https://github.com/system-in-miniature/mini-s3/blob/main/journey/stages/03-durable-storage-boundary/stage.patch)

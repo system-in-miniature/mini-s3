@@ -17,88 +17,68 @@
 - `src/minis3/store.py`
 - `tests/test_multipart.py`
 
-### 自查
+### 机制走读
 
-1. 本阶段的可见性或状态迁移由谁负责？
+#### 所有权与数据流
 
-    ??? note "答案"
-        未完成上传位于可见对象 manifest 之外。
+`MiniS3` 创建确定性 Upload 身份，`DiskStorage` 则把 Upload 元数据和原子替换的 Part 字节放在对象 Manifest 之外的私有 `uploads/` 路径。
 
-2. 如果绕过新边界，哪个测试会最先失败？
+#### 失败与排查
 
-    ??? note "答案"
-        阅读 `tests.txt`，找出最窄的新节点，并说出它覆盖的公开调用。
+写 Part 前同时解析 Bucket、Key 与 Upload ID；若未完成上传出现在 GET/Listing 中，检查暂存内容是否误入可见 Manifest。
 
-### 通关命令
+### 逐文件 Diff 走读
 
-`uv run pytest -q $(cat journey/stages/10-multipart-staging/tests.txt)`
+按运行时职责阅读，而不是按补丁存储顺序阅读。每个代码块都直接来自 canonical `stage.patch`。
 
-### 对应真实 S3 的一课
+#### `src/minis3/model.py`
 
-未完成上传位于可见对象 manifest 之外。
+贯穿系统的不可变领域值。
 
-### 教材
+由 Bucket/服务代码构造并向上返回，不拥有 I/O；状态正确但结果异常时检查这些字段。
 
-[第 6 章](https://github.com/system-in-miniature/mini-s3/blob/main/docs/zh/tutorial/06-multipart.md)
+**变化锚点:** 配置、导出或文档变化
 
-[在 GitHub 查看阶段差异](https://github.com/system-in-miniature/mini-s3/compare/stage-09...stage-10)
-
-完成后可运行 `git checkout stage-10` 对照你的结果。
-
-??? note "先做后看：stage.patch"
+??? note "文件差异：src/minis3/model.py"
     ```diff
-    diff --git a/src/minis3/__init__.py b/src/minis3/__init__.py
-    index 1a69ac7..0c23aea 100644
-    --- a/src/minis3/__init__.py
-    +++ b/src/minis3/__init__.py
-    @@ -1,43 +1,9 @@
-     """Public API for the MiniS3 teaching implementation."""
+    diff --git a/src/minis3/model.py b/src/minis3/model.py
+    index da662fc..7375afd 100644
+    --- a/src/minis3/model.py
+    +++ b/src/minis3/model.py
+    @@ -36,6 +36,8 @@ class Version:
+         sequence: int
+         body: bytes
+         etag: str
+    +    created_at: float = 0.0
+    +    multipart_upload_id: str | None = None
+
+         @property
+         def size(self) -> int:
+    @@ -57,6 +59,7 @@ class DeleteMarker:
+         version_id: str
+         storage_id: str
+         sequence: int
+    +    created_at: float = 0.0
+
+         @property
+         def is_delete_marker(self) -> bool:
+    @@ -72,4 +75,3 @@ class ObjectRecord:
+
+         key: str
+         versions: tuple[ObjectVersion, ...] = ()
     -
-    -from .errors import (
-    -    BucketAlreadyExists,
-    -    BucketNotEmpty,
-    -    InvalidContinuationToken,
-    -    MiniS3Error,
-    -    NoSuchBucket,
-    -    NoSuchKey,
-    -    NoSuchVersion,
-    -)
-    +from .errors import BucketAlreadyExists, BucketNotEmpty, InvalidContinuationToken, MiniS3Error, NoSuchBucket, NoSuchKey, NoSuchVersion
-     from .bucket import SequenceCounter, VersioningState
-    -from .listing import (
-    -    ListedObject,
-    -    ListedVersion,
-    -    ListObjectsResult,
-    -    ListObjectVersionsResult,
-    -)
-     from .model import DeleteMarker, ObjectRecord, Version, content_etag
-     from .store import MiniS3
-     from .storage import InjectedCrash
-    -
-    -__all__ = [
-    -    "BucketAlreadyExists",
-    -    "BucketNotEmpty",
-    -    "DeleteMarker",
-    -    "ListedObject",
-    -    "ListedVersion",
-    -    "ListObjectsResult",
-    -    "ListObjectVersionsResult",
-    -    "MiniS3",
-    -    "InvalidContinuationToken",
-    -    "InjectedCrash",
-    -    "MiniS3Error",
-    -    "NoSuchBucket",
-    -    "NoSuchKey",
-    -    "NoSuchVersion",
-    -    "ObjectRecord",
-    -    "SequenceCounter",
-    -    "Version",
-    -    "VersioningState",
-    -    "content_etag",
-    -]
-    +from .listing import ListedObject, ListedVersion, ListObjectsResult, ListObjectVersionsResult
-    +from .errors import EntityTooSmall, InvalidPart, InvalidPartOrder, NoSuchUpload
-    +from .multipart import MIN_PART_SIZE, MultipartPart, MultipartUpload
+    ```
+
+#### `src/minis3/bucket.py`
+
+拥有 Bucket 内部状态迁移的聚合。
+
+由 `MiniS3` 调用；把一次命令和当前记录转换为下一份内存历史。
+
+**变化锚点:** `put`
+
+??? note "文件差异：src/minis3/bucket.py"
+    ```diff
     diff --git a/src/minis3/bucket.py b/src/minis3/bucket.py
     index b0a46e5..cc695a1 100644
     --- a/src/minis3/bucket.py
@@ -106,7 +86,7 @@
     @@ -69,7 +69,16 @@ class Bucket:
                  raise ValueError("versioning must be enabled before it can be suspended")
              self.versioning = state
-     
+
     -    def put(self, key: str, body: bytes, next_sequence: Callable[[], int]) -> Version:
     +    def put(
     +        self,
@@ -131,7 +111,7 @@
     +            multipart_upload_id=multipart_upload_id,
              )
              old = self.records.get(key, ObjectRecord(key))
-     
+
     @@ -120,6 +131,8 @@ class Bucket:
              key: str,
              next_sequence: Callable[[], int],
@@ -140,7 +120,7 @@
     +        now: float = 0.0,
          ) -> ObjectVersion | None:
              record = self.records.get(key)
-     
+
     @@ -149,7 +162,9 @@ class Bucket:
                  if self.versioning is VersioningState.ENABLED
                  else NULL_VERSION_ID
@@ -152,46 +132,32 @@
              old_versions = () if record is None else record.versions
              if self.versioning is VersioningState.SUSPENDED or has_named_history:
                  old_versions = tuple(
-    diff --git a/src/minis3/model.py b/src/minis3/model.py
-    index da662fc..7375afd 100644
-    --- a/src/minis3/model.py
-    +++ b/src/minis3/model.py
-    @@ -36,6 +36,8 @@ class Version:
-         sequence: int
-         body: bytes
-         etag: str
-    +    created_at: float = 0.0
-    +    multipart_upload_id: str | None = None
-     
-         @property
-         def size(self) -> int:
-    @@ -57,6 +59,7 @@ class DeleteMarker:
-         version_id: str
-         storage_id: str
-         sequence: int
-    +    created_at: float = 0.0
-     
-         @property
-         def is_delete_marker(self) -> bool:
-    @@ -72,4 +75,3 @@ class ObjectRecord:
-     
-         key: str
-         versions: tuple[ObjectVersion, ...] = ()
-    -
+    ```
+
+#### `src/minis3/storage/disk.py`
+
+磁盘布局、发布与恢复的所有者。
+
+在领域变更后调用；把内存状态变成持久 Artifact，并在启动时重建。
+
+**变化锚点:** `create_multipart_upload`, `write_multipart_part`, `load_multipart_upload`, `remove_multipart_upload`, `_bucket_directory`, `_upload_directory`, `_manifest_bytes`, `_recover_uploads`
+
+??? note "文件差异：src/minis3/storage/disk.py"
+    ```diff
     diff --git a/src/minis3/storage/disk.py b/src/minis3/storage/disk.py
     index 8ad143f..95b160f 100644
     --- a/src/minis3/storage/disk.py
     +++ b/src/minis3/storage/disk.py
     @@ -23,7 +23,9 @@ from pathlib import Path
      import shutil
-     
+
      from ..bucket import Bucket, VersioningState
     +from ..errors import NoSuchUpload
      from ..model import DeleteMarker, ObjectRecord, ObjectVersion, Version
     +from ..multipart import MultipartUpload, StagedPart
      from .atomic import atomic_write, durable_mkdir, fsync_directory
-     
-     
+
+
     @@ -72,6 +74,9 @@ class DiskStorage:
                      for item in record.versions:
                          maximum_sequence = max(maximum_sequence, item.sequence)
@@ -201,7 +167,7 @@
     +            )
              fsync_directory(self.buckets_root)
              return buckets, maximum_sequence
-     
+
     @@ -85,6 +90,7 @@ class DiskStorage:
                  fsync_directory(self.buckets_root)
              durable_mkdir(temporary, parents=False)
@@ -213,7 +179,7 @@
     @@ -119,9 +125,108 @@ class DiskStorage:
              self._inject("after_manifest_publish")
              self._clean_bucket(directory, bucket)
-     
+
     +    def create_multipart_upload(self, upload: MultipartUpload) -> None:
     +        """Durably create private staging that no object listing consults."""
     +
@@ -304,7 +270,7 @@
     +
          def _bucket_directory(self, name: str) -> Path:
              return self.buckets_root / _encoded_name(name)
-     
+
     +    def _upload_directory(
     +        self, bucket_directory: Path, upload_id: str
     +    ) -> Path:
@@ -396,6 +362,18 @@
     +        if changed:
     +            fsync_directory(uploads)
     +        return maximum_sequence
+    ```
+
+#### `src/minis3/store.py`
+
+协调领域逻辑与持久化的应用服务。
+
+接收公开调用，拥有加锁与编排，再委托给领域、投影和存储边界。
+
+**变化锚点:** `create_bucket`, `delete_bucket`, `set_bucket_versioning`, `put_object`, `get_object`, `head_object`, `delete_object`, `list_objects`, `list_object_versions`, `create_multipart_upload`, `upload_part`, `abort_multipart_upload`, `_bucket`
+
+??? note "文件差异：src/minis3/store.py"
+    ```diff
     diff --git a/src/minis3/store.py b/src/minis3/store.py
     index 7c82b41..0d7e596 100644
     --- a/src/minis3/store.py
@@ -408,15 +386,15 @@
     -errors without taking ownership of storage semantics.
     -"""
     +"""Public service facade joining buckets, object state, and list projections."""
-     
+
      from __future__ import annotations
-     
+
     @@ -11,16 +6,21 @@ from collections.abc import Callable
      from copy import deepcopy
      from pathlib import Path
      from threading import RLock
     +from time import time
-     
+
      from .bucket import Bucket, SequenceCounter, VersioningState
      from .errors import BucketAlreadyExists, BucketNotEmpty, NoSuchBucket
     -from .listing import (
@@ -437,8 +415,8 @@
     +    validate_completion,
     +)
      from .storage import DiskStorage
-     
-     
+
+
     @@ -33,9 +33,15 @@ class MiniS3:
              *,
              counter: Callable[[], int] | None = None,
@@ -458,7 +436,7 @@
     @@ -43,6 +49,7 @@ class MiniS3:
                  ensure(maximum_sequence + 1)
              self._lock = RLock()
-     
+
     +
          def create_bucket(self, name: str) -> None:
              with self._lock:
@@ -466,7 +444,7 @@
     @@ -51,6 +58,7 @@ class MiniS3:
                  self._storage.create_bucket(bucket)
                  self._buckets[name] = bucket
-     
+
     +
          def delete_bucket(self, name: str) -> None:
              with self._lock:
@@ -474,7 +452,7 @@
     @@ -59,6 +67,7 @@ class MiniS3:
                  self._storage.delete_bucket(name)
                  del self._buckets[name]
-     
+
     +
          def set_bucket_versioning(
              self, name: str, state: VersioningState | str
@@ -482,7 +460,7 @@
     @@ -68,6 +77,7 @@ class MiniS3:
                  self._storage.persist_bucket(candidate)
                  self._buckets[name] = candidate
-     
+
     +
          def put_object(self, bucket: str, key: str, body: bytes) -> Version:
              with self._lock:
@@ -490,22 +468,22 @@
     @@ -76,12 +86,14 @@ class MiniS3:
                  self._buckets[bucket] = candidate
                  return result
-     
+
     +
          def get_object(
              self, bucket: str, key: str, *, version_id: str | None = None
          ) -> Version:
              with self._lock:
                  return self._bucket(bucket).get(key, version_id)
-     
+
     +
          def head_object(
              self, bucket: str, key: str, *, version_id: str | None = None
          ) -> Version:
     @@ -89,6 +101,7 @@ class MiniS3:
-     
+
              return self.get_object(bucket, key, version_id=version_id)
-     
+
     +
          def delete_object(
              self, bucket: str, key: str, *, version_id: str | None = None
@@ -513,7 +491,7 @@
     @@ -99,6 +112,7 @@ class MiniS3:
                  self._buckets[bucket] = candidate
                  return result
-     
+
     +
          def list_objects(
              self,
@@ -521,14 +499,14 @@
     @@ -117,14 +131,65 @@ class MiniS3:
                      continuation_token=continuation_token,
                  )
-     
+
     +
          def list_object_versions(
              self, bucket: str, *, prefix: str = ""
          ) -> ListObjectVersionsResult:
              with self._lock:
                  return list_object_versions(self._bucket(bucket).records, prefix=prefix)
-     
+
     +
     +    def create_multipart_upload(
     +        self, bucket: str, key: str
@@ -584,6 +562,82 @@
              except KeyError as exc:
                  raise NoSuchBucket(name) from exc
     +
+    ```
+
+#### `src/minis3/__init__.py`
+
+受支持的包级公开接口。
+
+由用户导入触达；接线错误会在运行时流程开始前表现为名称缺失。
+
+**变化锚点:** 配置、导出或文档变化
+
+??? note "文件差异：src/minis3/__init__.py"
+    ```diff
+    diff --git a/src/minis3/__init__.py b/src/minis3/__init__.py
+    index 1a69ac7..0c23aea 100644
+    --- a/src/minis3/__init__.py
+    +++ b/src/minis3/__init__.py
+    @@ -1,43 +1,9 @@
+     """Public API for the MiniS3 teaching implementation."""
+    -
+    -from .errors import (
+    -    BucketAlreadyExists,
+    -    BucketNotEmpty,
+    -    InvalidContinuationToken,
+    -    MiniS3Error,
+    -    NoSuchBucket,
+    -    NoSuchKey,
+    -    NoSuchVersion,
+    -)
+    +from .errors import BucketAlreadyExists, BucketNotEmpty, InvalidContinuationToken, MiniS3Error, NoSuchBucket, NoSuchKey, NoSuchVersion
+     from .bucket import SequenceCounter, VersioningState
+    -from .listing import (
+    -    ListedObject,
+    -    ListedVersion,
+    -    ListObjectsResult,
+    -    ListObjectVersionsResult,
+    -)
+     from .model import DeleteMarker, ObjectRecord, Version, content_etag
+     from .store import MiniS3
+     from .storage import InjectedCrash
+    -
+    -__all__ = [
+    -    "BucketAlreadyExists",
+    -    "BucketNotEmpty",
+    -    "DeleteMarker",
+    -    "ListedObject",
+    -    "ListedVersion",
+    -    "ListObjectsResult",
+    -    "ListObjectVersionsResult",
+    -    "MiniS3",
+    -    "InvalidContinuationToken",
+    -    "InjectedCrash",
+    -    "MiniS3Error",
+    -    "NoSuchBucket",
+    -    "NoSuchKey",
+    -    "NoSuchVersion",
+    -    "ObjectRecord",
+    -    "SequenceCounter",
+    -    "Version",
+    -    "VersioningState",
+    -    "content_etag",
+    -]
+    +from .listing import ListedObject, ListedVersion, ListObjectsResult, ListObjectVersionsResult
+    +from .errors import EntityTooSmall, InvalidPart, InvalidPartOrder, NoSuchUpload
+    +from .multipart import MIN_PART_SIZE, MultipartPart, MultipartUpload
+    ```
+
+#### `tests/test_multipart.py`
+
+本阶段行为的可执行证明。
+
+调用学习者可见边界并记录预期状态或失败；验证机制时再从这里进入。
+
+**变化锚点:** `test_upload_identity_and_part_number_are_validated`
+
+??? note "文件差异：tests/test_multipart.py"
+    ```diff
     diff --git a/tests/test_multipart.py b/tests/test_multipart.py
     new file mode 100644
     index 0000000..0b61034
@@ -621,3 +675,33 @@
     +    with pytest.raises(ValueError):
     +        store.upload_part("b", "right", upload.upload_id, 10_001, b"x")
     ```
+
+### 自查
+
+1. 本阶段的可见性或状态迁移由谁负责？
+
+    ??? note "答案"
+        未完成上传位于可见对象 manifest 之外。
+
+2. 如果绕过新边界，哪个测试会最先失败？
+
+    ??? note "答案"
+        阅读 `tests.txt`，找出最窄的新节点，并说出它覆盖的公开调用。
+
+### 通关命令
+
+`uv run pytest -q $(cat journey/stages/10-multipart-staging/tests.txt)`
+
+### 对应真实 S3 的一课
+
+未完成上传位于可见对象 manifest 之外。
+
+### 教材
+
+[第 6 章](https://github.com/system-in-miniature/mini-s3/blob/main/docs/zh/tutorial/06-multipart.md)
+
+[在 GitHub 查看阶段差异](https://github.com/system-in-miniature/mini-s3/compare/stage-09...stage-10)
+
+完成后可运行 `git checkout stage-10` 对照你的结果。
+
+[Complete reference patch / 完整参考补丁](https://github.com/system-in-miniature/mini-s3/blob/main/journey/stages/10-multipart-staging/stage.patch)

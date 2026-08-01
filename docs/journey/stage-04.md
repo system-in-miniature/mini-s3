@@ -15,47 +15,30 @@ Starting from stage-03, Implement `MiniS3.__init__`, bucket operations, object o
 - `tests/test_storage.py`
 - `tests/test_versioning.py`
 
-### Self-check
+### Mechanism walkthrough
 
-1. Where is this stage's visibility or state transition owned?
+#### Ownership and flow
 
-    ??? note "Answer"
-        Strong consistency comes from one mutation lock plus publish-before-swap candidate state.
+`MiniS3` is the application boundary: it locks, resolves a bucket, delegates state transitions to `Bucket`, persists successful mutations, and returns protocol-free values.
 
-2. Which test would fail first if the new boundary were bypassed?
+#### Failure and debugging
 
-    ??? note "Answer"
-        Read `tests.txt`, identify the narrowest new node, and name the public call it exercises.
+Follow one public call through `_bucket`, the aggregate operation, and `DiskStorage.persist_bucket`. If memory and restart results differ, the missing step is between mutation and publication.
 
-### Pass command
+### File-by-file diff walkthrough
 
-`uv run pytest -q $(cat journey/stages/04-object-service/tests.txt)`
+Read by runtime responsibility, not patch storage order. Every block comes directly from the canonical `stage.patch`.
 
-### The real S3 lesson
+#### `src/minis3/store.py`
 
-Strong consistency comes from one mutation lock plus publish-before-swap candidate state.
+Application service coordinating domain and persistence.
 
-### Textbook
+Receives public calls, owns locking and orchestration, then delegates to domain, projection, and storage boundaries.
 
-[Chapter 2](https://github.com/system-in-miniature/mini-s3/blob/main/docs/tutorial/02-objects-etag.md)
+**Changed anchors:** `MiniS3`, `__init__`, `create_bucket`, `delete_bucket`, `set_bucket_versioning`, `put_object`, `get_object`, `head_object`, `delete_object`, `_bucket`
 
-[Compare this stage on GitHub](https://github.com/system-in-miniature/mini-s3/compare/stage-03...stage-04)
-
-After finishing, use `git checkout stage-04` to compare your result.
-
-??? note "Try first, then peek: stage.patch"
+??? note "File diff: src/minis3/store.py"
     ```diff
-    diff --git a/src/minis3/__init__.py b/src/minis3/__init__.py
-    index 8a3d1c7..11378e1 100644
-    --- a/src/minis3/__init__.py
-    +++ b/src/minis3/__init__.py
-    @@ -1,3 +1,6 @@
-     """Public API for the MiniS3 teaching implementation."""
-     from .errors import BucketAlreadyExists, BucketNotEmpty, InvalidContinuationToken, MiniS3Error, NoSuchBucket, NoSuchKey, NoSuchVersion
-    +from .bucket import SequenceCounter, VersioningState
-     from .model import DeleteMarker, ObjectRecord, Version, content_etag
-    +from .store import MiniS3
-    +from .storage import InjectedCrash
     diff --git a/src/minis3/store.py b/src/minis3/store.py
     new file mode 100644
     index 0000000..5d418b8
@@ -166,6 +149,41 @@ After finishing, use `git checkout stage-04` to compare your result.
     +        except KeyError as exc:
     +            raise NoSuchBucket(name) from exc
     +
+    ```
+
+#### `src/minis3/__init__.py`
+
+Supported public package surface.
+
+Reached by user imports; wiring errors appear as missing names before any runtime flow starts.
+
+**Changed anchors:** configuration, export, or documentation change
+
+??? note "File diff: src/minis3/__init__.py"
+    ```diff
+    diff --git a/src/minis3/__init__.py b/src/minis3/__init__.py
+    index 8a3d1c7..11378e1 100644
+    --- a/src/minis3/__init__.py
+    +++ b/src/minis3/__init__.py
+    @@ -1,3 +1,6 @@
+     """Public API for the MiniS3 teaching implementation."""
+     from .errors import BucketAlreadyExists, BucketNotEmpty, InvalidContinuationToken, MiniS3Error, NoSuchBucket, NoSuchKey, NoSuchVersion
+    +from .bucket import SequenceCounter, VersioningState
+     from .model import DeleteMarker, ObjectRecord, Version, content_etag
+    +from .store import MiniS3
+    +from .storage import InjectedCrash
+    ```
+
+#### `tests/test_storage.py`
+
+Executable proof of the stage behavior.
+
+Calls the learner-visible boundary and records the expected state or failure; start here only when verifying the mechanism.
+
+**Changed anchors:** `CrashOnce`, `__init__`, `__call__`, `test_restart_restores_versions_bodies_and_counter`
+
+??? note "File diff: tests/test_storage.py"
+    ```diff
     diff --git a/tests/test_storage.py b/tests/test_storage.py
     new file mode 100644
     index 0000000..c96a7a6
@@ -204,6 +222,18 @@ After finishing, use `git checkout stage-04` to compare your result.
     +
     +    assert reopened.get_object("b", "k", version_id=first.version_id).body == b"one"
     +    assert second.version_id != first.version_id
+    ```
+
+#### `tests/test_versioning.py`
+
+Executable proof of the stage behavior.
+
+Calls the learner-visible boundary and records the expected state or failure; start here only when verifying the mechanism.
+
+**Changed anchors:** `test_versioning_state_machine_exhaustive`, `test_unversioned_delete_defensively_preserves_named_history`, `test_enabled_puts_stack_and_delete_marker_hides_history`, `test_specific_delete_removes_only_addressed_version`, `test_latest_marker_is_404_even_when_older_data_exists`, `test_nonempty_bucket_cannot_be_deleted`
+
+??? note "File diff: tests/test_versioning.py"
+    ```diff
     diff --git a/tests/test_versioning.py b/tests/test_versioning.py
     new file mode 100644
     index 0000000..389e45d
@@ -320,3 +350,33 @@ After finishing, use `git checkout stage-04` to compare your result.
     +    with pytest.raises(BucketNotEmpty):
     +        store.delete_bucket("b")
     ```
+
+### Self-check
+
+1. Where is this stage's visibility or state transition owned?
+
+    ??? note "Answer"
+        Strong consistency comes from one mutation lock plus publish-before-swap candidate state.
+
+2. Which test would fail first if the new boundary were bypassed?
+
+    ??? note "Answer"
+        Read `tests.txt`, identify the narrowest new node, and name the public call it exercises.
+
+### Pass command
+
+`uv run pytest -q $(cat journey/stages/04-object-service/tests.txt)`
+
+### The real S3 lesson
+
+Strong consistency comes from one mutation lock plus publish-before-swap candidate state.
+
+### Textbook
+
+[Chapter 2](https://github.com/system-in-miniature/mini-s3/blob/main/docs/tutorial/02-objects-etag.md)
+
+[Compare this stage on GitHub](https://github.com/system-in-miniature/mini-s3/compare/stage-03...stage-04)
+
+After finishing, use `git checkout stage-04` to compare your result.
+
+[Complete reference patch / 完整参考补丁](https://github.com/system-in-miniature/mini-s3/blob/main/journey/stages/04-object-service/stage.patch)

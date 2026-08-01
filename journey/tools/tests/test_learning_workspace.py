@@ -9,6 +9,8 @@ import sys
 import tempfile
 import unittest
 
+from journey.tools import build_journey
+
 
 ROOT = Path(__file__).resolve().parents[3]
 TOOL = ROOT / "journey" / "tools" / "build_journey.py"
@@ -31,6 +33,12 @@ def run(
 
 
 class LearningWorkspaceTest(unittest.TestCase):
+    def test_final_parity_scope_excludes_site_only_documentation_tests(self) -> None:
+        parity_tests = build_journey.parity_tree_bytes(ROOT, "tests")
+
+        self.assertNotIn("test_docs_homepage.py", parity_tests)
+        self.assertIn("test_model.py", parity_tests)
+
     def test_study_check_attempt_state_transition(self) -> None:
         with tempfile.TemporaryDirectory(prefix="minis3-journey-test-") as temporary:
             workspace = Path(temporary) / "learner"

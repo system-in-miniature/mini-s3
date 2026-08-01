@@ -18,6 +18,16 @@ Starting from stage-02, Implement `DiskStorage`, `atomic_write`, `durable_mkdir`
 - `src/minis3/storage/atomic.py`
 - `src/minis3/storage/disk.py`
 
+### Mechanism walkthrough
+
+#### Ownership and flow
+
+`DiskStorage` writes immutable data/metadata artifacts first and publishes `manifest.json` last. `atomic_write` makes rename the visibility point and fsync makes directory entries durable.
+
+#### Failure and debugging
+
+Trace artifact path, temporary name, rename, and parent fsync in order. On restart, compare manifest references with recovered files; unreferenced artifacts must not become visible.
+
 ### Self-check
 
 1. Where is this stage's visibility or state transition owned?
@@ -57,6 +67,16 @@ A manifest names visible immutable artifacts; publication order defines visibili
 - `src/minis3/storage/__init__.py`
 - `src/minis3/storage/atomic.py`
 - `src/minis3/storage/disk.py`
+
+### 机制走读
+
+#### 所有权与数据流
+
+`DiskStorage` 先写不可变数据与元数据 Artifact，最后发布 `manifest.json`；`atomic_write` 让 rename 成为可见性点，fsync 让目录项持久化。
+
+#### 失败与排查
+
+按 Artifact 路径、临时名、rename、父目录 fsync 的顺序追踪；重启时对照 Manifest 引用与恢复文件，未引用 Artifact 不能变得可见。
 
 ### 自查
 

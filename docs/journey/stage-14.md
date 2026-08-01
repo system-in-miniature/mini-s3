@@ -15,80 +15,30 @@ Starting from stage-13, Implement `ExpirationRule`, `evaluate_expiration(...)`, 
 - `src/minis3/store.py`
 - `tests/test_lifecycle.py`
 
-### Self-check
+### Mechanism walkthrough
 
-1. Where is this stage's visibility or state transition owned?
+#### Ownership and flow
 
-    ??? note "Answer"
-        Lifecycle is deterministic when evaluation is pure and time enters only through the service boundary.
+`evaluate_expiration` is a pure policy over timestamped versions; `MiniS3.lifecycle_tick` injects time, applies returned actions under lock, and persists the resulting histories.
 
-2. Which test would fail first if the new boundary were bypassed?
+#### Failure and debugging
 
-    ??? note "Answer"
-        Read `tests.txt`, identify the narrowest new node, and name the public call it exercises.
+Run the pure evaluator first. Wrong candidates are policy/time bugs; correct actions with wrong stored state are mutation or persistence bugs.
 
-### Pass command
+### File-by-file diff walkthrough
 
-`uv run pytest -q $(cat journey/stages/14-lifecycle-tick/tests.txt)`
+Read by runtime responsibility, not patch storage order. Every block comes directly from the canonical `stage.patch`.
 
-### The real S3 lesson
+#### `src/minis3/lifecycle.py`
 
-Lifecycle is deterministic when evaluation is pure and time enters only through the service boundary.
+Pure lifecycle expiration policy.
 
-### Textbook
+Called by `MiniS3` as a policy function; receives explicit values and returns a decision for the service to apply.
 
-[Chapter 8](https://github.com/system-in-miniature/mini-s3/blob/main/docs/tutorial/08-lifecycle.md)
+**Changed anchors:** `ExpirationRule`, `__post_init__`, `LifecycleActionKind`, `LifecycleAction`, `_old_enough`, `evaluate_expiration`
 
-[Compare this stage on GitHub](https://github.com/system-in-miniature/mini-s3/compare/stage-13...stage-14)
-
-After finishing, use `git checkout stage-14` to compare your result.
-
-??? note "Try first, then peek: stage.patch"
+??? note "File diff: src/minis3/lifecycle.py"
     ```diff
-    diff --git a/src/minis3/__init__.py b/src/minis3/__init__.py
-    index 3f6e582..36bc1f3 100644
-    --- a/src/minis3/__init__.py
-    +++ b/src/minis3/__init__.py
-    @@ -1,10 +1,34 @@
-     """Public API for the MiniS3 teaching implementation."""
-    -from .errors import BucketAlreadyExists, BucketNotEmpty, InvalidContinuationToken, MiniS3Error, NoSuchBucket, NoSuchKey, NoSuchVersion
-    +
-    +from .errors import (
-    +    BucketAlreadyExists,
-    +    BucketNotEmpty,
-    +    EntityTooSmall,
-    +    InvalidContinuationToken,
-    +    InvalidPart,
-    +    InvalidPartOrder,
-    +    MiniS3Error,
-    +    NoSuchBucket,
-    +    NoSuchKey,
-    +    NoSuchUpload,
-    +    NoSuchVersion,
-    +    NotModified,
-    +    PreconditionFailed,
-    +)
-     from .bucket import SequenceCounter, VersioningState
-    +from .listing import (
-    +    ListedObject,
-    +    ListedVersion,
-    +    ListObjectsResult,
-    +    ListObjectVersionsResult,
-    +)
-     from .model import DeleteMarker, ObjectRecord, Version, content_etag
-    +from .lifecycle import (
-    +    ExpirationRule,
-    +    LifecycleAction,
-    +    LifecycleActionKind,
-    +    evaluate_expiration,
-    +)
-    +from .multipart import MIN_PART_SIZE, MultipartPart, MultipartUpload
-     from .store import MiniS3
-     from .storage import InjectedCrash
-    -from .listing import ListedObject, ListedVersion, ListObjectsResult, ListObjectVersionsResult
-    -from .errors import EntityTooSmall, InvalidPart, InvalidPartOrder, NoSuchUpload
-    -from .multipart import MIN_PART_SIZE, MultipartPart, MultipartUpload
-    -from .errors import NotModified, PreconditionFailed
     diff --git a/src/minis3/lifecycle.py b/src/minis3/lifecycle.py
     new file mode 100644
     index 0000000..ca0c3f0
@@ -198,6 +148,18 @@ After finishing, use `git checkout stage-14` to compare your result.
     +                        )
     +                    )
     +    return tuple(actions)
+    ```
+
+#### `src/minis3/store.py`
+
+Application service coordinating domain and persistence.
+
+Receives public calls, owns locking and orchestration, then delegates to domain, projection, and storage boundaries.
+
+**Changed anchors:** `lifecycle_tick`
+
+??? note "File diff: src/minis3/store.py"
+    ```diff
     diff --git a/src/minis3/store.py b/src/minis3/store.py
     index e47e1ac..c2bdc5b 100644
     --- a/src/minis3/store.py
@@ -210,13 +172,13 @@ After finishing, use `git checkout stage-14` to compare your result.
     +server. A future thin protocol adapter can translate these domain values and
     +errors without taking ownership of storage semantics.
     +"""
-     
+
      from __future__ import annotations
-     
+
     @@ -8,10 +13,27 @@ from pathlib import Path
      from threading import RLock
      from time import time
-     
+
     -from .conditional import require_if_match, require_if_none_match
      from .bucket import Bucket, SequenceCounter, VersioningState
     -from .errors import BucketAlreadyExists, BucketNotEmpty, NoSuchBucket, NoSuchKey, NoSuchVersion
@@ -247,7 +209,7 @@ After finishing, use `git checkout stage-14` to compare your result.
     @@ -50,7 +72,6 @@ class MiniS3:
                  ensure(maximum_sequence + 1)
              self._lock = RLock()
-     
+
     -
          def create_bucket(self, name: str) -> None:
              with self._lock:
@@ -255,7 +217,7 @@ After finishing, use `git checkout stage-14` to compare your result.
     @@ -59,7 +80,6 @@ class MiniS3:
                  self._storage.create_bucket(bucket)
                  self._buckets[name] = bucket
-     
+
     -
          def delete_bucket(self, name: str) -> None:
              with self._lock:
@@ -263,7 +225,7 @@ After finishing, use `git checkout stage-14` to compare your result.
     @@ -68,7 +88,6 @@ class MiniS3:
                  self._storage.delete_bucket(name)
                  del self._buckets[name]
-     
+
     -
          def set_bucket_versioning(
              self, name: str, state: VersioningState | str
@@ -271,7 +233,7 @@ After finishing, use `git checkout stage-14` to compare your result.
     @@ -78,7 +97,6 @@ class MiniS3:
                  self._storage.persist_bucket(candidate)
                  self._buckets[name] = candidate
-     
+
     -
          def put_object(
              self,
@@ -279,7 +241,7 @@ After finishing, use `git checkout stage-14` to compare your result.
     @@ -97,7 +115,6 @@ class MiniS3:
                  self._buckets[bucket] = candidate
                  return result
-     
+
     -
          def get_object(
              self,
@@ -287,15 +249,15 @@ After finishing, use `git checkout stage-14` to compare your result.
     @@ -113,7 +130,6 @@ class MiniS3:
                  require_if_none_match(result.etag, if_none_match)
                  return result
-     
+
     -
          def head_object(
              self, bucket: str, key: str, *, version_id: str | None = None
          ) -> Version:
     @@ -121,7 +137,6 @@ class MiniS3:
-     
+
              return self.get_object(bucket, key, version_id=version_id)
-     
+
     -
          def delete_object(
              self,
@@ -303,7 +265,7 @@ After finishing, use `git checkout stage-14` to compare your result.
     @@ -142,7 +157,6 @@ class MiniS3:
                  self._buckets[bucket] = candidate
                  return result
-     
+
     -
          def list_objects(
              self,
@@ -311,14 +273,14 @@ After finishing, use `git checkout stage-14` to compare your result.
     @@ -161,14 +175,12 @@ class MiniS3:
                      continuation_token=continuation_token,
                  )
-     
+
     -
          def list_object_versions(
              self, bucket: str, *, prefix: str = ""
          ) -> ListObjectVersionsResult:
              with self._lock:
                  return list_object_versions(self._bucket(bucket).records, prefix=prefix)
-     
+
     -
          def create_multipart_upload(
              self, bucket: str, key: str
@@ -326,7 +288,7 @@ After finishing, use `git checkout stage-14` to compare your result.
     @@ -187,7 +199,6 @@ class MiniS3:
                  self._storage.create_multipart_upload(upload)
                  return upload
-     
+
     -
          def upload_part(
              self,
@@ -334,7 +296,7 @@ After finishing, use `git checkout stage-14` to compare your result.
     @@ -206,7 +217,6 @@ class MiniS3:
                  self._storage.write_multipart_part(bucket, key, upload_id, part)
                  return part.receipt
-     
+
     -
          def complete_multipart_upload(
              self,
@@ -342,7 +304,7 @@ After finishing, use `git checkout stage-14` to compare your result.
     @@ -239,7 +249,6 @@ class MiniS3:
                  self._storage.remove_multipart_upload(bucket, key, upload_id)
                  return result
-     
+
     -
          def abort_multipart_upload(
              self, bucket: str, key: str, upload_id: str
@@ -350,7 +312,7 @@ After finishing, use `git checkout stage-14` to compare your result.
     @@ -249,6 +258,37 @@ class MiniS3:
                  self._bucket(bucket)
                  self._storage.remove_multipart_upload(bucket, key, upload_id)
-     
+
     +    def lifecycle_tick(
     +        self,
     +        bucket: str,
@@ -382,13 +344,13 @@ After finishing, use `git checkout stage-14` to compare your result.
     +                self._storage.persist_bucket(candidate)
     +                self._buckets[bucket] = candidate
     +            return actions
-     
+
          @staticmethod
          def _current_etag(bucket: Bucket, key: str) -> str | None:
     @@ -257,7 +297,6 @@ class MiniS3:
              except NoSuchKey:
                  return None
-     
+
     -
          @staticmethod
          def _addressed_etag(
@@ -396,7 +358,7 @@ After finishing, use `git checkout stage-14` to compare your result.
     @@ -267,10 +306,8 @@ class MiniS3:
              except (NoSuchKey, NoSuchVersion):
                  return None
-     
+
     -
          def _bucket(self, name: str) -> Bucket:
              try:
@@ -404,6 +366,74 @@ After finishing, use `git checkout stage-14` to compare your result.
              except KeyError as exc:
                  raise NoSuchBucket(name) from exc
     -
+    ```
+
+#### `src/minis3/__init__.py`
+
+Supported public package surface.
+
+Reached by user imports; wiring errors appear as missing names before any runtime flow starts.
+
+**Changed anchors:** configuration, export, or documentation change
+
+??? note "File diff: src/minis3/__init__.py"
+    ```diff
+    diff --git a/src/minis3/__init__.py b/src/minis3/__init__.py
+    index 3f6e582..36bc1f3 100644
+    --- a/src/minis3/__init__.py
+    +++ b/src/minis3/__init__.py
+    @@ -1,10 +1,34 @@
+     """Public API for the MiniS3 teaching implementation."""
+    -from .errors import BucketAlreadyExists, BucketNotEmpty, InvalidContinuationToken, MiniS3Error, NoSuchBucket, NoSuchKey, NoSuchVersion
+    +
+    +from .errors import (
+    +    BucketAlreadyExists,
+    +    BucketNotEmpty,
+    +    EntityTooSmall,
+    +    InvalidContinuationToken,
+    +    InvalidPart,
+    +    InvalidPartOrder,
+    +    MiniS3Error,
+    +    NoSuchBucket,
+    +    NoSuchKey,
+    +    NoSuchUpload,
+    +    NoSuchVersion,
+    +    NotModified,
+    +    PreconditionFailed,
+    +)
+     from .bucket import SequenceCounter, VersioningState
+    +from .listing import (
+    +    ListedObject,
+    +    ListedVersion,
+    +    ListObjectsResult,
+    +    ListObjectVersionsResult,
+    +)
+     from .model import DeleteMarker, ObjectRecord, Version, content_etag
+    +from .lifecycle import (
+    +    ExpirationRule,
+    +    LifecycleAction,
+    +    LifecycleActionKind,
+    +    evaluate_expiration,
+    +)
+    +from .multipart import MIN_PART_SIZE, MultipartPart, MultipartUpload
+     from .store import MiniS3
+     from .storage import InjectedCrash
+    -from .listing import ListedObject, ListedVersion, ListObjectsResult, ListObjectVersionsResult
+    -from .errors import EntityTooSmall, InvalidPart, InvalidPartOrder, NoSuchUpload
+    -from .multipart import MIN_PART_SIZE, MultipartPart, MultipartUpload
+    -from .errors import NotModified, PreconditionFailed
+    ```
+
+#### `tests/test_lifecycle.py`
+
+Executable proof of the stage behavior.
+
+Calls the learner-visible boundary and records the expected state or failure; start here only when verifying the mechanism.
+
+**Changed anchors:** `ManualClock`, `__init__`, `__call__`, `test_rule_evaluation_is_pure_prefix_filtered_and_boundary_inclusive`, `test_tick_expires_current_to_marker_and_noncurrent_physically`, `test_tick_uses_injected_time_and_persists_timestamps_across_restart`, `test_expiration_rule_rejects_empty_or_negative_policy`
+
+??? note "File diff: tests/test_lifecycle.py"
+    ```diff
     diff --git a/tests/test_lifecycle.py b/tests/test_lifecycle.py
     new file mode 100644
     index 0000000..c413345
@@ -521,3 +551,33 @@ After finishing, use `git checkout stage-14` to compare your result.
     +        ExpirationRule("negative", expire_current_after=-1)
     +
     ```
+
+### Self-check
+
+1. Where is this stage's visibility or state transition owned?
+
+    ??? note "Answer"
+        Lifecycle is deterministic when evaluation is pure and time enters only through the service boundary.
+
+2. Which test would fail first if the new boundary were bypassed?
+
+    ??? note "Answer"
+        Read `tests.txt`, identify the narrowest new node, and name the public call it exercises.
+
+### Pass command
+
+`uv run pytest -q $(cat journey/stages/14-lifecycle-tick/tests.txt)`
+
+### The real S3 lesson
+
+Lifecycle is deterministic when evaluation is pure and time enters only through the service boundary.
+
+### Textbook
+
+[Chapter 8](https://github.com/system-in-miniature/mini-s3/blob/main/docs/tutorial/08-lifecycle.md)
+
+[Compare this stage on GitHub](https://github.com/system-in-miniature/mini-s3/compare/stage-13...stage-14)
+
+After finishing, use `git checkout stage-14` to compare your result.
+
+[Complete reference patch / 完整参考补丁](https://github.com/system-in-miniature/mini-s3/blob/main/journey/stages/14-lifecycle-tick/stage.patch)

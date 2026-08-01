@@ -13,35 +13,29 @@ Starting from stage-08, Implement `MultipartUpload`, `StagedPart`, receipts, and
 - `src/minis3/errors.py`
 - `src/minis3/multipart.py`
 
-### Self-check
+### Mechanism walkthrough
 
-1. Where is this stage's visibility or state transition owned?
+#### Ownership and flow
 
-    ??? note "Answer"
-        Minimum size is checked at completion because only then is the final part known.
+`multipart.py` owns upload/part values and pure completion validation: client entries select staged parts, enforce ordering and size rules, then produce a composite ETag.
 
-2. Which test would fail first if the new boundary were bypassed?
+#### Failure and debugging
 
-    ??? note "Answer"
-        Read `tests.txt`, identify the narrowest new node, and name the public call it exercises.
+Compare client identities with staged receipts before assembly. Wrong order, missing parts, mismatched ETags, and undersized non-final parts must fail independently.
 
-### Pass command
+### File-by-file diff walkthrough
 
-`uv run pytest -q $(cat journey/stages/09-multipart-domain/tests.txt)`
+Read by runtime responsibility, not patch storage order. Every block comes directly from the canonical `stage.patch`.
 
-### The real S3 lesson
+#### `src/minis3/errors.py`
 
-Minimum size is checked at completion because only then is the final part known.
+Shared domain failure vocabulary.
 
-### Textbook
+Constructed by bucket/service code and returned upward without owning I/O; inspect field values when state is correct but results look wrong.
 
-[Chapter 6](https://github.com/system-in-miniature/mini-s3/blob/main/docs/tutorial/06-multipart.md)
+**Changed anchors:** `NoSuchUpload`, `InvalidPart`, `InvalidPartOrder`, `EntityTooSmall`
 
-[Compare this stage on GitHub](https://github.com/system-in-miniature/mini-s3/compare/stage-08...stage-09)
-
-After finishing, use `git checkout stage-09` to compare your result.
-
-??? note "Try first, then peek: stage.patch"
+??? note "File diff: src/minis3/errors.py"
     ```diff
     diff --git a/src/minis3/errors.py b/src/minis3/errors.py
     index e1a2230..9db3b4c 100644
@@ -50,7 +44,7 @@ After finishing, use `git checkout stage-09` to compare your result.
     @@ -28,3 +28,18 @@ class NoSuchVersion(MiniS3Error):
      class InvalidContinuationToken(MiniS3Error):
          """The list continuation token was malformed or belongs to another query."""
-     
+
     +
     +class NoSuchUpload(MiniS3Error):
     +    """The addressed multipart upload does not exist or no longer exists."""
@@ -66,6 +60,18 @@ After finishing, use `git checkout stage-09` to compare your result.
     +
     +class EntityTooSmall(MiniS3Error):
     +    """A non-final multipart part is below the configured minimum size."""
+    ```
+
+#### `src/minis3/multipart.py`
+
+Multipart values and completion rules.
+
+Called by `MiniS3` as a policy function; receives explicit values and returns a decision for the service to apply.
+
+**Changed anchors:** `MultipartUpload`, `MultipartPart`, `StagedPart`, `etag`, `size`, `receipt`, `_entry_identity`, `validate_completion`
+
+??? note "File diff: src/minis3/multipart.py"
+    ```diff
     diff --git a/src/minis3/multipart.py b/src/minis3/multipart.py
     new file mode 100644
     index 0000000..c10ab02
@@ -180,3 +186,33 @@ After finishing, use `git checkout stage-09` to compare your result.
     +    composite = md5(digests, usedforsecurity=False).hexdigest()
     +    return tuple(selected), f'"{composite}-{len(selected)}"'
     ```
+
+### Self-check
+
+1. Where is this stage's visibility or state transition owned?
+
+    ??? note "Answer"
+        Minimum size is checked at completion because only then is the final part known.
+
+2. Which test would fail first if the new boundary were bypassed?
+
+    ??? note "Answer"
+        Read `tests.txt`, identify the narrowest new node, and name the public call it exercises.
+
+### Pass command
+
+`uv run pytest -q $(cat journey/stages/09-multipart-domain/tests.txt)`
+
+### The real S3 lesson
+
+Minimum size is checked at completion because only then is the final part known.
+
+### Textbook
+
+[Chapter 6](https://github.com/system-in-miniature/mini-s3/blob/main/docs/tutorial/06-multipart.md)
+
+[Compare this stage on GitHub](https://github.com/system-in-miniature/mini-s3/compare/stage-08...stage-09)
+
+After finishing, use `git checkout stage-09` to compare your result.
+
+[Complete reference patch / 完整参考补丁](https://github.com/system-in-miniature/mini-s3/blob/main/journey/stages/09-multipart-domain/stage.patch)

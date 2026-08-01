@@ -21,6 +21,16 @@ Starting from stage-09, Implement create/load/write/remove upload methods and `M
 - `src/minis3/store.py`
 - `tests/test_multipart.py`
 
+### Mechanism walkthrough
+
+#### Ownership and flow
+
+`MiniS3` creates deterministic upload identities, while `DiskStorage` keeps upload metadata and atomically replaced part bytes under private `uploads/` paths outside object manifests.
+
+#### Failure and debugging
+
+Resolve bucket, key, and upload ID together before touching a part. If an unfinished upload appears in GET/listing, inspect whether staging accidentally entered the visible manifest.
+
 ### Self-check
 
 1. Where is this stage's visibility or state transition owned?
@@ -63,6 +73,16 @@ An unfinished upload lives outside the visible object manifest.
 - `src/minis3/storage/disk.py`
 - `src/minis3/store.py`
 - `tests/test_multipart.py`
+
+### 机制走读
+
+#### 所有权与数据流
+
+`MiniS3` 创建确定性 Upload 身份，`DiskStorage` 则把 Upload 元数据和原子替换的 Part 字节放在对象 Manifest 之外的私有 `uploads/` 路径。
+
+#### 失败与排查
+
+写 Part 前同时解析 Bucket、Key 与 Upload ID；若未完成上传出现在 GET/Listing 中，检查暂存内容是否误入可见 Manifest。
 
 ### 自查
 

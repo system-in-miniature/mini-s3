@@ -20,6 +20,16 @@ Starting from stage-12, Implement ETag matching plus `if_match`/`if_none_match` 
 - `src/minis3/store.py`
 - `tests/test_conditional.py`
 
+### Mechanism walkthrough
+
+#### Ownership and flow
+
+Pure helpers evaluate ETag syntax; `MiniS3` holds one lock across reading the current visible ETag, checking the precondition, and publishing the mutation.
+
+#### Failure and debugging
+
+Separate matching errors from serialization errors. If two conditional writers both win, comparison and mutation escaped the same critical section.
+
 ### Self-check
 
 1. Where is this stage's visibility or state transition owned?
@@ -61,6 +71,16 @@ The comparison and publication must share one critical section or two writers ca
 - `src/minis3/errors.py`
 - `src/minis3/store.py`
 - `tests/test_conditional.py`
+
+### 机制走读
+
+#### 所有权与数据流
+
+纯辅助函数评估 ETag 语法；`MiniS3` 用同一把锁覆盖读取当前可见 ETag、检查前置条件和发布变更。
+
+#### 失败与排查
+
+区分匹配语义问题与串行化问题；若两个条件写者都成功，说明比较与变更没有处于同一临界区。
 
 ### 自查
 

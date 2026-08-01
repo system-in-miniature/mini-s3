@@ -15,45 +15,30 @@ Starting from stage-04, Implement `list_object_versions(records, prefix=...)` an
 - `src/minis3/store.py`
 - `tests/test_versioning.py`
 
-### Self-check
+### Mechanism walkthrough
 
-1. Where is this stage's visibility or state transition owned?
+#### Ownership and flow
 
-    ??? note "Answer"
-        Current visibility and retained history are different projections of the same record.
+Mutation remains in `Bucket`; `listing.py` flattens ordered histories into read-only `ListedVersion` rows while preserving latest and delete-marker flags.
 
-2. Which test would fail first if the new boundary were bypassed?
+#### Failure and debugging
 
-    ??? note "Answer"
-        Read `tests.txt`, identify the narrowest new node, and name the public call it exercises.
+Inspect the stored tuple before blaming projection. Wrong null-slot replacement is a mutation bug; correct history with wrong ordering/flags is a listing bug.
 
-### Pass command
+### File-by-file diff walkthrough
 
-`uv run pytest -q $(cat journey/stages/05-version-history/tests.txt)`
+Read by runtime responsibility, not patch storage order. Every block comes directly from the canonical `stage.patch`.
 
-### The real S3 lesson
+#### `src/minis3/listing.py`
 
-Current visibility and retained history are different projections of the same record.
+Read-side projection and pagination logic.
 
-### Textbook
+Called by the service read path; converts stored histories into sorted, paginated response values without mutation.
 
-[Chapter 3](https://github.com/system-in-miniature/mini-s3/blob/main/docs/tutorial/03-versioning.md)
+**Changed anchors:** `ListedVersion`, `ListObjectVersionsResult`, `list_object_versions`
 
-[Compare this stage on GitHub](https://github.com/system-in-miniature/mini-s3/compare/stage-04...stage-05)
-
-After finishing, use `git checkout stage-05` to compare your result.
-
-??? note "Try first, then peek: stage.patch"
+??? note "File diff: src/minis3/listing.py"
     ```diff
-    diff --git a/src/minis3/__init__.py b/src/minis3/__init__.py
-    index 11378e1..f9c1adf 100644
-    --- a/src/minis3/__init__.py
-    +++ b/src/minis3/__init__.py
-    @@ -4,3 +4,4 @@ from .bucket import SequenceCounter, VersioningState
-     from .model import DeleteMarker, ObjectRecord, Version, content_etag
-     from .store import MiniS3
-     from .storage import InjectedCrash
-    +from .listing import ListedVersion, ListObjectVersionsResult
     diff --git a/src/minis3/listing.py b/src/minis3/listing.py
     new file mode 100644
     index 0000000..3c40e0d
@@ -115,22 +100,34 @@ After finishing, use `git checkout stage-05` to compare your result.
     +                )
     +            )
     +    return ListObjectVersionsResult(tuple(result))
+    ```
+
+#### `src/minis3/store.py`
+
+Application service coordinating domain and persistence.
+
+Receives public calls, owns locking and orchestration, then delegates to domain, projection, and storage boundaries.
+
+**Changed anchors:** `list_object_versions`, `_bucket`
+
+??? note "File diff: src/minis3/store.py"
+    ```diff
     diff --git a/src/minis3/store.py b/src/minis3/store.py
     index 5d418b8..23ddd8e 100644
     --- a/src/minis3/store.py
     +++ b/src/minis3/store.py
     @@ -9,6 +9,7 @@ from threading import RLock
-     
+
      from .bucket import Bucket, SequenceCounter, VersioningState
      from .errors import BucketAlreadyExists, BucketNotEmpty, NoSuchBucket
     +from .listing import ListObjectVersionsResult, list_object_versions
      from .model import ObjectVersion, Version
      from .storage import DiskStorage
-     
+
     @@ -96,6 +97,13 @@ class MiniS3:
                  return result
-     
-     
+
+
     +    def list_object_versions(
     +        self, bucket: str, *, prefix: str = ""
     +    ) -> ListObjectVersionsResult:
@@ -141,13 +138,46 @@ After finishing, use `git checkout stage-05` to compare your result.
          def _bucket(self, name: str) -> Bucket:
              try:
                  return self._buckets[name]
+    ```
+
+#### `src/minis3/__init__.py`
+
+Supported public package surface.
+
+Reached by user imports; wiring errors appear as missing names before any runtime flow starts.
+
+**Changed anchors:** configuration, export, or documentation change
+
+??? note "File diff: src/minis3/__init__.py"
+    ```diff
+    diff --git a/src/minis3/__init__.py b/src/minis3/__init__.py
+    index 11378e1..f9c1adf 100644
+    --- a/src/minis3/__init__.py
+    +++ b/src/minis3/__init__.py
+    @@ -4,3 +4,4 @@ from .bucket import SequenceCounter, VersioningState
+     from .model import DeleteMarker, ObjectRecord, Version, content_etag
+     from .store import MiniS3
+     from .storage import InjectedCrash
+    +from .listing import ListedVersion, ListObjectVersionsResult
+    ```
+
+#### `tests/test_versioning.py`
+
+Executable proof of the stage behavior.
+
+Calls the learner-visible boundary and records the expected state or failure; start here only when verifying the mechanism.
+
+**Changed anchors:** `test_unversioned_put_replaces_null_and_delete_removes_it`, `test_enabled_puts_stack_and_delete_marker_hides_history`, `test_suspended_put_replaces_null_but_preserves_named_history`, `test_latest_marker_is_404_even_when_older_data_exists`, `test_suspended_delete_replaces_null_with_null_marker`, `test_nonempty_bucket_cannot_be_deleted`
+
+??? note "File diff: tests/test_versioning.py"
+    ```diff
     diff --git a/tests/test_versioning.py b/tests/test_versioning.py
     index 389e45d..3f305c6 100644
     --- a/tests/test_versioning.py
     +++ b/tests/test_versioning.py
     @@ -1,8 +1,17 @@
      """Versioning is the central state-machine contract of M1."""
-     
+
      from pathlib import Path
     +
      import pytest
@@ -162,12 +192,12 @@ After finishing, use `git checkout stage-05` to compare your result.
     +    VersioningState,
     +)
      from minis3.bucket import Bucket
-     
-     
+
+
     @@ -47,6 +56,22 @@ def test_unversioned_delete_defensively_preserves_named_history() -> None:
          assert bucket.get("k", historical.version_id) == historical
-     
-     
+
+
     +def test_unversioned_put_replaces_null_and_delete_removes_it(tmp_path: Path) -> None:
     +    store = MiniS3(tmp_path, counter=SequenceCounter())
     +    store.create_bucket("photos")
@@ -189,8 +219,8 @@ After finishing, use `git checkout stage-05` to compare your result.
          store.create_bucket("photos")
     @@ -87,6 +112,28 @@ def test_specific_delete_removes_only_addressed_version(tmp_path: Path) -> None:
              store.get_object("b", "k", version_id=new.version_id)
-     
-     
+
+
     +def test_suspended_put_replaces_null_but_preserves_named_history(
     +    tmp_path: Path,
     +) -> None:
@@ -218,8 +248,8 @@ After finishing, use `git checkout stage-05` to compare your result.
          store.create_bucket("b")
     @@ -101,6 +148,24 @@ def test_latest_marker_is_404_even_when_older_data_exists(tmp_path: Path) -> Non
          assert store.get_object("b", "k").body == b"still here"
-     
-     
+
+
     +def test_suspended_delete_replaces_null_with_null_marker(tmp_path: Path) -> None:
     +    store = MiniS3(tmp_path)
     +    store.create_bucket("b")
@@ -242,3 +272,33 @@ After finishing, use `git checkout stage-05` to compare your result.
          store = MiniS3(tmp_path)
          store.create_bucket("b")
     ```
+
+### Self-check
+
+1. Where is this stage's visibility or state transition owned?
+
+    ??? note "Answer"
+        Current visibility and retained history are different projections of the same record.
+
+2. Which test would fail first if the new boundary were bypassed?
+
+    ??? note "Answer"
+        Read `tests.txt`, identify the narrowest new node, and name the public call it exercises.
+
+### Pass command
+
+`uv run pytest -q $(cat journey/stages/05-version-history/tests.txt)`
+
+### The real S3 lesson
+
+Current visibility and retained history are different projections of the same record.
+
+### Textbook
+
+[Chapter 3](https://github.com/system-in-miniature/mini-s3/blob/main/docs/tutorial/03-versioning.md)
+
+[Compare this stage on GitHub](https://github.com/system-in-miniature/mini-s3/compare/stage-04...stage-05)
+
+After finishing, use `git checkout stage-05` to compare your result.
+
+[Complete reference patch / 完整参考补丁](https://github.com/system-in-miniature/mini-s3/blob/main/journey/stages/05-version-history/stage.patch)

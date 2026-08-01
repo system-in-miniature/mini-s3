@@ -17,6 +17,16 @@ Starting from stage-08, Implement `MultipartUpload`, `StagedPart`, receipts, and
 - `src/minis3/errors.py`
 - `src/minis3/multipart.py`
 
+### Mechanism walkthrough
+
+#### Ownership and flow
+
+`multipart.py` owns upload/part values and pure completion validation: client entries select staged parts, enforce ordering and size rules, then produce a composite ETag.
+
+#### Failure and debugging
+
+Compare client identities with staged receipts before assembly. Wrong order, missing parts, mismatched ETags, and undersized non-final parts must fail independently.
+
 ### Self-check
 
 1. Where is this stage's visibility or state transition owned?
@@ -55,6 +65,16 @@ Minimum size is checked at completion because only then is the final part known.
 
 - `src/minis3/errors.py`
 - `src/minis3/multipart.py`
+
+### 机制走读
+
+#### 所有权与数据流
+
+`multipart.py` 拥有 Upload/Part 值和纯完成校验：客户端清单选择暂存 Part，校验顺序与尺寸，再生成组合 ETag。
+
+#### 失败与排查
+
+组装前对照客户端身份与暂存回执；乱序、缺失 Part、ETag 不匹配和非末尾 Part 过小必须分别失败。
 
 ### 自查
 

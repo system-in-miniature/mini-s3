@@ -15,80 +15,30 @@
 - `src/minis3/store.py`
 - `tests/test_lifecycle.py`
 
-### 自查
+### 机制走读
 
-1. 本阶段的可见性或状态迁移由谁负责？
+#### 所有权与数据流
 
-    ??? note "答案"
-        当评估保持纯函数、时间只从服务边界注入时，生命周期行为才可确定复现。
+`evaluate_expiration` 是针对带时间戳版本的纯策略；`MiniS3.lifecycle_tick` 注入时间、在锁内执行动作并持久化结果历史。
 
-2. 如果绕过新边界，哪个测试会最先失败？
+#### 失败与排查
 
-    ??? note "答案"
-        阅读 `tests.txt`，找出最窄的新节点，并说出它覆盖的公开调用。
+先单独运行纯评估器；候选错误属于策略或时间问题，动作正确但存储状态错误属于变更或持久化问题。
 
-### 通关命令
+### 逐文件 Diff 走读
 
-`uv run pytest -q $(cat journey/stages/14-lifecycle-tick/tests.txt)`
+按运行时职责阅读，而不是按补丁存储顺序阅读。每个代码块都直接来自 canonical `stage.patch`。
 
-### 对应真实 S3 的一课
+#### `src/minis3/lifecycle.py`
 
-当评估保持纯函数、时间只从服务边界注入时，生命周期行为才可确定复现。
+纯生命周期过期策略。
 
-### 教材
+由 `MiniS3` 作为策略函数调用；接收显式值并返回由服务执行的决策。
 
-[第 8 章](https://github.com/system-in-miniature/mini-s3/blob/main/docs/zh/tutorial/08-lifecycle.md)
+**变化锚点:** `ExpirationRule`, `__post_init__`, `LifecycleActionKind`, `LifecycleAction`, `_old_enough`, `evaluate_expiration`
 
-[在 GitHub 查看阶段差异](https://github.com/system-in-miniature/mini-s3/compare/stage-13...stage-14)
-
-完成后可运行 `git checkout stage-14` 对照你的结果。
-
-??? note "先做后看：stage.patch"
+??? note "文件差异：src/minis3/lifecycle.py"
     ```diff
-    diff --git a/src/minis3/__init__.py b/src/minis3/__init__.py
-    index 3f6e582..36bc1f3 100644
-    --- a/src/minis3/__init__.py
-    +++ b/src/minis3/__init__.py
-    @@ -1,10 +1,34 @@
-     """Public API for the MiniS3 teaching implementation."""
-    -from .errors import BucketAlreadyExists, BucketNotEmpty, InvalidContinuationToken, MiniS3Error, NoSuchBucket, NoSuchKey, NoSuchVersion
-    +
-    +from .errors import (
-    +    BucketAlreadyExists,
-    +    BucketNotEmpty,
-    +    EntityTooSmall,
-    +    InvalidContinuationToken,
-    +    InvalidPart,
-    +    InvalidPartOrder,
-    +    MiniS3Error,
-    +    NoSuchBucket,
-    +    NoSuchKey,
-    +    NoSuchUpload,
-    +    NoSuchVersion,
-    +    NotModified,
-    +    PreconditionFailed,
-    +)
-     from .bucket import SequenceCounter, VersioningState
-    +from .listing import (
-    +    ListedObject,
-    +    ListedVersion,
-    +    ListObjectsResult,
-    +    ListObjectVersionsResult,
-    +)
-     from .model import DeleteMarker, ObjectRecord, Version, content_etag
-    +from .lifecycle import (
-    +    ExpirationRule,
-    +    LifecycleAction,
-    +    LifecycleActionKind,
-    +    evaluate_expiration,
-    +)
-    +from .multipart import MIN_PART_SIZE, MultipartPart, MultipartUpload
-     from .store import MiniS3
-     from .storage import InjectedCrash
-    -from .listing import ListedObject, ListedVersion, ListObjectsResult, ListObjectVersionsResult
-    -from .errors import EntityTooSmall, InvalidPart, InvalidPartOrder, NoSuchUpload
-    -from .multipart import MIN_PART_SIZE, MultipartPart, MultipartUpload
-    -from .errors import NotModified, PreconditionFailed
     diff --git a/src/minis3/lifecycle.py b/src/minis3/lifecycle.py
     new file mode 100644
     index 0000000..ca0c3f0
@@ -198,6 +148,18 @@
     +                        )
     +                    )
     +    return tuple(actions)
+    ```
+
+#### `src/minis3/store.py`
+
+协调领域逻辑与持久化的应用服务。
+
+接收公开调用，拥有加锁与编排，再委托给领域、投影和存储边界。
+
+**变化锚点:** `lifecycle_tick`
+
+??? note "文件差异：src/minis3/store.py"
+    ```diff
     diff --git a/src/minis3/store.py b/src/minis3/store.py
     index e47e1ac..c2bdc5b 100644
     --- a/src/minis3/store.py
@@ -210,13 +172,13 @@
     +server. A future thin protocol adapter can translate these domain values and
     +errors without taking ownership of storage semantics.
     +"""
-     
+
      from __future__ import annotations
-     
+
     @@ -8,10 +13,27 @@ from pathlib import Path
      from threading import RLock
      from time import time
-     
+
     -from .conditional import require_if_match, require_if_none_match
      from .bucket import Bucket, SequenceCounter, VersioningState
     -from .errors import BucketAlreadyExists, BucketNotEmpty, NoSuchBucket, NoSuchKey, NoSuchVersion
@@ -247,7 +209,7 @@
     @@ -50,7 +72,6 @@ class MiniS3:
                  ensure(maximum_sequence + 1)
              self._lock = RLock()
-     
+
     -
          def create_bucket(self, name: str) -> None:
              with self._lock:
@@ -255,7 +217,7 @@
     @@ -59,7 +80,6 @@ class MiniS3:
                  self._storage.create_bucket(bucket)
                  self._buckets[name] = bucket
-     
+
     -
          def delete_bucket(self, name: str) -> None:
              with self._lock:
@@ -263,7 +225,7 @@
     @@ -68,7 +88,6 @@ class MiniS3:
                  self._storage.delete_bucket(name)
                  del self._buckets[name]
-     
+
     -
          def set_bucket_versioning(
              self, name: str, state: VersioningState | str
@@ -271,7 +233,7 @@
     @@ -78,7 +97,6 @@ class MiniS3:
                  self._storage.persist_bucket(candidate)
                  self._buckets[name] = candidate
-     
+
     -
          def put_object(
              self,
@@ -279,7 +241,7 @@
     @@ -97,7 +115,6 @@ class MiniS3:
                  self._buckets[bucket] = candidate
                  return result
-     
+
     -
          def get_object(
              self,
@@ -287,15 +249,15 @@
     @@ -113,7 +130,6 @@ class MiniS3:
                  require_if_none_match(result.etag, if_none_match)
                  return result
-     
+
     -
          def head_object(
              self, bucket: str, key: str, *, version_id: str | None = None
          ) -> Version:
     @@ -121,7 +137,6 @@ class MiniS3:
-     
+
              return self.get_object(bucket, key, version_id=version_id)
-     
+
     -
          def delete_object(
              self,
@@ -303,7 +265,7 @@
     @@ -142,7 +157,6 @@ class MiniS3:
                  self._buckets[bucket] = candidate
                  return result
-     
+
     -
          def list_objects(
              self,
@@ -311,14 +273,14 @@
     @@ -161,14 +175,12 @@ class MiniS3:
                      continuation_token=continuation_token,
                  )
-     
+
     -
          def list_object_versions(
              self, bucket: str, *, prefix: str = ""
          ) -> ListObjectVersionsResult:
              with self._lock:
                  return list_object_versions(self._bucket(bucket).records, prefix=prefix)
-     
+
     -
          def create_multipart_upload(
              self, bucket: str, key: str
@@ -326,7 +288,7 @@
     @@ -187,7 +199,6 @@ class MiniS3:
                  self._storage.create_multipart_upload(upload)
                  return upload
-     
+
     -
          def upload_part(
              self,
@@ -334,7 +296,7 @@
     @@ -206,7 +217,6 @@ class MiniS3:
                  self._storage.write_multipart_part(bucket, key, upload_id, part)
                  return part.receipt
-     
+
     -
          def complete_multipart_upload(
              self,
@@ -342,7 +304,7 @@
     @@ -239,7 +249,6 @@ class MiniS3:
                  self._storage.remove_multipart_upload(bucket, key, upload_id)
                  return result
-     
+
     -
          def abort_multipart_upload(
              self, bucket: str, key: str, upload_id: str
@@ -350,7 +312,7 @@
     @@ -249,6 +258,37 @@ class MiniS3:
                  self._bucket(bucket)
                  self._storage.remove_multipart_upload(bucket, key, upload_id)
-     
+
     +    def lifecycle_tick(
     +        self,
     +        bucket: str,
@@ -382,13 +344,13 @@
     +                self._storage.persist_bucket(candidate)
     +                self._buckets[bucket] = candidate
     +            return actions
-     
+
          @staticmethod
          def _current_etag(bucket: Bucket, key: str) -> str | None:
     @@ -257,7 +297,6 @@ class MiniS3:
              except NoSuchKey:
                  return None
-     
+
     -
          @staticmethod
          def _addressed_etag(
@@ -396,7 +358,7 @@
     @@ -267,10 +306,8 @@ class MiniS3:
              except (NoSuchKey, NoSuchVersion):
                  return None
-     
+
     -
          def _bucket(self, name: str) -> Bucket:
              try:
@@ -404,6 +366,74 @@
              except KeyError as exc:
                  raise NoSuchBucket(name) from exc
     -
+    ```
+
+#### `src/minis3/__init__.py`
+
+受支持的包级公开接口。
+
+由用户导入触达；接线错误会在运行时流程开始前表现为名称缺失。
+
+**变化锚点:** 配置、导出或文档变化
+
+??? note "文件差异：src/minis3/__init__.py"
+    ```diff
+    diff --git a/src/minis3/__init__.py b/src/minis3/__init__.py
+    index 3f6e582..36bc1f3 100644
+    --- a/src/minis3/__init__.py
+    +++ b/src/minis3/__init__.py
+    @@ -1,10 +1,34 @@
+     """Public API for the MiniS3 teaching implementation."""
+    -from .errors import BucketAlreadyExists, BucketNotEmpty, InvalidContinuationToken, MiniS3Error, NoSuchBucket, NoSuchKey, NoSuchVersion
+    +
+    +from .errors import (
+    +    BucketAlreadyExists,
+    +    BucketNotEmpty,
+    +    EntityTooSmall,
+    +    InvalidContinuationToken,
+    +    InvalidPart,
+    +    InvalidPartOrder,
+    +    MiniS3Error,
+    +    NoSuchBucket,
+    +    NoSuchKey,
+    +    NoSuchUpload,
+    +    NoSuchVersion,
+    +    NotModified,
+    +    PreconditionFailed,
+    +)
+     from .bucket import SequenceCounter, VersioningState
+    +from .listing import (
+    +    ListedObject,
+    +    ListedVersion,
+    +    ListObjectsResult,
+    +    ListObjectVersionsResult,
+    +)
+     from .model import DeleteMarker, ObjectRecord, Version, content_etag
+    +from .lifecycle import (
+    +    ExpirationRule,
+    +    LifecycleAction,
+    +    LifecycleActionKind,
+    +    evaluate_expiration,
+    +)
+    +from .multipart import MIN_PART_SIZE, MultipartPart, MultipartUpload
+     from .store import MiniS3
+     from .storage import InjectedCrash
+    -from .listing import ListedObject, ListedVersion, ListObjectsResult, ListObjectVersionsResult
+    -from .errors import EntityTooSmall, InvalidPart, InvalidPartOrder, NoSuchUpload
+    -from .multipart import MIN_PART_SIZE, MultipartPart, MultipartUpload
+    -from .errors import NotModified, PreconditionFailed
+    ```
+
+#### `tests/test_lifecycle.py`
+
+本阶段行为的可执行证明。
+
+调用学习者可见边界并记录预期状态或失败；验证机制时再从这里进入。
+
+**变化锚点:** `ManualClock`, `__init__`, `__call__`, `test_rule_evaluation_is_pure_prefix_filtered_and_boundary_inclusive`, `test_tick_expires_current_to_marker_and_noncurrent_physically`, `test_tick_uses_injected_time_and_persists_timestamps_across_restart`, `test_expiration_rule_rejects_empty_or_negative_policy`
+
+??? note "文件差异：tests/test_lifecycle.py"
+    ```diff
     diff --git a/tests/test_lifecycle.py b/tests/test_lifecycle.py
     new file mode 100644
     index 0000000..c413345
@@ -521,3 +551,33 @@
     +        ExpirationRule("negative", expire_current_after=-1)
     +
     ```
+
+### 自查
+
+1. 本阶段的可见性或状态迁移由谁负责？
+
+    ??? note "答案"
+        当评估保持纯函数、时间只从服务边界注入时，生命周期行为才可确定复现。
+
+2. 如果绕过新边界，哪个测试会最先失败？
+
+    ??? note "答案"
+        阅读 `tests.txt`，找出最窄的新节点，并说出它覆盖的公开调用。
+
+### 通关命令
+
+`uv run pytest -q $(cat journey/stages/14-lifecycle-tick/tests.txt)`
+
+### 对应真实 S3 的一课
+
+当评估保持纯函数、时间只从服务边界注入时，生命周期行为才可确定复现。
+
+### 教材
+
+[第 8 章](https://github.com/system-in-miniature/mini-s3/blob/main/docs/zh/tutorial/08-lifecycle.md)
+
+[在 GitHub 查看阶段差异](https://github.com/system-in-miniature/mini-s3/compare/stage-13...stage-14)
+
+完成后可运行 `git checkout stage-14` 对照你的结果。
+
+[Complete reference patch / 完整参考补丁](https://github.com/system-in-miniature/mini-s3/blob/main/journey/stages/14-lifecycle-tick/stage.patch)

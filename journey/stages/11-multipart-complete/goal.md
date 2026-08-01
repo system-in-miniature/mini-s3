@@ -17,6 +17,16 @@ Starting from stage-10, Implement `MiniS3.complete_multipart_upload(...)` and co
 - `src/minis3/store.py`
 - `tests/test_multipart.py`
 
+### Mechanism walkthrough
+
+#### Ownership and flow
+
+Completion loads private parts, validates the ordered client manifest, concatenates bytes, publishes once through normal `Bucket.put`, then removes staging.
+
+#### Failure and debugging
+
+Inspect validation before assembly and manifest publication before cleanup. A visible partial object means publication was split; lost retry state means cleanup happened too early.
+
 ### Self-check
 
 1. Where is this stage's visibility or state transition owned?
@@ -55,6 +65,16 @@ Completion becomes visible only through the same bucket-manifest publication bou
 
 - `src/minis3/store.py`
 - `tests/test_multipart.py`
+
+### 机制走读
+
+#### 所有权与数据流
+
+完成操作加载私有 Part、校验有序客户端清单、拼接字节，通过普通 `Bucket.put` 只发布一次，最后删除暂存。
+
+#### 失败与排查
+
+先检查组装前校验，再检查清理前 Manifest 发布；出现部分可见对象说明发布被拆开，丢失重试状态说明清理过早。
 
 ### 自查
 

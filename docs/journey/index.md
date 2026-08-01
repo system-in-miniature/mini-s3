@@ -1,30 +1,8 @@
 # MiniS3 Journey
 
-Start from an empty tree and complete each task card in order. Build first; peek at the patch only when stuck.
+Each Stage is a complete independent-browser lesson: understand the S3 problem and mechanism, read every changed file by runtime responsibility, then close with verification, checks, and interview language.
 
-## Learn in VSCode
-
-Use a dedicated learning repository so the VSCode gutter and Source Control
-view show only one stage. The main checkout is never modified.
-
-```bash
-python journey/tools/build_journey.py study 3
-code ../MiniS3-journey-workspace
-```
-
-To implement the stage yourself, prepare its clean previous-stage baseline and
-then check your work:
-
-```bash
-python journey/tools/build_journey.py attempt 3
-python journey/tools/build_journey.py check 3
-```
-
-`check` runs the stage's cumulative `tests.txt` subset and prints a
-`git diff --stat` against a reference tree built directly from the patches.
-`study` and `attempt` confirm before overwriting existing learning work; use
-`--yes` to skip the prompt or `--workspace PATH` to choose another dedicated
-repository.
+For an editor-focused diff, run `python journey/tools/build_journey.py study N` and open `../MiniS3-journey-workspace`. An agent tutor adds interaction but is not required to complete the course.
 
 | Stage | Topic | New tests | Book chapter |
 |---:|---|---:|---:|
@@ -43,6 +21,3 @@ repository.
 | [13](stage-13.md) | Conditional requests and CAS | 4 | [7](../tutorial/07-conditional.md) |
 | [14](stage-14.md) | Deterministic lifecycle expiration | 4 | [8](../tutorial/08-lifecycle.md) |
 | [15](stage-15.md) | Public API and parity closeout | 0 | [9](../tutorial/09-methodology.md) |
-
-
-> `journey attempt` is an experimental placeholder; it will be redesigned as CS336-style test-driven assignments (shipped tests + interface stubs, implement until green, `check` as grader).

@@ -5,6 +5,10 @@ one or more journey stages. Follow this contract; it consumes only
 `journey/stages/NN-*/{goal.md,stage.patch,tests.txt}` — there is no other
 course content.
 
+The generated browser Journey is also a complete learning path. Your role is
+an interactive enhancement: adapt explanations and checks, but do not assume
+the website is only a task card that needs chat to become a lesson.
+
 ## Division of labor (non-negotiable)
 
 - **You own implementation and verification.** You write/apply the stage code
@@ -23,17 +27,19 @@ course content.
 2. **MCQ screening**: 2-4 questions per batch. Options must be complete,
    plausible competing mental models. Rotate correct-answer positions. Do not
    reveal the key until the learner answers.
-3. **Implement**: apply `stage.patch` hunk by hunk (or type the equivalent),
+3. **Trace the mechanism**: explain ownership and the input-to-output flow,
+   then read the patch file by file in runtime-responsibility order.
+4. **Implement**: apply `stage.patch` hunk by hunk (or type the equivalent),
    pausing to explain each slice as you go. Keep the increment uncommitted so
    the learner's editor shows it as highlighted changes (`journey study N`
    produces exactly this state).
-4. **Verify**: run the `tests.txt` subset yourself; report a focused summary,
+5. **Verify**: run the `tests.txt` subset yourself; report a focused summary,
    not raw dumps. A green run must prove *today's mechanism*, not merely that
    code executes — add a check if it doesn't.
-5. **Code-reading checks**: give an exact `file:line` anchor, explain the
+6. **Code-reading checks**: give an exact `file:line` anchor, explain the
    local names and data flow of a 5-15 line slice, then ask one small question
    bound to that slice.
-6. **Interview lens**: compress the stage's design into one interview-ready
+7. **Interview lens**: compress the stage's design into one interview-ready
    sentence; have the learner restate it in their own words.
 
 ## Feedback branches
@@ -61,8 +67,6 @@ commit. Never commit mid-teaching.
 ## Modes
 
 - Default: tutor-implements (this contract), pairs with `journey study N`.
-- `journey attempt N` is an **experimental placeholder**. Future direction
-  (marker, not yet implemented): CS336-style test-driven assignments — the
-  stage ships its test suite and interface stubs, the learner implements until
-  green, and `journey check N` acts as the grader. Do not improvise that mode
-  from this contract today.
+- `journey attempt N` remains an **experimental self-implementation path**.
+  The complete public course does not depend on it; do not make test-first
+  implementation the default teaching sequence.

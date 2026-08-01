@@ -17,88 +17,68 @@ Starting from stage-09, Implement create/load/write/remove upload methods and `M
 - `src/minis3/store.py`
 - `tests/test_multipart.py`
 
-### Self-check
+### Mechanism walkthrough
 
-1. Where is this stage's visibility or state transition owned?
+#### Ownership and flow
 
-    ??? note "Answer"
-        An unfinished upload lives outside the visible object manifest.
+`MiniS3` creates deterministic upload identities, while `DiskStorage` keeps upload metadata and atomically replaced part bytes under private `uploads/` paths outside object manifests.
 
-2. Which test would fail first if the new boundary were bypassed?
+#### Failure and debugging
 
-    ??? note "Answer"
-        Read `tests.txt`, identify the narrowest new node, and name the public call it exercises.
+Resolve bucket, key, and upload ID together before touching a part. If an unfinished upload appears in GET/listing, inspect whether staging accidentally entered the visible manifest.
 
-### Pass command
+### File-by-file diff walkthrough
 
-`uv run pytest -q $(cat journey/stages/10-multipart-staging/tests.txt)`
+Read by runtime responsibility, not patch storage order. Every block comes directly from the canonical `stage.patch`.
 
-### The real S3 lesson
+#### `src/minis3/model.py`
 
-An unfinished upload lives outside the visible object manifest.
+Immutable values carried through the system.
 
-### Textbook
+Constructed by bucket/service code and returned upward without owning I/O; inspect field values when state is correct but results look wrong.
 
-[Chapter 6](https://github.com/system-in-miniature/mini-s3/blob/main/docs/tutorial/06-multipart.md)
+**Changed anchors:** configuration, export, or documentation change
 
-[Compare this stage on GitHub](https://github.com/system-in-miniature/mini-s3/compare/stage-09...stage-10)
-
-After finishing, use `git checkout stage-10` to compare your result.
-
-??? note "Try first, then peek: stage.patch"
+??? note "File diff: src/minis3/model.py"
     ```diff
-    diff --git a/src/minis3/__init__.py b/src/minis3/__init__.py
-    index 1a69ac7..0c23aea 100644
-    --- a/src/minis3/__init__.py
-    +++ b/src/minis3/__init__.py
-    @@ -1,43 +1,9 @@
-     """Public API for the MiniS3 teaching implementation."""
+    diff --git a/src/minis3/model.py b/src/minis3/model.py
+    index da662fc..7375afd 100644
+    --- a/src/minis3/model.py
+    +++ b/src/minis3/model.py
+    @@ -36,6 +36,8 @@ class Version:
+         sequence: int
+         body: bytes
+         etag: str
+    +    created_at: float = 0.0
+    +    multipart_upload_id: str | None = None
+
+         @property
+         def size(self) -> int:
+    @@ -57,6 +59,7 @@ class DeleteMarker:
+         version_id: str
+         storage_id: str
+         sequence: int
+    +    created_at: float = 0.0
+
+         @property
+         def is_delete_marker(self) -> bool:
+    @@ -72,4 +75,3 @@ class ObjectRecord:
+
+         key: str
+         versions: tuple[ObjectVersion, ...] = ()
     -
-    -from .errors import (
-    -    BucketAlreadyExists,
-    -    BucketNotEmpty,
-    -    InvalidContinuationToken,
-    -    MiniS3Error,
-    -    NoSuchBucket,
-    -    NoSuchKey,
-    -    NoSuchVersion,
-    -)
-    +from .errors import BucketAlreadyExists, BucketNotEmpty, InvalidContinuationToken, MiniS3Error, NoSuchBucket, NoSuchKey, NoSuchVersion
-     from .bucket import SequenceCounter, VersioningState
-    -from .listing import (
-    -    ListedObject,
-    -    ListedVersion,
-    -    ListObjectsResult,
-    -    ListObjectVersionsResult,
-    -)
-     from .model import DeleteMarker, ObjectRecord, Version, content_etag
-     from .store import MiniS3
-     from .storage import InjectedCrash
-    -
-    -__all__ = [
-    -    "BucketAlreadyExists",
-    -    "BucketNotEmpty",
-    -    "DeleteMarker",
-    -    "ListedObject",
-    -    "ListedVersion",
-    -    "ListObjectsResult",
-    -    "ListObjectVersionsResult",
-    -    "MiniS3",
-    -    "InvalidContinuationToken",
-    -    "InjectedCrash",
-    -    "MiniS3Error",
-    -    "NoSuchBucket",
-    -    "NoSuchKey",
-    -    "NoSuchVersion",
-    -    "ObjectRecord",
-    -    "SequenceCounter",
-    -    "Version",
-    -    "VersioningState",
-    -    "content_etag",
-    -]
-    +from .listing import ListedObject, ListedVersion, ListObjectsResult, ListObjectVersionsResult
-    +from .errors import EntityTooSmall, InvalidPart, InvalidPartOrder, NoSuchUpload
-    +from .multipart import MIN_PART_SIZE, MultipartPart, MultipartUpload
+    ```
+
+#### `src/minis3/bucket.py`
+
+Aggregate that owns per-bucket state transitions.
+
+Called by `MiniS3`; turns one command plus the current record into the next in-memory history.
+
+**Changed anchors:** `put`
+
+??? note "File diff: src/minis3/bucket.py"
+    ```diff
     diff --git a/src/minis3/bucket.py b/src/minis3/bucket.py
     index b0a46e5..cc695a1 100644
     --- a/src/minis3/bucket.py
@@ -106,7 +86,7 @@ After finishing, use `git checkout stage-10` to compare your result.
     @@ -69,7 +69,16 @@ class Bucket:
                  raise ValueError("versioning must be enabled before it can be suspended")
              self.versioning = state
-     
+
     -    def put(self, key: str, body: bytes, next_sequence: Callable[[], int]) -> Version:
     +    def put(
     +        self,
@@ -131,7 +111,7 @@ After finishing, use `git checkout stage-10` to compare your result.
     +            multipart_upload_id=multipart_upload_id,
              )
              old = self.records.get(key, ObjectRecord(key))
-     
+
     @@ -120,6 +131,8 @@ class Bucket:
              key: str,
              next_sequence: Callable[[], int],
@@ -140,7 +120,7 @@ After finishing, use `git checkout stage-10` to compare your result.
     +        now: float = 0.0,
          ) -> ObjectVersion | None:
              record = self.records.get(key)
-     
+
     @@ -149,7 +162,9 @@ class Bucket:
                  if self.versioning is VersioningState.ENABLED
                  else NULL_VERSION_ID
@@ -152,46 +132,32 @@ After finishing, use `git checkout stage-10` to compare your result.
              old_versions = () if record is None else record.versions
              if self.versioning is VersioningState.SUSPENDED or has_named_history:
                  old_versions = tuple(
-    diff --git a/src/minis3/model.py b/src/minis3/model.py
-    index da662fc..7375afd 100644
-    --- a/src/minis3/model.py
-    +++ b/src/minis3/model.py
-    @@ -36,6 +36,8 @@ class Version:
-         sequence: int
-         body: bytes
-         etag: str
-    +    created_at: float = 0.0
-    +    multipart_upload_id: str | None = None
-     
-         @property
-         def size(self) -> int:
-    @@ -57,6 +59,7 @@ class DeleteMarker:
-         version_id: str
-         storage_id: str
-         sequence: int
-    +    created_at: float = 0.0
-     
-         @property
-         def is_delete_marker(self) -> bool:
-    @@ -72,4 +75,3 @@ class ObjectRecord:
-     
-         key: str
-         versions: tuple[ObjectVersion, ...] = ()
-    -
+    ```
+
+#### `src/minis3/storage/disk.py`
+
+Disk layout, publication, and recovery owner.
+
+Called after a domain mutation; turns in-memory state into durable artifacts and reconstructs it on startup.
+
+**Changed anchors:** `create_multipart_upload`, `write_multipart_part`, `load_multipart_upload`, `remove_multipart_upload`, `_bucket_directory`, `_upload_directory`, `_manifest_bytes`, `_recover_uploads`
+
+??? note "File diff: src/minis3/storage/disk.py"
+    ```diff
     diff --git a/src/minis3/storage/disk.py b/src/minis3/storage/disk.py
     index 8ad143f..95b160f 100644
     --- a/src/minis3/storage/disk.py
     +++ b/src/minis3/storage/disk.py
     @@ -23,7 +23,9 @@ from pathlib import Path
      import shutil
-     
+
      from ..bucket import Bucket, VersioningState
     +from ..errors import NoSuchUpload
      from ..model import DeleteMarker, ObjectRecord, ObjectVersion, Version
     +from ..multipart import MultipartUpload, StagedPart
      from .atomic import atomic_write, durable_mkdir, fsync_directory
-     
-     
+
+
     @@ -72,6 +74,9 @@ class DiskStorage:
                      for item in record.versions:
                          maximum_sequence = max(maximum_sequence, item.sequence)
@@ -201,7 +167,7 @@ After finishing, use `git checkout stage-10` to compare your result.
     +            )
              fsync_directory(self.buckets_root)
              return buckets, maximum_sequence
-     
+
     @@ -85,6 +90,7 @@ class DiskStorage:
                  fsync_directory(self.buckets_root)
              durable_mkdir(temporary, parents=False)
@@ -213,7 +179,7 @@ After finishing, use `git checkout stage-10` to compare your result.
     @@ -119,9 +125,108 @@ class DiskStorage:
              self._inject("after_manifest_publish")
              self._clean_bucket(directory, bucket)
-     
+
     +    def create_multipart_upload(self, upload: MultipartUpload) -> None:
     +        """Durably create private staging that no object listing consults."""
     +
@@ -304,7 +270,7 @@ After finishing, use `git checkout stage-10` to compare your result.
     +
          def _bucket_directory(self, name: str) -> Path:
              return self.buckets_root / _encoded_name(name)
-     
+
     +    def _upload_directory(
     +        self, bucket_directory: Path, upload_id: str
     +    ) -> Path:
@@ -396,6 +362,18 @@ After finishing, use `git checkout stage-10` to compare your result.
     +        if changed:
     +            fsync_directory(uploads)
     +        return maximum_sequence
+    ```
+
+#### `src/minis3/store.py`
+
+Application service coordinating domain and persistence.
+
+Receives public calls, owns locking and orchestration, then delegates to domain, projection, and storage boundaries.
+
+**Changed anchors:** `create_bucket`, `delete_bucket`, `set_bucket_versioning`, `put_object`, `get_object`, `head_object`, `delete_object`, `list_objects`, `list_object_versions`, `create_multipart_upload`, `upload_part`, `abort_multipart_upload`, `_bucket`
+
+??? note "File diff: src/minis3/store.py"
+    ```diff
     diff --git a/src/minis3/store.py b/src/minis3/store.py
     index 7c82b41..0d7e596 100644
     --- a/src/minis3/store.py
@@ -408,15 +386,15 @@ After finishing, use `git checkout stage-10` to compare your result.
     -errors without taking ownership of storage semantics.
     -"""
     +"""Public service facade joining buckets, object state, and list projections."""
-     
+
      from __future__ import annotations
-     
+
     @@ -11,16 +6,21 @@ from collections.abc import Callable
      from copy import deepcopy
      from pathlib import Path
      from threading import RLock
     +from time import time
-     
+
      from .bucket import Bucket, SequenceCounter, VersioningState
      from .errors import BucketAlreadyExists, BucketNotEmpty, NoSuchBucket
     -from .listing import (
@@ -437,8 +415,8 @@ After finishing, use `git checkout stage-10` to compare your result.
     +    validate_completion,
     +)
      from .storage import DiskStorage
-     
-     
+
+
     @@ -33,9 +33,15 @@ class MiniS3:
              *,
              counter: Callable[[], int] | None = None,
@@ -458,7 +436,7 @@ After finishing, use `git checkout stage-10` to compare your result.
     @@ -43,6 +49,7 @@ class MiniS3:
                  ensure(maximum_sequence + 1)
              self._lock = RLock()
-     
+
     +
          def create_bucket(self, name: str) -> None:
              with self._lock:
@@ -466,7 +444,7 @@ After finishing, use `git checkout stage-10` to compare your result.
     @@ -51,6 +58,7 @@ class MiniS3:
                  self._storage.create_bucket(bucket)
                  self._buckets[name] = bucket
-     
+
     +
          def delete_bucket(self, name: str) -> None:
              with self._lock:
@@ -474,7 +452,7 @@ After finishing, use `git checkout stage-10` to compare your result.
     @@ -59,6 +67,7 @@ class MiniS3:
                  self._storage.delete_bucket(name)
                  del self._buckets[name]
-     
+
     +
          def set_bucket_versioning(
              self, name: str, state: VersioningState | str
@@ -482,7 +460,7 @@ After finishing, use `git checkout stage-10` to compare your result.
     @@ -68,6 +77,7 @@ class MiniS3:
                  self._storage.persist_bucket(candidate)
                  self._buckets[name] = candidate
-     
+
     +
          def put_object(self, bucket: str, key: str, body: bytes) -> Version:
              with self._lock:
@@ -490,22 +468,22 @@ After finishing, use `git checkout stage-10` to compare your result.
     @@ -76,12 +86,14 @@ class MiniS3:
                  self._buckets[bucket] = candidate
                  return result
-     
+
     +
          def get_object(
              self, bucket: str, key: str, *, version_id: str | None = None
          ) -> Version:
              with self._lock:
                  return self._bucket(bucket).get(key, version_id)
-     
+
     +
          def head_object(
              self, bucket: str, key: str, *, version_id: str | None = None
          ) -> Version:
     @@ -89,6 +101,7 @@ class MiniS3:
-     
+
              return self.get_object(bucket, key, version_id=version_id)
-     
+
     +
          def delete_object(
              self, bucket: str, key: str, *, version_id: str | None = None
@@ -513,7 +491,7 @@ After finishing, use `git checkout stage-10` to compare your result.
     @@ -99,6 +112,7 @@ class MiniS3:
                  self._buckets[bucket] = candidate
                  return result
-     
+
     +
          def list_objects(
              self,
@@ -521,14 +499,14 @@ After finishing, use `git checkout stage-10` to compare your result.
     @@ -117,14 +131,65 @@ class MiniS3:
                      continuation_token=continuation_token,
                  )
-     
+
     +
          def list_object_versions(
              self, bucket: str, *, prefix: str = ""
          ) -> ListObjectVersionsResult:
              with self._lock:
                  return list_object_versions(self._bucket(bucket).records, prefix=prefix)
-     
+
     +
     +    def create_multipart_upload(
     +        self, bucket: str, key: str
@@ -584,6 +562,82 @@ After finishing, use `git checkout stage-10` to compare your result.
              except KeyError as exc:
                  raise NoSuchBucket(name) from exc
     +
+    ```
+
+#### `src/minis3/__init__.py`
+
+Supported public package surface.
+
+Reached by user imports; wiring errors appear as missing names before any runtime flow starts.
+
+**Changed anchors:** configuration, export, or documentation change
+
+??? note "File diff: src/minis3/__init__.py"
+    ```diff
+    diff --git a/src/minis3/__init__.py b/src/minis3/__init__.py
+    index 1a69ac7..0c23aea 100644
+    --- a/src/minis3/__init__.py
+    +++ b/src/minis3/__init__.py
+    @@ -1,43 +1,9 @@
+     """Public API for the MiniS3 teaching implementation."""
+    -
+    -from .errors import (
+    -    BucketAlreadyExists,
+    -    BucketNotEmpty,
+    -    InvalidContinuationToken,
+    -    MiniS3Error,
+    -    NoSuchBucket,
+    -    NoSuchKey,
+    -    NoSuchVersion,
+    -)
+    +from .errors import BucketAlreadyExists, BucketNotEmpty, InvalidContinuationToken, MiniS3Error, NoSuchBucket, NoSuchKey, NoSuchVersion
+     from .bucket import SequenceCounter, VersioningState
+    -from .listing import (
+    -    ListedObject,
+    -    ListedVersion,
+    -    ListObjectsResult,
+    -    ListObjectVersionsResult,
+    -)
+     from .model import DeleteMarker, ObjectRecord, Version, content_etag
+     from .store import MiniS3
+     from .storage import InjectedCrash
+    -
+    -__all__ = [
+    -    "BucketAlreadyExists",
+    -    "BucketNotEmpty",
+    -    "DeleteMarker",
+    -    "ListedObject",
+    -    "ListedVersion",
+    -    "ListObjectsResult",
+    -    "ListObjectVersionsResult",
+    -    "MiniS3",
+    -    "InvalidContinuationToken",
+    -    "InjectedCrash",
+    -    "MiniS3Error",
+    -    "NoSuchBucket",
+    -    "NoSuchKey",
+    -    "NoSuchVersion",
+    -    "ObjectRecord",
+    -    "SequenceCounter",
+    -    "Version",
+    -    "VersioningState",
+    -    "content_etag",
+    -]
+    +from .listing import ListedObject, ListedVersion, ListObjectsResult, ListObjectVersionsResult
+    +from .errors import EntityTooSmall, InvalidPart, InvalidPartOrder, NoSuchUpload
+    +from .multipart import MIN_PART_SIZE, MultipartPart, MultipartUpload
+    ```
+
+#### `tests/test_multipart.py`
+
+Executable proof of the stage behavior.
+
+Calls the learner-visible boundary and records the expected state or failure; start here only when verifying the mechanism.
+
+**Changed anchors:** `test_upload_identity_and_part_number_are_validated`
+
+??? note "File diff: tests/test_multipart.py"
+    ```diff
     diff --git a/tests/test_multipart.py b/tests/test_multipart.py
     new file mode 100644
     index 0000000..0b61034
@@ -621,3 +675,33 @@ After finishing, use `git checkout stage-10` to compare your result.
     +    with pytest.raises(ValueError):
     +        store.upload_part("b", "right", upload.upload_id, 10_001, b"x")
     ```
+
+### Self-check
+
+1. Where is this stage's visibility or state transition owned?
+
+    ??? note "Answer"
+        An unfinished upload lives outside the visible object manifest.
+
+2. Which test would fail first if the new boundary were bypassed?
+
+    ??? note "Answer"
+        Read `tests.txt`, identify the narrowest new node, and name the public call it exercises.
+
+### Pass command
+
+`uv run pytest -q $(cat journey/stages/10-multipart-staging/tests.txt)`
+
+### The real S3 lesson
+
+An unfinished upload lives outside the visible object manifest.
+
+### Textbook
+
+[Chapter 6](https://github.com/system-in-miniature/mini-s3/blob/main/docs/tutorial/06-multipart.md)
+
+[Compare this stage on GitHub](https://github.com/system-in-miniature/mini-s3/compare/stage-09...stage-10)
+
+After finishing, use `git checkout stage-10` to compare your result.
+
+[Complete reference patch / 完整参考补丁](https://github.com/system-in-miniature/mini-s3/blob/main/journey/stages/10-multipart-staging/stage.patch)

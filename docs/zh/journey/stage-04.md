@@ -15,47 +15,30 @@
 - `tests/test_storage.py`
 - `tests/test_versioning.py`
 
-### 自查
+### 机制走读
 
-1. 本阶段的可见性或状态迁移由谁负责？
+#### 所有权与数据流
 
-    ??? note "答案"
-        强一致性来自单一变更锁，以及先发布再替换候选状态。
+`MiniS3` 是应用边界：加锁、解析 Bucket、把状态迁移委托给 `Bucket`、持久化成功变更，并返回协议无关的值。
 
-2. 如果绕过新边界，哪个测试会最先失败？
+#### 失败与排查
 
-    ??? note "答案"
-        阅读 `tests.txt`，找出最窄的新节点，并说出它覆盖的公开调用。
+沿一次公开调用追踪 `_bucket`、聚合操作和 `DiskStorage.persist_bucket`；若内存结果与重启结果不同，缺口就在变更与发布之间。
 
-### 通关命令
+### 逐文件 Diff 走读
 
-`uv run pytest -q $(cat journey/stages/04-object-service/tests.txt)`
+按运行时职责阅读，而不是按补丁存储顺序阅读。每个代码块都直接来自 canonical `stage.patch`。
 
-### 对应真实 S3 的一课
+#### `src/minis3/store.py`
 
-强一致性来自单一变更锁，以及先发布再替换候选状态。
+协调领域逻辑与持久化的应用服务。
 
-### 教材
+接收公开调用，拥有加锁与编排，再委托给领域、投影和存储边界。
 
-[第 2 章](https://github.com/system-in-miniature/mini-s3/blob/main/docs/zh/tutorial/02-objects-etag.md)
+**变化锚点:** `MiniS3`, `__init__`, `create_bucket`, `delete_bucket`, `set_bucket_versioning`, `put_object`, `get_object`, `head_object`, `delete_object`, `_bucket`
 
-[在 GitHub 查看阶段差异](https://github.com/system-in-miniature/mini-s3/compare/stage-03...stage-04)
-
-完成后可运行 `git checkout stage-04` 对照你的结果。
-
-??? note "先做后看：stage.patch"
+??? note "文件差异：src/minis3/store.py"
     ```diff
-    diff --git a/src/minis3/__init__.py b/src/minis3/__init__.py
-    index 8a3d1c7..11378e1 100644
-    --- a/src/minis3/__init__.py
-    +++ b/src/minis3/__init__.py
-    @@ -1,3 +1,6 @@
-     """Public API for the MiniS3 teaching implementation."""
-     from .errors import BucketAlreadyExists, BucketNotEmpty, InvalidContinuationToken, MiniS3Error, NoSuchBucket, NoSuchKey, NoSuchVersion
-    +from .bucket import SequenceCounter, VersioningState
-     from .model import DeleteMarker, ObjectRecord, Version, content_etag
-    +from .store import MiniS3
-    +from .storage import InjectedCrash
     diff --git a/src/minis3/store.py b/src/minis3/store.py
     new file mode 100644
     index 0000000..5d418b8
@@ -166,6 +149,41 @@
     +        except KeyError as exc:
     +            raise NoSuchBucket(name) from exc
     +
+    ```
+
+#### `src/minis3/__init__.py`
+
+受支持的包级公开接口。
+
+由用户导入触达；接线错误会在运行时流程开始前表现为名称缺失。
+
+**变化锚点:** 配置、导出或文档变化
+
+??? note "文件差异：src/minis3/__init__.py"
+    ```diff
+    diff --git a/src/minis3/__init__.py b/src/minis3/__init__.py
+    index 8a3d1c7..11378e1 100644
+    --- a/src/minis3/__init__.py
+    +++ b/src/minis3/__init__.py
+    @@ -1,3 +1,6 @@
+     """Public API for the MiniS3 teaching implementation."""
+     from .errors import BucketAlreadyExists, BucketNotEmpty, InvalidContinuationToken, MiniS3Error, NoSuchBucket, NoSuchKey, NoSuchVersion
+    +from .bucket import SequenceCounter, VersioningState
+     from .model import DeleteMarker, ObjectRecord, Version, content_etag
+    +from .store import MiniS3
+    +from .storage import InjectedCrash
+    ```
+
+#### `tests/test_storage.py`
+
+本阶段行为的可执行证明。
+
+调用学习者可见边界并记录预期状态或失败；验证机制时再从这里进入。
+
+**变化锚点:** `CrashOnce`, `__init__`, `__call__`, `test_restart_restores_versions_bodies_and_counter`
+
+??? note "文件差异：tests/test_storage.py"
+    ```diff
     diff --git a/tests/test_storage.py b/tests/test_storage.py
     new file mode 100644
     index 0000000..c96a7a6
@@ -204,6 +222,18 @@
     +
     +    assert reopened.get_object("b", "k", version_id=first.version_id).body == b"one"
     +    assert second.version_id != first.version_id
+    ```
+
+#### `tests/test_versioning.py`
+
+本阶段行为的可执行证明。
+
+调用学习者可见边界并记录预期状态或失败；验证机制时再从这里进入。
+
+**变化锚点:** `test_versioning_state_machine_exhaustive`, `test_unversioned_delete_defensively_preserves_named_history`, `test_enabled_puts_stack_and_delete_marker_hides_history`, `test_specific_delete_removes_only_addressed_version`, `test_latest_marker_is_404_even_when_older_data_exists`, `test_nonempty_bucket_cannot_be_deleted`
+
+??? note "文件差异：tests/test_versioning.py"
+    ```diff
     diff --git a/tests/test_versioning.py b/tests/test_versioning.py
     new file mode 100644
     index 0000000..389e45d
@@ -320,3 +350,33 @@
     +    with pytest.raises(BucketNotEmpty):
     +        store.delete_bucket("b")
     ```
+
+### 自查
+
+1. 本阶段的可见性或状态迁移由谁负责？
+
+    ??? note "答案"
+        强一致性来自单一变更锁，以及先发布再替换候选状态。
+
+2. 如果绕过新边界，哪个测试会最先失败？
+
+    ??? note "答案"
+        阅读 `tests.txt`，找出最窄的新节点，并说出它覆盖的公开调用。
+
+### 通关命令
+
+`uv run pytest -q $(cat journey/stages/04-object-service/tests.txt)`
+
+### 对应真实 S3 的一课
+
+强一致性来自单一变更锁，以及先发布再替换候选状态。
+
+### 教材
+
+[第 2 章](https://github.com/system-in-miniature/mini-s3/blob/main/docs/zh/tutorial/02-objects-etag.md)
+
+[在 GitHub 查看阶段差异](https://github.com/system-in-miniature/mini-s3/compare/stage-03...stage-04)
+
+完成后可运行 `git checkout stage-04` 对照你的结果。
+
+[Complete reference patch / 完整参考补丁](https://github.com/system-in-miniature/mini-s3/blob/main/journey/stages/04-object-service/stage.patch)

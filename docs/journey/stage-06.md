@@ -15,86 +15,30 @@ Starting from stage-05, Implement `list_objects(...)`, token encode/decode, and 
 - `src/minis3/store.py`
 - `tests/test_listing.py`
 
-### Self-check
+### Mechanism walkthrough
 
-1. Where is this stage's visibility or state transition owned?
+#### Ownership and flow
 
-    ??? note "Answer"
-        S3 directories are a delimiter projection; contents and prefixes share one page budget.
+`list_objects` sorts visible flat keys, derives common prefixes at read time, counts prefixes and objects in one page budget, and binds the opaque cursor to the original query.
 
-2. Which test would fail first if the new boundary were bypassed?
+#### Failure and debugging
 
-    ??? note "Answer"
-        Read `tests.txt`, identify the narrowest new node, and name the public call it exercises.
+Log the sorted candidate stream before pagination. Missing keys usually come from marker filtering; duplicate/shifted pages come from cursor or prefix accounting.
 
-### Pass command
+### File-by-file diff walkthrough
 
-`uv run pytest -q $(cat journey/stages/06-directory-illusion/tests.txt)`
+Read by runtime responsibility, not patch storage order. Every block comes directly from the canonical `stage.patch`.
 
-### The real S3 lesson
+#### `src/minis3/listing.py`
 
-S3 directories are a delimiter projection; contents and prefixes share one page budget.
+Read-side projection and pagination logic.
 
-### Textbook
+Called by the service read path; converts stored histories into sorted, paginated response values without mutation.
 
-[Chapter 4](https://github.com/system-in-miniature/mini-s3/blob/main/docs/tutorial/04-listing.md)
+**Changed anchors:** `ListedObject`, `ListObjectsResult`, `is_truncated`, `_encode_token`, `_decode_token`, `list_objects`, `list_object_versions`
 
-[Compare this stage on GitHub](https://github.com/system-in-miniature/mini-s3/compare/stage-05...stage-06)
-
-After finishing, use `git checkout stage-06` to compare your result.
-
-??? note "Try first, then peek: stage.patch"
+??? note "File diff: src/minis3/listing.py"
     ```diff
-    diff --git a/src/minis3/__init__.py b/src/minis3/__init__.py
-    index f9c1adf..1a69ac7 100644
-    --- a/src/minis3/__init__.py
-    +++ b/src/minis3/__init__.py
-    @@ -1,7 +1,43 @@
-     """Public API for the MiniS3 teaching implementation."""
-    -from .errors import BucketAlreadyExists, BucketNotEmpty, InvalidContinuationToken, MiniS3Error, NoSuchBucket, NoSuchKey, NoSuchVersion
-    +
-    +from .errors import (
-    +    BucketAlreadyExists,
-    +    BucketNotEmpty,
-    +    InvalidContinuationToken,
-    +    MiniS3Error,
-    +    NoSuchBucket,
-    +    NoSuchKey,
-    +    NoSuchVersion,
-    +)
-     from .bucket import SequenceCounter, VersioningState
-    +from .listing import (
-    +    ListedObject,
-    +    ListedVersion,
-    +    ListObjectsResult,
-    +    ListObjectVersionsResult,
-    +)
-     from .model import DeleteMarker, ObjectRecord, Version, content_etag
-     from .store import MiniS3
-     from .storage import InjectedCrash
-    -from .listing import ListedVersion, ListObjectVersionsResult
-    +
-    +__all__ = [
-    +    "BucketAlreadyExists",
-    +    "BucketNotEmpty",
-    +    "DeleteMarker",
-    +    "ListedObject",
-    +    "ListedVersion",
-    +    "ListObjectsResult",
-    +    "ListObjectVersionsResult",
-    +    "MiniS3",
-    +    "InvalidContinuationToken",
-    +    "InjectedCrash",
-    +    "MiniS3Error",
-    +    "NoSuchBucket",
-    +    "NoSuchKey",
-    +    "NoSuchVersion",
-    +    "ObjectRecord",
-    +    "SequenceCounter",
-    +    "Version",
-    +    "VersioningState",
-    +    "content_etag",
-    +]
     diff --git a/src/minis3/listing.py b/src/minis3/listing.py
     index 3c40e0d..c6e95b3 100644
     --- a/src/minis3/listing.py
@@ -102,15 +46,15 @@ After finishing, use `git checkout stage-06` to compare your result.
     @@ -1,13 +1,43 @@
     -"""Version-history projection over MiniS3 records."""
     +"""Strongly consistent projections over MiniS3's flat key map.
-     
+
     +``delimiter`` does not traverse directories. It partitions matching strings:
     +the first delimiter after ``prefix`` turns the matching key into a
     +``common_prefix``; otherwise the key is returned as content. This projection
     +is the entire "directory illusion."
     +"""
-     
+
      from __future__ import annotations
-     
+
     -
     +from base64 import urlsafe_b64decode, urlsafe_b64encode
      from dataclasses import dataclass
@@ -133,23 +77,23 @@ After finishing, use `git checkout stage-06` to compare your result.
     +@dataclass(frozen=True, slots=True)
     +class ListObjectsResult:
     +    """One page of current objects and derived common prefixes."""
-     
+
     +    contents: tuple[ListedObject, ...]
     +    common_prefixes: tuple[str, ...]
     +    key_count: int
     +    next_token: str | None
-     
+
     -from .model import ObjectRecord, Version
     +    @property
     +    def is_truncated(self) -> bool:
     +        return self.next_token is not None
-     
-     
+
+
      @dataclass(frozen=True, slots=True)
     @@ -29,6 +59,86 @@ class ListObjectVersionsResult:
          versions: tuple[ListedVersion, ...]
-     
-     
+
+
     +def _encode_token(offset: int, prefix: str, delimiter: str | None) -> str:
     +    payload = json.dumps(
     +        {"o": offset, "p": prefix, "d": delimiter},
@@ -238,6 +182,18 @@ After finishing, use `git checkout stage-06` to compare your result.
                  )
          return ListObjectVersionsResult(tuple(result))
     +
+    ```
+
+#### `src/minis3/store.py`
+
+Application service coordinating domain and persistence.
+
+Receives public calls, owns locking and orchestration, then delegates to domain, projection, and storage boundaries.
+
+**Changed anchors:** `list_objects`
+
+??? note "File diff: src/minis3/store.py"
+    ```diff
     diff --git a/src/minis3/store.py b/src/minis3/store.py
     index 23ddd8e..7c82b41 100644
     --- a/src/minis3/store.py
@@ -250,11 +206,11 @@ After finishing, use `git checkout stage-06` to compare your result.
     +server. A future thin protocol adapter can translate these domain values and
     +errors without taking ownership of storage semantics.
     +"""
-     
+
      from __future__ import annotations
-     
+
     @@ -9,7 +14,12 @@ from threading import RLock
-     
+
      from .bucket import Bucket, SequenceCounter, VersioningState
      from .errors import BucketAlreadyExists, BucketNotEmpty, NoSuchBucket
     -from .listing import ListObjectVersionsResult, list_object_versions
@@ -266,11 +222,11 @@ After finishing, use `git checkout stage-06` to compare your result.
     +)
      from .model import ObjectVersion, Version
      from .storage import DiskStorage
-     
+
     @@ -33,7 +43,6 @@ class MiniS3:
                  ensure(maximum_sequence + 1)
              self._lock = RLock()
-     
+
     -
          def create_bucket(self, name: str) -> None:
              with self._lock:
@@ -278,7 +234,7 @@ After finishing, use `git checkout stage-06` to compare your result.
     @@ -42,7 +51,6 @@ class MiniS3:
                  self._storage.create_bucket(bucket)
                  self._buckets[name] = bucket
-     
+
     -
          def delete_bucket(self, name: str) -> None:
              with self._lock:
@@ -286,7 +242,7 @@ After finishing, use `git checkout stage-06` to compare your result.
     @@ -51,7 +59,6 @@ class MiniS3:
                  self._storage.delete_bucket(name)
                  del self._buckets[name]
-     
+
     -
          def set_bucket_versioning(
              self, name: str, state: VersioningState | str
@@ -294,7 +250,7 @@ After finishing, use `git checkout stage-06` to compare your result.
     @@ -61,7 +68,6 @@ class MiniS3:
                  self._storage.persist_bucket(candidate)
                  self._buckets[name] = candidate
-     
+
     -
          def put_object(self, bucket: str, key: str, body: bytes) -> Version:
              with self._lock:
@@ -302,22 +258,22 @@ After finishing, use `git checkout stage-06` to compare your result.
     @@ -70,14 +76,12 @@ class MiniS3:
                  self._buckets[bucket] = candidate
                  return result
-     
+
     -
          def get_object(
              self, bucket: str, key: str, *, version_id: str | None = None
          ) -> Version:
              with self._lock:
                  return self._bucket(bucket).get(key, version_id)
-     
+
     -
          def head_object(
              self, bucket: str, key: str, *, version_id: str | None = None
          ) -> Version:
     @@ -85,7 +89,6 @@ class MiniS3:
-     
+
              return self.get_object(bucket, key, version_id=version_id)
-     
+
     -
          def delete_object(
              self, bucket: str, key: str, *, version_id: str | None = None
@@ -325,7 +281,7 @@ After finishing, use `git checkout stage-06` to compare your result.
     @@ -96,6 +99,23 @@ class MiniS3:
                  self._buckets[bucket] = candidate
                  return result
-     
+
     +    def list_objects(
     +        self,
     +        bucket: str,
@@ -343,13 +299,13 @@ After finishing, use `git checkout stage-06` to compare your result.
     +                max_keys=max_keys,
     +                continuation_token=continuation_token,
     +            )
-     
+
          def list_object_versions(
              self, bucket: str, *, prefix: str = ""
     @@ -103,10 +123,8 @@ class MiniS3:
              with self._lock:
                  return list_object_versions(self._bucket(bucket).records, prefix=prefix)
-     
+
     -
          def _bucket(self, name: str) -> Bucket:
              try:
@@ -357,6 +313,80 @@ After finishing, use `git checkout stage-06` to compare your result.
              except KeyError as exc:
                  raise NoSuchBucket(name) from exc
     -
+    ```
+
+#### `src/minis3/__init__.py`
+
+Supported public package surface.
+
+Reached by user imports; wiring errors appear as missing names before any runtime flow starts.
+
+**Changed anchors:** configuration, export, or documentation change
+
+??? note "File diff: src/minis3/__init__.py"
+    ```diff
+    diff --git a/src/minis3/__init__.py b/src/minis3/__init__.py
+    index f9c1adf..1a69ac7 100644
+    --- a/src/minis3/__init__.py
+    +++ b/src/minis3/__init__.py
+    @@ -1,7 +1,43 @@
+     """Public API for the MiniS3 teaching implementation."""
+    -from .errors import BucketAlreadyExists, BucketNotEmpty, InvalidContinuationToken, MiniS3Error, NoSuchBucket, NoSuchKey, NoSuchVersion
+    +
+    +from .errors import (
+    +    BucketAlreadyExists,
+    +    BucketNotEmpty,
+    +    InvalidContinuationToken,
+    +    MiniS3Error,
+    +    NoSuchBucket,
+    +    NoSuchKey,
+    +    NoSuchVersion,
+    +)
+     from .bucket import SequenceCounter, VersioningState
+    +from .listing import (
+    +    ListedObject,
+    +    ListedVersion,
+    +    ListObjectsResult,
+    +    ListObjectVersionsResult,
+    +)
+     from .model import DeleteMarker, ObjectRecord, Version, content_etag
+     from .store import MiniS3
+     from .storage import InjectedCrash
+    -from .listing import ListedVersion, ListObjectVersionsResult
+    +
+    +__all__ = [
+    +    "BucketAlreadyExists",
+    +    "BucketNotEmpty",
+    +    "DeleteMarker",
+    +    "ListedObject",
+    +    "ListedVersion",
+    +    "ListObjectsResult",
+    +    "ListObjectVersionsResult",
+    +    "MiniS3",
+    +    "InvalidContinuationToken",
+    +    "InjectedCrash",
+    +    "MiniS3Error",
+    +    "NoSuchBucket",
+    +    "NoSuchKey",
+    +    "NoSuchVersion",
+    +    "ObjectRecord",
+    +    "SequenceCounter",
+    +    "Version",
+    +    "VersioningState",
+    +    "content_etag",
+    +]
+    ```
+
+#### `tests/test_listing.py`
+
+Executable proof of the stage behavior.
+
+Calls the learner-visible boundary and records the expected state or failure; start here only when verifying the mechanism.
+
+**Changed anchors:** `_populated_store`, `test_delimiter_derives_common_prefixes_from_flat_keys`, `test_pagination_counts_contents_and_prefixes_and_token_is_opaque`, `test_current_listing_hides_key_behind_delete_marker`, `test_version_listing_flattens_versions_and_marks_latest`, `test_malformed_or_query_mismatched_tokens_are_rejected`
+
+??? note "File diff: tests/test_listing.py"
+    ```diff
     diff --git a/tests/test_listing.py b/tests/test_listing.py
     new file mode 100644
     index 0000000..741dacb
@@ -457,3 +487,33 @@ After finishing, use `git checkout stage-06` to compare your result.
     +            "b", prefix="different", continuation_token=first.next_token
     +        )
     ```
+
+### Self-check
+
+1. Where is this stage's visibility or state transition owned?
+
+    ??? note "Answer"
+        S3 directories are a delimiter projection; contents and prefixes share one page budget.
+
+2. Which test would fail first if the new boundary were bypassed?
+
+    ??? note "Answer"
+        Read `tests.txt`, identify the narrowest new node, and name the public call it exercises.
+
+### Pass command
+
+`uv run pytest -q $(cat journey/stages/06-directory-illusion/tests.txt)`
+
+### The real S3 lesson
+
+S3 directories are a delimiter projection; contents and prefixes share one page budget.
+
+### Textbook
+
+[Chapter 4](https://github.com/system-in-miniature/mini-s3/blob/main/docs/tutorial/04-listing.md)
+
+[Compare this stage on GitHub](https://github.com/system-in-miniature/mini-s3/compare/stage-05...stage-06)
+
+After finishing, use `git checkout stage-06` to compare your result.
+
+[Complete reference patch / 完整参考补丁](https://github.com/system-in-miniature/mini-s3/blob/main/journey/stages/06-directory-illusion/stage.patch)

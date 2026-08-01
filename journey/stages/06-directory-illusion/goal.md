@@ -19,6 +19,16 @@ Starting from stage-05, Implement `list_objects(...)`, token encode/decode, and 
 - `src/minis3/store.py`
 - `tests/test_listing.py`
 
+### Mechanism walkthrough
+
+#### Ownership and flow
+
+`list_objects` sorts visible flat keys, derives common prefixes at read time, counts prefixes and objects in one page budget, and binds the opaque cursor to the original query.
+
+#### Failure and debugging
+
+Log the sorted candidate stream before pagination. Missing keys usually come from marker filtering; duplicate/shifted pages come from cursor or prefix accounting.
+
 ### Self-check
 
 1. Where is this stage's visibility or state transition owned?
@@ -59,6 +69,16 @@ S3 directories are a delimiter projection; contents and prefixes share one page 
 - `src/minis3/listing.py`
 - `src/minis3/store.py`
 - `tests/test_listing.py`
+
+### 机制走读
+
+#### 所有权与数据流
+
+`list_objects` 排序可见扁平 Key，读取时推导公共前缀，在同一页预算中统计前缀与对象，并把不透明游标绑定到原查询。
+
+#### 失败与排查
+
+分页前先观察排序后的候选流；Key 缺失通常来自删除标记过滤，页面重复或偏移通常来自游标或前缀计数。
 
 ### 自查
 

@@ -15,86 +15,30 @@
 - `src/minis3/store.py`
 - `tests/test_listing.py`
 
-### 自查
+### 机制走读
 
-1. 本阶段的可见性或状态迁移由谁负责？
+#### 所有权与数据流
 
-    ??? note "答案"
-        S3 目录是 delimiter 投影；对象与公共前缀共享同一页额度。
+`list_objects` 排序可见扁平 Key，读取时推导公共前缀，在同一页预算中统计前缀与对象，并把不透明游标绑定到原查询。
 
-2. 如果绕过新边界，哪个测试会最先失败？
+#### 失败与排查
 
-    ??? note "答案"
-        阅读 `tests.txt`，找出最窄的新节点，并说出它覆盖的公开调用。
+分页前先观察排序后的候选流；Key 缺失通常来自删除标记过滤，页面重复或偏移通常来自游标或前缀计数。
 
-### 通关命令
+### 逐文件 Diff 走读
 
-`uv run pytest -q $(cat journey/stages/06-directory-illusion/tests.txt)`
+按运行时职责阅读，而不是按补丁存储顺序阅读。每个代码块都直接来自 canonical `stage.patch`。
 
-### 对应真实 S3 的一课
+#### `src/minis3/listing.py`
 
-S3 目录是 delimiter 投影；对象与公共前缀共享同一页额度。
+读取侧投影与分页逻辑。
 
-### 教材
+由服务读取路径调用；把存储历史转换成排序、分页的响应值，不修改状态。
 
-[第 4 章](https://github.com/system-in-miniature/mini-s3/blob/main/docs/zh/tutorial/04-listing.md)
+**变化锚点:** `ListedObject`, `ListObjectsResult`, `is_truncated`, `_encode_token`, `_decode_token`, `list_objects`, `list_object_versions`
 
-[在 GitHub 查看阶段差异](https://github.com/system-in-miniature/mini-s3/compare/stage-05...stage-06)
-
-完成后可运行 `git checkout stage-06` 对照你的结果。
-
-??? note "先做后看：stage.patch"
+??? note "文件差异：src/minis3/listing.py"
     ```diff
-    diff --git a/src/minis3/__init__.py b/src/minis3/__init__.py
-    index f9c1adf..1a69ac7 100644
-    --- a/src/minis3/__init__.py
-    +++ b/src/minis3/__init__.py
-    @@ -1,7 +1,43 @@
-     """Public API for the MiniS3 teaching implementation."""
-    -from .errors import BucketAlreadyExists, BucketNotEmpty, InvalidContinuationToken, MiniS3Error, NoSuchBucket, NoSuchKey, NoSuchVersion
-    +
-    +from .errors import (
-    +    BucketAlreadyExists,
-    +    BucketNotEmpty,
-    +    InvalidContinuationToken,
-    +    MiniS3Error,
-    +    NoSuchBucket,
-    +    NoSuchKey,
-    +    NoSuchVersion,
-    +)
-     from .bucket import SequenceCounter, VersioningState
-    +from .listing import (
-    +    ListedObject,
-    +    ListedVersion,
-    +    ListObjectsResult,
-    +    ListObjectVersionsResult,
-    +)
-     from .model import DeleteMarker, ObjectRecord, Version, content_etag
-     from .store import MiniS3
-     from .storage import InjectedCrash
-    -from .listing import ListedVersion, ListObjectVersionsResult
-    +
-    +__all__ = [
-    +    "BucketAlreadyExists",
-    +    "BucketNotEmpty",
-    +    "DeleteMarker",
-    +    "ListedObject",
-    +    "ListedVersion",
-    +    "ListObjectsResult",
-    +    "ListObjectVersionsResult",
-    +    "MiniS3",
-    +    "InvalidContinuationToken",
-    +    "InjectedCrash",
-    +    "MiniS3Error",
-    +    "NoSuchBucket",
-    +    "NoSuchKey",
-    +    "NoSuchVersion",
-    +    "ObjectRecord",
-    +    "SequenceCounter",
-    +    "Version",
-    +    "VersioningState",
-    +    "content_etag",
-    +]
     diff --git a/src/minis3/listing.py b/src/minis3/listing.py
     index 3c40e0d..c6e95b3 100644
     --- a/src/minis3/listing.py
@@ -102,15 +46,15 @@ S3 目录是 delimiter 投影；对象与公共前缀共享同一页额度。
     @@ -1,13 +1,43 @@
     -"""Version-history projection over MiniS3 records."""
     +"""Strongly consistent projections over MiniS3's flat key map.
-     
+
     +``delimiter`` does not traverse directories. It partitions matching strings:
     +the first delimiter after ``prefix`` turns the matching key into a
     +``common_prefix``; otherwise the key is returned as content. This projection
     +is the entire "directory illusion."
     +"""
-     
+
      from __future__ import annotations
-     
+
     -
     +from base64 import urlsafe_b64decode, urlsafe_b64encode
      from dataclasses import dataclass
@@ -133,23 +77,23 @@ S3 目录是 delimiter 投影；对象与公共前缀共享同一页额度。
     +@dataclass(frozen=True, slots=True)
     +class ListObjectsResult:
     +    """One page of current objects and derived common prefixes."""
-     
+
     +    contents: tuple[ListedObject, ...]
     +    common_prefixes: tuple[str, ...]
     +    key_count: int
     +    next_token: str | None
-     
+
     -from .model import ObjectRecord, Version
     +    @property
     +    def is_truncated(self) -> bool:
     +        return self.next_token is not None
-     
-     
+
+
      @dataclass(frozen=True, slots=True)
     @@ -29,6 +59,86 @@ class ListObjectVersionsResult:
          versions: tuple[ListedVersion, ...]
-     
-     
+
+
     +def _encode_token(offset: int, prefix: str, delimiter: str | None) -> str:
     +    payload = json.dumps(
     +        {"o": offset, "p": prefix, "d": delimiter},
@@ -238,6 +182,18 @@ S3 目录是 delimiter 投影；对象与公共前缀共享同一页额度。
                  )
          return ListObjectVersionsResult(tuple(result))
     +
+    ```
+
+#### `src/minis3/store.py`
+
+协调领域逻辑与持久化的应用服务。
+
+接收公开调用，拥有加锁与编排，再委托给领域、投影和存储边界。
+
+**变化锚点:** `list_objects`
+
+??? note "文件差异：src/minis3/store.py"
+    ```diff
     diff --git a/src/minis3/store.py b/src/minis3/store.py
     index 23ddd8e..7c82b41 100644
     --- a/src/minis3/store.py
@@ -250,11 +206,11 @@ S3 目录是 delimiter 投影；对象与公共前缀共享同一页额度。
     +server. A future thin protocol adapter can translate these domain values and
     +errors without taking ownership of storage semantics.
     +"""
-     
+
      from __future__ import annotations
-     
+
     @@ -9,7 +14,12 @@ from threading import RLock
-     
+
      from .bucket import Bucket, SequenceCounter, VersioningState
      from .errors import BucketAlreadyExists, BucketNotEmpty, NoSuchBucket
     -from .listing import ListObjectVersionsResult, list_object_versions
@@ -266,11 +222,11 @@ S3 目录是 delimiter 投影；对象与公共前缀共享同一页额度。
     +)
      from .model import ObjectVersion, Version
      from .storage import DiskStorage
-     
+
     @@ -33,7 +43,6 @@ class MiniS3:
                  ensure(maximum_sequence + 1)
              self._lock = RLock()
-     
+
     -
          def create_bucket(self, name: str) -> None:
              with self._lock:
@@ -278,7 +234,7 @@ S3 目录是 delimiter 投影；对象与公共前缀共享同一页额度。
     @@ -42,7 +51,6 @@ class MiniS3:
                  self._storage.create_bucket(bucket)
                  self._buckets[name] = bucket
-     
+
     -
          def delete_bucket(self, name: str) -> None:
              with self._lock:
@@ -286,7 +242,7 @@ S3 目录是 delimiter 投影；对象与公共前缀共享同一页额度。
     @@ -51,7 +59,6 @@ class MiniS3:
                  self._storage.delete_bucket(name)
                  del self._buckets[name]
-     
+
     -
          def set_bucket_versioning(
              self, name: str, state: VersioningState | str
@@ -294,7 +250,7 @@ S3 目录是 delimiter 投影；对象与公共前缀共享同一页额度。
     @@ -61,7 +68,6 @@ class MiniS3:
                  self._storage.persist_bucket(candidate)
                  self._buckets[name] = candidate
-     
+
     -
          def put_object(self, bucket: str, key: str, body: bytes) -> Version:
              with self._lock:
@@ -302,22 +258,22 @@ S3 目录是 delimiter 投影；对象与公共前缀共享同一页额度。
     @@ -70,14 +76,12 @@ class MiniS3:
                  self._buckets[bucket] = candidate
                  return result
-     
+
     -
          def get_object(
              self, bucket: str, key: str, *, version_id: str | None = None
          ) -> Version:
              with self._lock:
                  return self._bucket(bucket).get(key, version_id)
-     
+
     -
          def head_object(
              self, bucket: str, key: str, *, version_id: str | None = None
          ) -> Version:
     @@ -85,7 +89,6 @@ class MiniS3:
-     
+
              return self.get_object(bucket, key, version_id=version_id)
-     
+
     -
          def delete_object(
              self, bucket: str, key: str, *, version_id: str | None = None
@@ -325,7 +281,7 @@ S3 目录是 delimiter 投影；对象与公共前缀共享同一页额度。
     @@ -96,6 +99,23 @@ class MiniS3:
                  self._buckets[bucket] = candidate
                  return result
-     
+
     +    def list_objects(
     +        self,
     +        bucket: str,
@@ -343,13 +299,13 @@ S3 目录是 delimiter 投影；对象与公共前缀共享同一页额度。
     +                max_keys=max_keys,
     +                continuation_token=continuation_token,
     +            )
-     
+
          def list_object_versions(
              self, bucket: str, *, prefix: str = ""
     @@ -103,10 +123,8 @@ class MiniS3:
              with self._lock:
                  return list_object_versions(self._bucket(bucket).records, prefix=prefix)
-     
+
     -
          def _bucket(self, name: str) -> Bucket:
              try:
@@ -357,6 +313,80 @@ S3 目录是 delimiter 投影；对象与公共前缀共享同一页额度。
              except KeyError as exc:
                  raise NoSuchBucket(name) from exc
     -
+    ```
+
+#### `src/minis3/__init__.py`
+
+受支持的包级公开接口。
+
+由用户导入触达；接线错误会在运行时流程开始前表现为名称缺失。
+
+**变化锚点:** 配置、导出或文档变化
+
+??? note "文件差异：src/minis3/__init__.py"
+    ```diff
+    diff --git a/src/minis3/__init__.py b/src/minis3/__init__.py
+    index f9c1adf..1a69ac7 100644
+    --- a/src/minis3/__init__.py
+    +++ b/src/minis3/__init__.py
+    @@ -1,7 +1,43 @@
+     """Public API for the MiniS3 teaching implementation."""
+    -from .errors import BucketAlreadyExists, BucketNotEmpty, InvalidContinuationToken, MiniS3Error, NoSuchBucket, NoSuchKey, NoSuchVersion
+    +
+    +from .errors import (
+    +    BucketAlreadyExists,
+    +    BucketNotEmpty,
+    +    InvalidContinuationToken,
+    +    MiniS3Error,
+    +    NoSuchBucket,
+    +    NoSuchKey,
+    +    NoSuchVersion,
+    +)
+     from .bucket import SequenceCounter, VersioningState
+    +from .listing import (
+    +    ListedObject,
+    +    ListedVersion,
+    +    ListObjectsResult,
+    +    ListObjectVersionsResult,
+    +)
+     from .model import DeleteMarker, ObjectRecord, Version, content_etag
+     from .store import MiniS3
+     from .storage import InjectedCrash
+    -from .listing import ListedVersion, ListObjectVersionsResult
+    +
+    +__all__ = [
+    +    "BucketAlreadyExists",
+    +    "BucketNotEmpty",
+    +    "DeleteMarker",
+    +    "ListedObject",
+    +    "ListedVersion",
+    +    "ListObjectsResult",
+    +    "ListObjectVersionsResult",
+    +    "MiniS3",
+    +    "InvalidContinuationToken",
+    +    "InjectedCrash",
+    +    "MiniS3Error",
+    +    "NoSuchBucket",
+    +    "NoSuchKey",
+    +    "NoSuchVersion",
+    +    "ObjectRecord",
+    +    "SequenceCounter",
+    +    "Version",
+    +    "VersioningState",
+    +    "content_etag",
+    +]
+    ```
+
+#### `tests/test_listing.py`
+
+本阶段行为的可执行证明。
+
+调用学习者可见边界并记录预期状态或失败；验证机制时再从这里进入。
+
+**变化锚点:** `_populated_store`, `test_delimiter_derives_common_prefixes_from_flat_keys`, `test_pagination_counts_contents_and_prefixes_and_token_is_opaque`, `test_current_listing_hides_key_behind_delete_marker`, `test_version_listing_flattens_versions_and_marks_latest`, `test_malformed_or_query_mismatched_tokens_are_rejected`
+
+??? note "文件差异：tests/test_listing.py"
+    ```diff
     diff --git a/tests/test_listing.py b/tests/test_listing.py
     new file mode 100644
     index 0000000..741dacb
@@ -457,3 +487,33 @@ S3 目录是 delimiter 投影；对象与公共前缀共享同一页额度。
     +            "b", prefix="different", continuation_token=first.next_token
     +        )
     ```
+
+### 自查
+
+1. 本阶段的可见性或状态迁移由谁负责？
+
+    ??? note "答案"
+        S3 目录是 delimiter 投影；对象与公共前缀共享同一页额度。
+
+2. 如果绕过新边界，哪个测试会最先失败？
+
+    ??? note "答案"
+        阅读 `tests.txt`，找出最窄的新节点，并说出它覆盖的公开调用。
+
+### 通关命令
+
+`uv run pytest -q $(cat journey/stages/06-directory-illusion/tests.txt)`
+
+### 对应真实 S3 的一课
+
+S3 目录是 delimiter 投影；对象与公共前缀共享同一页额度。
+
+### 教材
+
+[第 4 章](https://github.com/system-in-miniature/mini-s3/blob/main/docs/zh/tutorial/04-listing.md)
+
+[在 GitHub 查看阶段差异](https://github.com/system-in-miniature/mini-s3/compare/stage-05...stage-06)
+
+完成后可运行 `git checkout stage-06` 对照你的结果。
+
+[Complete reference patch / 完整参考补丁](https://github.com/system-in-miniature/mini-s3/blob/main/journey/stages/06-directory-illusion/stage.patch)

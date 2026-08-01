@@ -12,35 +12,29 @@ Starting from stage-01, Implement `VersioningState`, `SequenceCounter`, and `Buc
 
 - `src/minis3/bucket.py`
 
-### Self-check
+### Mechanism walkthrough
 
-1. Where is this stage's visibility or state transition owned?
+#### Ownership and flow
 
-    ??? note "Answer"
-        Versioning can be enabled and suspended, but never reset to the never-enabled state.
+`Bucket` owns per-key history and legal versioning transitions. An injected `SequenceCounter` turns each PUT or marker into deterministic public and internal identities.
 
-2. Which test would fail first if the new boundary were bypassed?
+#### Failure and debugging
 
-    ??? note "Answer"
-        Read `tests.txt`, identify the narrowest new node, and name the public call it exercises.
+Inspect the bucket state before the branch, then compare `version_id`, `storage_id`, and record order after it. Illegal transitions should fail before mutating state.
 
-### Pass command
+### File-by-file diff walkthrough
 
-`uv run pytest -q $(cat journey/stages/02-bucket-state/tests.txt)`
+Read by runtime responsibility, not patch storage order. Every block comes directly from the canonical `stage.patch`.
 
-### The real S3 lesson
+#### `src/minis3/bucket.py`
 
-Versioning can be enabled and suspended, but never reset to the never-enabled state.
+Aggregate that owns per-bucket state transitions.
 
-### Textbook
+Called by `MiniS3`; turns one command plus the current record into the next in-memory history.
 
-[Chapter 3](https://github.com/system-in-miniature/mini-s3/blob/main/docs/tutorial/03-versioning.md)
+**Changed anchors:** `VersioningState`, `SequenceCounter`, `__init__`, `__call__`, `ensure_at_least`, `Bucket`, `set_versioning`, `put`, `get`, `delete`
 
-[Compare this stage on GitHub](https://github.com/system-in-miniature/mini-s3/compare/stage-01...stage-02)
-
-After finishing, use `git checkout stage-02` to compare your result.
-
-??? note "Try first, then peek: stage.patch"
+??? note "File diff: src/minis3/bucket.py"
     ```diff
     diff --git a/src/minis3/bucket.py b/src/minis3/bucket.py
     new file mode 100644
@@ -208,3 +202,33 @@ After finishing, use `git checkout stage-02` to compare your result.
     +        self.records[key] = ObjectRecord(key, (marker, *old_versions))
     +        return marker
     ```
+
+### Self-check
+
+1. Where is this stage's visibility or state transition owned?
+
+    ??? note "Answer"
+        Versioning can be enabled and suspended, but never reset to the never-enabled state.
+
+2. Which test would fail first if the new boundary were bypassed?
+
+    ??? note "Answer"
+        Read `tests.txt`, identify the narrowest new node, and name the public call it exercises.
+
+### Pass command
+
+`uv run pytest -q $(cat journey/stages/02-bucket-state/tests.txt)`
+
+### The real S3 lesson
+
+Versioning can be enabled and suspended, but never reset to the never-enabled state.
+
+### Textbook
+
+[Chapter 3](https://github.com/system-in-miniature/mini-s3/blob/main/docs/tutorial/03-versioning.md)
+
+[Compare this stage on GitHub](https://github.com/system-in-miniature/mini-s3/compare/stage-01...stage-02)
+
+After finishing, use `git checkout stage-02` to compare your result.
+
+[Complete reference patch / 完整参考补丁](https://github.com/system-in-miniature/mini-s3/blob/main/journey/stages/02-bucket-state/stage.patch)

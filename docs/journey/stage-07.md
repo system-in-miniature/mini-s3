@@ -12,42 +12,36 @@ Starting from stage-06, Exercise `DiskStorage.persist_bucket` through `CrashOnce
 
 - `tests/test_storage.py`
 
-### Self-check
+### Mechanism walkthrough
 
-1. Where is this stage's visibility or state transition owned?
+#### Ownership and flow
 
-    ??? note "Answer"
-        Before rename, recovery sees the old state; after rename, it sees the complete new state.
+This stage changes tests, not production code. Fault injection brackets manifest replacement to prove the old/new visibility split around one linearization point.
 
-2. Which test would fail first if the new boundary were bypassed?
+#### Failure and debugging
 
-    ??? note "Answer"
-        Read `tests.txt`, identify the narrowest new node, and name the public call it exercises.
+Reopen storage after each injected crash and inspect only published state. Seeing partial new state means publication order or recovery trust boundaries are wrong.
 
-### Pass command
+### File-by-file diff walkthrough
 
-`uv run pytest -q $(cat journey/stages/07-publication-crash-matrix/tests.txt)`
+Read by runtime responsibility, not patch storage order. Every block comes directly from the canonical `stage.patch`.
 
-### The real S3 lesson
+#### `tests/test_storage.py`
 
-Before rename, recovery sees the old state; after rename, it sees the complete new state.
+Executable proof of the stage behavior.
 
-### Textbook
+Calls the learner-visible boundary and records the expected state or failure; start here only when verifying the mechanism.
 
-[Chapter 5](https://github.com/system-in-miniature/mini-s3/blob/main/docs/tutorial/05-crash-atomicity.md)
+**Changed anchors:** `test_crash_before_manifest_publish_leaves_old_state`, `test_crash_before_manifest_publication_matrix_leaves_old_state`, `test_crash_after_manifest_publish_exposes_complete_new_state`
 
-[Compare this stage on GitHub](https://github.com/system-in-miniature/mini-s3/compare/stage-06...stage-07)
-
-After finishing, use `git checkout stage-07` to compare your result.
-
-??? note "Try first, then peek: stage.patch"
+??? note "File diff: tests/test_storage.py"
     ```diff
     diff --git a/tests/test_storage.py b/tests/test_storage.py
     index c96a7a6..5faad97 100644
     --- a/tests/test_storage.py
     +++ b/tests/test_storage.py
     @@ -30,3 +30,69 @@ def test_restart_restores_versions_bodies_and_counter(tmp_path: Path) -> None:
-     
+
          assert reopened.get_object("b", "k", version_id=first.version_id).body == b"one"
          assert second.version_id != first.version_id
     +
@@ -117,3 +111,33 @@ After finishing, use `git checkout stage-07` to compare your result.
     +    assert visible.body == b"value"
     +    assert visible.etag == '"2063c1608d6e0baf80249c42e2be5804"'
     ```
+
+### Self-check
+
+1. Where is this stage's visibility or state transition owned?
+
+    ??? note "Answer"
+        Before rename, recovery sees the old state; after rename, it sees the complete new state.
+
+2. Which test would fail first if the new boundary were bypassed?
+
+    ??? note "Answer"
+        Read `tests.txt`, identify the narrowest new node, and name the public call it exercises.
+
+### Pass command
+
+`uv run pytest -q $(cat journey/stages/07-publication-crash-matrix/tests.txt)`
+
+### The real S3 lesson
+
+Before rename, recovery sees the old state; after rename, it sees the complete new state.
+
+### Textbook
+
+[Chapter 5](https://github.com/system-in-miniature/mini-s3/blob/main/docs/tutorial/05-crash-atomicity.md)
+
+[Compare this stage on GitHub](https://github.com/system-in-miniature/mini-s3/compare/stage-06...stage-07)
+
+After finishing, use `git checkout stage-07` to compare your result.
+
+[Complete reference patch / 完整参考补丁](https://github.com/system-in-miniature/mini-s3/blob/main/journey/stages/07-publication-crash-matrix/stage.patch)

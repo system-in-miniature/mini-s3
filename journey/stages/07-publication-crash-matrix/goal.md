@@ -16,6 +16,16 @@ Starting from stage-06, Exercise `DiskStorage.persist_bucket` through `CrashOnce
 
 - `tests/test_storage.py`
 
+### Mechanism walkthrough
+
+#### Ownership and flow
+
+This stage changes tests, not production code. Fault injection brackets manifest replacement to prove the old/new visibility split around one linearization point.
+
+#### Failure and debugging
+
+Reopen storage after each injected crash and inspect only published state. Seeing partial new state means publication order or recovery trust boundaries are wrong.
+
 ### Self-check
 
 1. Where is this stage's visibility or state transition owned?
@@ -53,6 +63,16 @@ Before rename, recovery sees the old state; after rename, it sees the complete n
 ### 交付文件
 
 - `tests/test_storage.py`
+
+### 机制走读
+
+#### 所有权与数据流
+
+本阶段只修改测试，不修改生产代码；故障注入包围 Manifest 替换，以证明单一线性化点两侧的旧/新可见性分界。
+
+#### 失败与排查
+
+每次注入崩溃后重新打开存储，只观察已发布状态；若看到部分新状态，说明发布顺序或恢复信任边界错误。
 
 ### 自查
 

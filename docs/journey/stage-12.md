@@ -12,44 +12,38 @@ Starting from stage-11, Exercise `_recover_uploads(...)` with crashes before and
 
 - `tests/test_storage.py`
 
-### Self-check
+### Mechanism walkthrough
 
-1. Where is this stage's visibility or state transition owned?
+#### Ownership and flow
 
-    ??? note "Answer"
-        Recovery correlates a published object with its upload ID to make cleanup idempotent.
+This test-only stage correlates a published object's `multipart_upload_id` with private staging: retain staging before publish, clean it idempotently after publish.
 
-2. Which test would fail first if the new boundary were bypassed?
+#### Failure and debugging
 
-    ??? note "Answer"
-        Read `tests.txt`, identify the narrowest new node, and name the public call it exercises.
+After restart, inspect manifest visibility and upload-directory presence as one pair. Either both absent/present in the wrong crash window exposes a recovery bug.
 
-### Pass command
+### File-by-file diff walkthrough
 
-`uv run pytest -q $(cat journey/stages/12-multipart-recovery/tests.txt)`
+Read by runtime responsibility, not patch storage order. Every block comes directly from the canonical `stage.patch`.
 
-### The real S3 lesson
+#### `tests/test_storage.py`
 
-Recovery correlates a published object with its upload ID to make cleanup idempotent.
+Executable proof of the stage behavior.
 
-### Textbook
+Calls the learner-visible boundary and records the expected state or failure; start here only when verifying the mechanism.
 
-[Chapter 6](https://github.com/system-in-miniature/mini-s3/blob/main/docs/tutorial/06-multipart.md)
+**Changed anchors:** `test_multipart_complete_crash_before_publish_keeps_upload_not_object`, `test_multipart_complete_crash_after_publish_recovers_object_and_cleans_upload`
 
-[Compare this stage on GitHub](https://github.com/system-in-miniature/mini-s3/compare/stage-11...stage-12)
-
-After finishing, use `git checkout stage-12` to compare your result.
-
-??? note "Try first, then peek: stage.patch"
+??? note "File diff: tests/test_storage.py"
     ```diff
     diff --git a/tests/test_storage.py b/tests/test_storage.py
     index afc9a8a..96bc973 100644
     --- a/tests/test_storage.py
     +++ b/tests/test_storage.py
     @@ -4,7 +4,13 @@ from pathlib import Path
-     
+
      import pytest
-     
+
     -from minis3 import InjectedCrash, MiniS3, NoSuchKey, SequenceCounter
     +from minis3 import (
     +    InjectedCrash,
@@ -63,7 +57,7 @@ After finishing, use `git checkout stage-12` to compare your result.
      from minis3.storage.disk import DiskStorage
     @@ -152,3 +158,56 @@ def test_recovery_removes_spurious_tmp_files(tmp_path: Path) -> None:
          MiniS3(tmp_path)
-     
+
          assert not stray.exists()
     +
     +
@@ -119,3 +113,33 @@ After finishing, use `git checkout stage-12` to compare your result.
     +    with pytest.raises(NoSuchUpload):
     +        reopened.abort_multipart_upload("b", "movie", upload.upload_id)
     ```
+
+### Self-check
+
+1. Where is this stage's visibility or state transition owned?
+
+    ??? note "Answer"
+        Recovery correlates a published object with its upload ID to make cleanup idempotent.
+
+2. Which test would fail first if the new boundary were bypassed?
+
+    ??? note "Answer"
+        Read `tests.txt`, identify the narrowest new node, and name the public call it exercises.
+
+### Pass command
+
+`uv run pytest -q $(cat journey/stages/12-multipart-recovery/tests.txt)`
+
+### The real S3 lesson
+
+Recovery correlates a published object with its upload ID to make cleanup idempotent.
+
+### Textbook
+
+[Chapter 6](https://github.com/system-in-miniature/mini-s3/blob/main/docs/tutorial/06-multipart.md)
+
+[Compare this stage on GitHub](https://github.com/system-in-miniature/mini-s3/compare/stage-11...stage-12)
+
+After finishing, use `git checkout stage-12` to compare your result.
+
+[Complete reference patch / 完整参考补丁](https://github.com/system-in-miniature/mini-s3/blob/main/journey/stages/12-multipart-recovery/stage.patch)

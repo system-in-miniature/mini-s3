@@ -13,35 +13,29 @@ Starting from stage-10, Implement `MiniS3.complete_multipart_upload(...)` and co
 - `src/minis3/store.py`
 - `tests/test_multipart.py`
 
-### Self-check
+### Mechanism walkthrough
 
-1. Where is this stage's visibility or state transition owned?
+#### Ownership and flow
 
-    ??? note "Answer"
-        Completion becomes visible only through the same bucket-manifest publication boundary as PUT.
+Completion loads private parts, validates the ordered client manifest, concatenates bytes, publishes once through normal `Bucket.put`, then removes staging.
 
-2. Which test would fail first if the new boundary were bypassed?
+#### Failure and debugging
 
-    ??? note "Answer"
-        Read `tests.txt`, identify the narrowest new node, and name the public call it exercises.
+Inspect validation before assembly and manifest publication before cleanup. A visible partial object means publication was split; lost retry state means cleanup happened too early.
 
-### Pass command
+### File-by-file diff walkthrough
 
-`uv run pytest -q $(cat journey/stages/11-multipart-complete/tests.txt)`
+Read by runtime responsibility, not patch storage order. Every block comes directly from the canonical `stage.patch`.
 
-### The real S3 lesson
+#### `src/minis3/store.py`
 
-Completion becomes visible only through the same bucket-manifest publication boundary as PUT.
+Application service coordinating domain and persistence.
 
-### Textbook
+Receives public calls, owns locking and orchestration, then delegates to domain, projection, and storage boundaries.
 
-[Chapter 6](https://github.com/system-in-miniature/mini-s3/blob/main/docs/tutorial/06-multipart.md)
+**Changed anchors:** `complete_multipart_upload`, `abort_multipart_upload`
 
-[Compare this stage on GitHub](https://github.com/system-in-miniature/mini-s3/compare/stage-10...stage-11)
-
-After finishing, use `git checkout stage-11` to compare your result.
-
-??? note "Try first, then peek: stage.patch"
+??? note "File diff: src/minis3/store.py"
     ```diff
     diff --git a/src/minis3/store.py b/src/minis3/store.py
     index 0d7e596..9b50aa2 100644
@@ -49,8 +43,8 @@ After finishing, use `git checkout stage-11` to compare your result.
     +++ b/src/minis3/store.py
     @@ -177,6 +177,39 @@ class MiniS3:
                  return part.receipt
-     
-     
+
+
     +    def complete_multipart_upload(
     +        self,
     +        bucket: str,
@@ -87,14 +81,26 @@ After finishing, use `git checkout stage-11` to compare your result.
          def abort_multipart_upload(
              self, bucket: str, key: str, upload_id: str
          ) -> None:
+    ```
+
+#### `tests/test_multipart.py`
+
+Executable proof of the stage behavior.
+
+Calls the learner-visible boundary and records the expected state or failure; start here only when verifying the mechanism.
+
+**Changed anchors:** `_md5`, `test_multipart_is_invisible_until_ordered_atomic_complete`, `test_uploading_same_part_number_replaces_the_staged_part`, `test_complete_validates_order_presence_etag_and_nonfinal_size`, `test_abort_removes_upload_and_restart_preserves_unfinished_parts`, `test_upload_identity_and_part_number_are_validated`
+
+??? note "File diff: tests/test_multipart.py"
+    ```diff
     diff --git a/tests/test_multipart.py b/tests/test_multipart.py
     index 0b61034..adcb3f7 100644
     --- a/tests/test_multipart.py
     +++ b/tests/test_multipart.py
     @@ -17,6 +17,104 @@ from minis3 import (
      )
-     
-     
+
+
     +def _md5(payload: bytes) -> bytes:
     +    return md5(payload, usedforsecurity=False).digest()
     +
@@ -202,3 +208,33 @@ After finishing, use `git checkout stage-11` to compare your result.
              store.upload_part("b", "right", upload.upload_id, 10_001, b"x")
     +
     ```
+
+### Self-check
+
+1. Where is this stage's visibility or state transition owned?
+
+    ??? note "Answer"
+        Completion becomes visible only through the same bucket-manifest publication boundary as PUT.
+
+2. Which test would fail first if the new boundary were bypassed?
+
+    ??? note "Answer"
+        Read `tests.txt`, identify the narrowest new node, and name the public call it exercises.
+
+### Pass command
+
+`uv run pytest -q $(cat journey/stages/11-multipart-complete/tests.txt)`
+
+### The real S3 lesson
+
+Completion becomes visible only through the same bucket-manifest publication boundary as PUT.
+
+### Textbook
+
+[Chapter 6](https://github.com/system-in-miniature/mini-s3/blob/main/docs/tutorial/06-multipart.md)
+
+[Compare this stage on GitHub](https://github.com/system-in-miniature/mini-s3/compare/stage-10...stage-11)
+
+After finishing, use `git checkout stage-11` to compare your result.
+
+[Complete reference patch / 完整参考补丁](https://github.com/system-in-miniature/mini-s3/blob/main/journey/stages/11-multipart-complete/stage.patch)

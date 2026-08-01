@@ -12,35 +12,29 @@
 
 - `src/minis3/bucket.py`
 
-### 自查
+### 机制走读
 
-1. 本阶段的可见性或状态迁移由谁负责？
+#### 所有权与数据流
 
-    ??? note "答案"
-        版本化可启用、可暂停，但不能回到从未启用状态。
+`Bucket` 拥有每个 Key 的历史与合法版本状态迁移；注入的 `SequenceCounter` 为每次 PUT 或删除标记生成确定性的公开与内部身份。
 
-2. 如果绕过新边界，哪个测试会最先失败？
+#### 失败与排查
 
-    ??? note "答案"
-        阅读 `tests.txt`，找出最窄的新节点，并说出它覆盖的公开调用。
+先看分支前的 Bucket 状态，再比较变更后的 `version_id`、`storage_id` 与记录顺序；非法迁移必须在修改状态前失败。
 
-### 通关命令
+### 逐文件 Diff 走读
 
-`uv run pytest -q $(cat journey/stages/02-bucket-state/tests.txt)`
+按运行时职责阅读，而不是按补丁存储顺序阅读。每个代码块都直接来自 canonical `stage.patch`。
 
-### 对应真实 S3 的一课
+#### `src/minis3/bucket.py`
 
-版本化可启用、可暂停，但不能回到从未启用状态。
+拥有 Bucket 内部状态迁移的聚合。
 
-### 教材
+由 `MiniS3` 调用；把一次命令和当前记录转换为下一份内存历史。
 
-[第 3 章](https://github.com/system-in-miniature/mini-s3/blob/main/docs/zh/tutorial/03-versioning.md)
+**变化锚点:** `VersioningState`, `SequenceCounter`, `__init__`, `__call__`, `ensure_at_least`, `Bucket`, `set_versioning`, `put`, `get`, `delete`
 
-[在 GitHub 查看阶段差异](https://github.com/system-in-miniature/mini-s3/compare/stage-01...stage-02)
-
-完成后可运行 `git checkout stage-02` 对照你的结果。
-
-??? note "先做后看：stage.patch"
+??? note "文件差异：src/minis3/bucket.py"
     ```diff
     diff --git a/src/minis3/bucket.py b/src/minis3/bucket.py
     new file mode 100644
@@ -208,3 +202,33 @@
     +        self.records[key] = ObjectRecord(key, (marker, *old_versions))
     +        return marker
     ```
+
+### 自查
+
+1. 本阶段的可见性或状态迁移由谁负责？
+
+    ??? note "答案"
+        版本化可启用、可暂停，但不能回到从未启用状态。
+
+2. 如果绕过新边界，哪个测试会最先失败？
+
+    ??? note "答案"
+        阅读 `tests.txt`，找出最窄的新节点，并说出它覆盖的公开调用。
+
+### 通关命令
+
+`uv run pytest -q $(cat journey/stages/02-bucket-state/tests.txt)`
+
+### 对应真实 S3 的一课
+
+版本化可启用、可暂停，但不能回到从未启用状态。
+
+### 教材
+
+[第 3 章](https://github.com/system-in-miniature/mini-s3/blob/main/docs/zh/tutorial/03-versioning.md)
+
+[在 GitHub 查看阶段差异](https://github.com/system-in-miniature/mini-s3/compare/stage-01...stage-02)
+
+完成后可运行 `git checkout stage-02` 对照你的结果。
+
+[Complete reference patch / 完整参考补丁](https://github.com/system-in-miniature/mini-s3/blob/main/journey/stages/02-bucket-state/stage.patch)

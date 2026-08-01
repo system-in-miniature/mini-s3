@@ -16,6 +16,16 @@ Starting from stage-07, Harden and test `atomic_write`, `durable_mkdir`, `DiskSt
 
 - `tests/test_storage.py`
 
+### Mechanism walkthrough
+
+#### Ownership and flow
+
+This proof stage records directory fsync boundaries and creates interrupted-write debris, then checks that startup cleanup preserves referenced artifacts and removes temporary names.
+
+#### Failure and debugging
+
+Match every created or renamed directory entry with its parent fsync. During recovery, compare each deletion candidate against manifest references before removing it.
+
 ### Self-check
 
 1. Where is this stage's visibility or state transition owned?
@@ -53,6 +63,16 @@ Atomic rename is not durable publication until the containing directory is fsync
 ### 交付文件
 
 - `tests/test_storage.py`
+
+### 机制走读
+
+#### 所有权与数据流
+
+这个证明型 Stage 记录目录 fsync 边界并制造中断写入残留，再检查启动清理保留被引用 Artifact、删除临时名称。
+
+#### 失败与排查
+
+把每个新建或 rename 的目录项与父目录 fsync 对齐；恢复删除前，先把候选文件与 Manifest 引用逐一比较。
 
 ### 自查
 

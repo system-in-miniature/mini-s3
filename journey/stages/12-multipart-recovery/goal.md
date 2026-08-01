@@ -16,6 +16,16 @@ Starting from stage-11, Exercise `_recover_uploads(...)` with crashes before and
 
 - `tests/test_storage.py`
 
+### Mechanism walkthrough
+
+#### Ownership and flow
+
+This test-only stage correlates a published object's `multipart_upload_id` with private staging: retain staging before publish, clean it idempotently after publish.
+
+#### Failure and debugging
+
+After restart, inspect manifest visibility and upload-directory presence as one pair. Either both absent/present in the wrong crash window exposes a recovery bug.
+
 ### Self-check
 
 1. Where is this stage's visibility or state transition owned?
@@ -53,6 +63,16 @@ Recovery correlates a published object with its upload ID to make cleanup idempo
 ### 交付文件
 
 - `tests/test_storage.py`
+
+### 机制走读
+
+#### 所有权与数据流
+
+这个纯测试 Stage 用已发布对象的 `multipart_upload_id` 关联私有暂存：发布前保留暂存，发布后幂等清理。
+
+#### 失败与排查
+
+重启后把 Manifest 可见性与 Upload 目录存在性成对检查；在错误崩溃窗口同时缺失或同时保留都暴露恢复问题。
 
 ### 自查
 

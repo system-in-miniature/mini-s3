@@ -12,35 +12,29 @@
 
 - `tests/test_storage.py`
 
-### 自查
+### 机制走读
 
-1. 本阶段的可见性或状态迁移由谁负责？
+#### 所有权与数据流
 
-    ??? note "答案"
-        只有对所在目录执行 fsync，原子 rename 才成为持久发布。
+这个证明型 Stage 记录目录 fsync 边界并制造中断写入残留，再检查启动清理保留被引用 Artifact、删除临时名称。
 
-2. 如果绕过新边界，哪个测试会最先失败？
+#### 失败与排查
 
-    ??? note "答案"
-        阅读 `tests.txt`，找出最窄的新节点，并说出它覆盖的公开调用。
+把每个新建或 rename 的目录项与父目录 fsync 对齐；恢复删除前，先把候选文件与 Manifest 引用逐一比较。
 
-### 通关命令
+### 逐文件 Diff 走读
 
-`uv run pytest -q $(cat journey/stages/08-fsync-recovery/tests.txt)`
+按运行时职责阅读，而不是按补丁存储顺序阅读。每个代码块都直接来自 canonical `stage.patch`。
 
-### 对应真实 S3 的一课
+#### `tests/test_storage.py`
 
-只有对所在目录执行 fsync，原子 rename 才成为持久发布。
+本阶段行为的可执行证明。
 
-### 教材
+调用学习者可见边界并记录预期状态或失败；验证机制时再从这里进入。
 
-[第 5 章](https://github.com/system-in-miniature/mini-s3/blob/main/docs/zh/tutorial/05-crash-atomicity.md)
+**变化锚点:** `test_atomic_write_fsyncs_each_new_directory_parent`, `recording_fsync_directory`, `test_storage_and_bucket_directory_creation_fsync_parent_chains`, `test_recovery_removes_spurious_tmp_files`
 
-[在 GitHub 查看阶段差异](https://github.com/system-in-miniature/mini-s3/compare/stage-07...stage-08)
-
-完成后可运行 `git checkout stage-08` 对照你的结果。
-
-??? note "先做后看：stage.patch"
+??? note "文件差异：tests/test_storage.py"
     ```diff
     diff --git a/tests/test_storage.py b/tests/test_storage.py
     index 5faad97..afc9a8a 100644
@@ -48,7 +42,7 @@
     +++ b/tests/test_storage.py
     @@ -1,7 +1,9 @@
      """Disk tests pin the manifest publication crash boundary."""
-     
+
      from pathlib import Path
     +
      import pytest
@@ -115,3 +109,33 @@
     +
     +    assert not stray.exists()
     ```
+
+### 自查
+
+1. 本阶段的可见性或状态迁移由谁负责？
+
+    ??? note "答案"
+        只有对所在目录执行 fsync，原子 rename 才成为持久发布。
+
+2. 如果绕过新边界，哪个测试会最先失败？
+
+    ??? note "答案"
+        阅读 `tests.txt`，找出最窄的新节点，并说出它覆盖的公开调用。
+
+### 通关命令
+
+`uv run pytest -q $(cat journey/stages/08-fsync-recovery/tests.txt)`
+
+### 对应真实 S3 的一课
+
+只有对所在目录执行 fsync，原子 rename 才成为持久发布。
+
+### 教材
+
+[第 5 章](https://github.com/system-in-miniature/mini-s3/blob/main/docs/zh/tutorial/05-crash-atomicity.md)
+
+[在 GitHub 查看阶段差异](https://github.com/system-in-miniature/mini-s3/compare/stage-07...stage-08)
+
+完成后可运行 `git checkout stage-08` 对照你的结果。
+
+[Complete reference patch / 完整参考补丁](https://github.com/system-in-miniature/mini-s3/blob/main/journey/stages/08-fsync-recovery/stage.patch)

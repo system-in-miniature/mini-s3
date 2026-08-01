@@ -12,44 +12,38 @@
 
 - `tests/test_storage.py`
 
-### 自查
+### 机制走读
 
-1. 本阶段的可见性或状态迁移由谁负责？
+#### 所有权与数据流
 
-    ??? note "答案"
-        恢复逻辑用已发布对象的 upload ID 建立关联，使清理具备幂等性。
+这个纯测试 Stage 用已发布对象的 `multipart_upload_id` 关联私有暂存：发布前保留暂存，发布后幂等清理。
 
-2. 如果绕过新边界，哪个测试会最先失败？
+#### 失败与排查
 
-    ??? note "答案"
-        阅读 `tests.txt`，找出最窄的新节点，并说出它覆盖的公开调用。
+重启后把 Manifest 可见性与 Upload 目录存在性成对检查；在错误崩溃窗口同时缺失或同时保留都暴露恢复问题。
 
-### 通关命令
+### 逐文件 Diff 走读
 
-`uv run pytest -q $(cat journey/stages/12-multipart-recovery/tests.txt)`
+按运行时职责阅读，而不是按补丁存储顺序阅读。每个代码块都直接来自 canonical `stage.patch`。
 
-### 对应真实 S3 的一课
+#### `tests/test_storage.py`
 
-恢复逻辑用已发布对象的 upload ID 建立关联，使清理具备幂等性。
+本阶段行为的可执行证明。
 
-### 教材
+调用学习者可见边界并记录预期状态或失败；验证机制时再从这里进入。
 
-[第 6 章](https://github.com/system-in-miniature/mini-s3/blob/main/docs/zh/tutorial/06-multipart.md)
+**变化锚点:** `test_multipart_complete_crash_before_publish_keeps_upload_not_object`, `test_multipart_complete_crash_after_publish_recovers_object_and_cleans_upload`
 
-[在 GitHub 查看阶段差异](https://github.com/system-in-miniature/mini-s3/compare/stage-11...stage-12)
-
-完成后可运行 `git checkout stage-12` 对照你的结果。
-
-??? note "先做后看：stage.patch"
+??? note "文件差异：tests/test_storage.py"
     ```diff
     diff --git a/tests/test_storage.py b/tests/test_storage.py
     index afc9a8a..96bc973 100644
     --- a/tests/test_storage.py
     +++ b/tests/test_storage.py
     @@ -4,7 +4,13 @@ from pathlib import Path
-     
+
      import pytest
-     
+
     -from minis3 import InjectedCrash, MiniS3, NoSuchKey, SequenceCounter
     +from minis3 import (
     +    InjectedCrash,
@@ -63,7 +57,7 @@
      from minis3.storage.disk import DiskStorage
     @@ -152,3 +158,56 @@ def test_recovery_removes_spurious_tmp_files(tmp_path: Path) -> None:
          MiniS3(tmp_path)
-     
+
          assert not stray.exists()
     +
     +
@@ -119,3 +113,33 @@
     +    with pytest.raises(NoSuchUpload):
     +        reopened.abort_multipart_upload("b", "movie", upload.upload_id)
     ```
+
+### 自查
+
+1. 本阶段的可见性或状态迁移由谁负责？
+
+    ??? note "答案"
+        恢复逻辑用已发布对象的 upload ID 建立关联，使清理具备幂等性。
+
+2. 如果绕过新边界，哪个测试会最先失败？
+
+    ??? note "答案"
+        阅读 `tests.txt`，找出最窄的新节点，并说出它覆盖的公开调用。
+
+### 通关命令
+
+`uv run pytest -q $(cat journey/stages/12-multipart-recovery/tests.txt)`
+
+### 对应真实 S3 的一课
+
+恢复逻辑用已发布对象的 upload ID 建立关联，使清理具备幂等性。
+
+### 教材
+
+[第 6 章](https://github.com/system-in-miniature/mini-s3/blob/main/docs/zh/tutorial/06-multipart.md)
+
+[在 GitHub 查看阶段差异](https://github.com/system-in-miniature/mini-s3/compare/stage-11...stage-12)
+
+完成后可运行 `git checkout stage-12` 对照你的结果。
+
+[Complete reference patch / 完整参考补丁](https://github.com/system-in-miniature/mini-s3/blob/main/journey/stages/12-multipart-recovery/stage.patch)

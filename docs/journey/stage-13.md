@@ -16,45 +16,30 @@ Starting from stage-12, Implement ETag matching plus `if_match`/`if_none_match` 
 - `src/minis3/store.py`
 - `tests/test_conditional.py`
 
-### Self-check
+### Mechanism walkthrough
 
-1. Where is this stage's visibility or state transition owned?
+#### Ownership and flow
 
-    ??? note "Answer"
-        The comparison and publication must share one critical section or two writers can both win.
+Pure helpers evaluate ETag syntax; `MiniS3` holds one lock across reading the current visible ETag, checking the precondition, and publishing the mutation.
 
-2. Which test would fail first if the new boundary were bypassed?
+#### Failure and debugging
 
-    ??? note "Answer"
-        Read `tests.txt`, identify the narrowest new node, and name the public call it exercises.
+Separate matching errors from serialization errors. If two conditional writers both win, comparison and mutation escaped the same critical section.
 
-### Pass command
+### File-by-file diff walkthrough
 
-`uv run pytest -q $(cat journey/stages/13-conditional-cas/tests.txt)`
+Read by runtime responsibility, not patch storage order. Every block comes directly from the canonical `stage.patch`.
 
-### The real S3 lesson
+#### `src/minis3/conditional.py`
 
-The comparison and publication must share one critical section or two writers can both win.
+ETag precondition matching rules.
 
-### Textbook
+Called by `MiniS3` as a policy function; receives explicit values and returns a decision for the service to apply.
 
-[Chapter 7](https://github.com/system-in-miniature/mini-s3/blob/main/docs/tutorial/07-conditional.md)
+**Changed anchors:** `etag_matches`, `require_if_match`, `require_if_none_match`
 
-[Compare this stage on GitHub](https://github.com/system-in-miniature/mini-s3/compare/stage-12...stage-13)
-
-After finishing, use `git checkout stage-13` to compare your result.
-
-??? note "Try first, then peek: stage.patch"
+??? note "File diff: src/minis3/conditional.py"
     ```diff
-    diff --git a/src/minis3/__init__.py b/src/minis3/__init__.py
-    index 0c23aea..3f6e582 100644
-    --- a/src/minis3/__init__.py
-    +++ b/src/minis3/__init__.py
-    @@ -7,3 +7,4 @@ from .storage import InjectedCrash
-     from .listing import ListedObject, ListedVersion, ListObjectsResult, ListObjectVersionsResult
-     from .errors import EntityTooSmall, InvalidPart, InvalidPartOrder, NoSuchUpload
-     from .multipart import MIN_PART_SIZE, MultipartPart, MultipartUpload
-    +from .errors import NotModified, PreconditionFailed
     diff --git a/src/minis3/conditional.py b/src/minis3/conditional.py
     new file mode 100644
     index 0000000..d13ccf3
@@ -96,12 +81,24 @@ After finishing, use `git checkout stage-13` to compare your result.
     +
     +    if condition is not None and etag_matches(condition, current_etag):
     +        raise NotModified(condition)
+    ```
+
+#### `src/minis3/errors.py`
+
+Shared domain failure vocabulary.
+
+Constructed by bucket/service code and returned upward without owning I/O; inspect field values when state is correct but results look wrong.
+
+**Changed anchors:** `PreconditionFailed`, `NotModified`
+
+??? note "File diff: src/minis3/errors.py"
+    ```diff
     diff --git a/src/minis3/errors.py b/src/minis3/errors.py
     index 9db3b4c..5f255e0 100644
     --- a/src/minis3/errors.py
     +++ b/src/minis3/errors.py
     @@ -43,3 +43,11 @@ class InvalidPartOrder(MiniS3Error):
-     
+
      class EntityTooSmall(MiniS3Error):
          """A non-final multipart part is below the configured minimum size."""
     +
@@ -112,6 +109,18 @@ After finishing, use `git checkout stage-13` to compare your result.
     +
     +class NotModified(MiniS3Error):
     +    """An If-None-Match condition matched (the HTTP 304 control outcome)."""
+    ```
+
+#### `src/minis3/store.py`
+
+Application service coordinating domain and persistence.
+
+Receives public calls, owns locking and orchestration, then delegates to domain, projection, and storage boundaries.
+
+**Changed anchors:** `put_object`, `_current_etag`, `_addressed_etag`, `_bucket`
+
+??? note "File diff: src/minis3/store.py"
+    ```diff
     diff --git a/src/minis3/store.py b/src/minis3/store.py
     index 9b50aa2..e47e1ac 100644
     --- a/src/minis3/store.py
@@ -119,7 +128,7 @@ After finishing, use `git checkout stage-13` to compare your result.
     @@ -8,8 +8,9 @@ from pathlib import Path
      from threading import RLock
      from time import time
-     
+
     +from .conditional import require_if_match, require_if_none_match
      from .bucket import Bucket, SequenceCounter, VersioningState
     -from .errors import BucketAlreadyExists, BucketNotEmpty, NoSuchBucket
@@ -129,8 +138,8 @@ After finishing, use `git checkout stage-13` to compare your result.
      from .multipart import (
     @@ -78,20 +79,39 @@ class MiniS3:
                  self._buckets[name] = candidate
-     
-     
+
+
     -    def put_object(self, bucket: str, key: str, body: bytes) -> Version:
     +    def put_object(
     +        self,
@@ -150,8 +159,8 @@ After finishing, use `git checkout stage-13` to compare your result.
                  self._storage.persist_bucket(candidate)
                  self._buckets[bucket] = candidate
                  return result
-     
-     
+
+
          def get_object(
     -        self, bucket: str, key: str, *, version_id: str | None = None
     +        self,
@@ -168,12 +177,12 @@ After finishing, use `git checkout stage-13` to compare your result.
     +            require_if_match(result.etag, if_match)
     +            require_if_none_match(result.etag, if_none_match)
     +            return result
-     
-     
+
+
          def head_object(
     @@ -103,11 +123,21 @@ class MiniS3:
-     
-     
+
+
          def delete_object(
     -        self, bucket: str, key: str, *, version_id: str | None = None
     +        self,
@@ -197,8 +206,8 @@ After finishing, use `git checkout stage-13` to compare your result.
                  return result
     @@ -220,6 +250,24 @@ class MiniS3:
                  self._storage.remove_multipart_upload(bucket, key, upload_id)
-     
-     
+
+
     +    @staticmethod
     +    def _current_etag(bucket: Bucket, key: str) -> str | None:
     +        try:
@@ -220,6 +229,39 @@ After finishing, use `git checkout stage-13` to compare your result.
          def _bucket(self, name: str) -> Bucket:
              try:
                  return self._buckets[name]
+    ```
+
+#### `src/minis3/__init__.py`
+
+Supported public package surface.
+
+Reached by user imports; wiring errors appear as missing names before any runtime flow starts.
+
+**Changed anchors:** configuration, export, or documentation change
+
+??? note "File diff: src/minis3/__init__.py"
+    ```diff
+    diff --git a/src/minis3/__init__.py b/src/minis3/__init__.py
+    index 0c23aea..3f6e582 100644
+    --- a/src/minis3/__init__.py
+    +++ b/src/minis3/__init__.py
+    @@ -7,3 +7,4 @@ from .storage import InjectedCrash
+     from .listing import ListedObject, ListedVersion, ListObjectsResult, ListObjectVersionsResult
+     from .errors import EntityTooSmall, InvalidPart, InvalidPartOrder, NoSuchUpload
+     from .multipart import MIN_PART_SIZE, MultipartPart, MultipartUpload
+    +from .errors import NotModified, PreconditionFailed
+    ```
+
+#### `tests/test_conditional.py`
+
+Executable proof of the stage behavior.
+
+Calls the learner-visible boundary and records the expected state or failure; start here only when verifying the mechanism.
+
+**Changed anchors:** `test_get_if_none_match_has_304_semantics_and_if_match_has_412`, `test_put_and_delete_if_match_compare_against_current_visible_etag`, `test_if_match_wildcard_requires_a_current_visible_object`, `test_two_conditional_writers_have_exactly_one_winner`, `writer`
+
+??? note "File diff: tests/test_conditional.py"
+    ```diff
     diff --git a/tests/test_conditional.py b/tests/test_conditional.py
     new file mode 100644
     index 0000000..137e7a1
@@ -308,3 +350,33 @@ After finishing, use `git checkout stage-13` to compare your result.
     +    assert store.get_object("b", "counter").body in {b"writer-a", b"writer-b"}
     +
     ```
+
+### Self-check
+
+1. Where is this stage's visibility or state transition owned?
+
+    ??? note "Answer"
+        The comparison and publication must share one critical section or two writers can both win.
+
+2. Which test would fail first if the new boundary were bypassed?
+
+    ??? note "Answer"
+        Read `tests.txt`, identify the narrowest new node, and name the public call it exercises.
+
+### Pass command
+
+`uv run pytest -q $(cat journey/stages/13-conditional-cas/tests.txt)`
+
+### The real S3 lesson
+
+The comparison and publication must share one critical section or two writers can both win.
+
+### Textbook
+
+[Chapter 7](https://github.com/system-in-miniature/mini-s3/blob/main/docs/tutorial/07-conditional.md)
+
+[Compare this stage on GitHub](https://github.com/system-in-miniature/mini-s3/compare/stage-12...stage-13)
+
+After finishing, use `git checkout stage-13` to compare your result.
+
+[Complete reference patch / 完整参考补丁](https://github.com/system-in-miniature/mini-s3/blob/main/journey/stages/13-conditional-cas/stage.patch)

@@ -18,84 +18,30 @@ Starting from an empty tree, Implement `content_etag(body: bytes) -> str`, `Vers
 - `tests/test_model.py`
 - `uv.lock`
 
-### Self-check
+### Mechanism walkthrough
 
-1. Where is this stage's visibility or state transition owned?
+#### Ownership and flow
 
-    ??? note "Answer"
-        S3 stores whole object values; a slash in a key is data, not a directory.
+`model.py` owns immutable whole-object values: bytes enter `content_etag`, become a quoted fingerprint, and travel with `Version` inside an `ObjectRecord`; a `DeleteMarker` hides history without carrying a body.
 
-2. Which test would fail first if the new boundary were bypassed?
+#### Failure and debugging
 
-    ??? note "Answer"
-        Read `tests.txt`, identify the narrowest new node, and name the public call it exercises.
+Start at the value constructor and ETag assertion. A slash in `key` must remain untouched, mutation must raise, and delete markers must never acquire object bytes.
 
-### Pass command
+### File-by-file diff walkthrough
 
-`uv run pytest -q $(cat journey/stages/01-scaffold-object-model/tests.txt)`
+Read by runtime responsibility, not patch storage order. Every block comes directly from the canonical `stage.patch`.
 
-### The real S3 lesson
+#### `src/minis3/errors.py`
 
-S3 stores whole object values; a slash in a key is data, not a directory.
+Shared domain failure vocabulary.
 
-### Textbook
+Constructed by bucket/service code and returned upward without owning I/O; inspect field values when state is correct but results look wrong.
 
-[Chapter 1](https://github.com/system-in-miniature/mini-s3/blob/main/docs/tutorial/01-getting-started.md)
+**Changed anchors:** `MiniS3Error`, `BucketAlreadyExists`, `NoSuchBucket`, `BucketNotEmpty`, `NoSuchKey`, `NoSuchVersion`, `InvalidContinuationToken`
 
-[Compare this stage on GitHub](https://github.com/system-in-miniature/mini-s3/tree/stage-01)
-
-After finishing, use `git checkout stage-01` to compare your result.
-
-??? note "Try first, then peek: stage.patch"
+??? note "File diff: src/minis3/errors.py"
     ```diff
-    diff --git a/README.md b/README.md
-    new file mode 100644
-    index 0000000..55f857c
-    --- /dev/null
-    +++ b/README.md
-    @@ -0,0 +1,3 @@
-    +# MiniS3 Journey workspace
-    +
-    +Build the object store one verified stage at a time.
-    diff --git a/pyproject.toml b/pyproject.toml
-    new file mode 100644
-    index 0000000..9167f50
-    --- /dev/null
-    +++ b/pyproject.toml
-    @@ -0,0 +1,24 @@
-    +[build-system]
-    +requires = ["hatchling"]
-    +build-backend = "hatchling.build"
-    +
-    +[project]
-    +name = "minis3"
-    +version = "0.1.0"
-    +description = "A deterministic S3 system-in-miniature for teaching"
-    +readme = "README.md"
-    +requires-python = ">=3.12"
-    +dependencies = []
-    +
-    +[dependency-groups]
-    +dev = [
-    +    "pytest>=9,<10",
-    +]
-    +
-    +[tool.hatch.build.targets.wheel]
-    +packages = ["src/minis3"]
-    +
-    +[tool.pytest.ini_options]
-    +pythonpath = ["src", "."]
-    +testpaths = ["tests"]
-    +
-    diff --git a/src/minis3/__init__.py b/src/minis3/__init__.py
-    new file mode 100644
-    index 0000000..8a3d1c7
-    --- /dev/null
-    +++ b/src/minis3/__init__.py
-    @@ -0,0 +1,3 @@
-    +"""Public API for the MiniS3 teaching implementation."""
-    +from .errors import BucketAlreadyExists, BucketNotEmpty, InvalidContinuationToken, MiniS3Error, NoSuchBucket, NoSuchKey, NoSuchVersion
-    +from .model import DeleteMarker, ObjectRecord, Version, content_etag
     diff --git a/src/minis3/errors.py b/src/minis3/errors.py
     new file mode 100644
     index 0000000..e1a2230
@@ -132,6 +78,18 @@ After finishing, use `git checkout stage-01` to compare your result.
     +class InvalidContinuationToken(MiniS3Error):
     +    """The list continuation token was malformed or belongs to another query."""
     +
+    ```
+
+#### `src/minis3/model.py`
+
+Immutable values carried through the system.
+
+Constructed by bucket/service code and returned upward without owning I/O; inspect field values when state is correct but results look wrong.
+
+**Changed anchors:** `content_etag`, `Version`, `size`, `is_delete_marker`, `DeleteMarker`, `ObjectRecord`
+
+??? note "File diff: src/minis3/model.py"
+    ```diff
     diff --git a/src/minis3/model.py b/src/minis3/model.py
     new file mode 100644
     index 0000000..da662fc
@@ -213,6 +171,39 @@ After finishing, use `git checkout stage-01` to compare your result.
     +    key: str
     +    versions: tuple[ObjectVersion, ...] = ()
     +
+    ```
+
+#### `src/minis3/__init__.py`
+
+Supported public package surface.
+
+Reached by user imports; wiring errors appear as missing names before any runtime flow starts.
+
+**Changed anchors:** configuration, export, or documentation change
+
+??? note "File diff: src/minis3/__init__.py"
+    ```diff
+    diff --git a/src/minis3/__init__.py b/src/minis3/__init__.py
+    new file mode 100644
+    index 0000000..8a3d1c7
+    --- /dev/null
+    +++ b/src/minis3/__init__.py
+    @@ -0,0 +1,3 @@
+    +"""Public API for the MiniS3 teaching implementation."""
+    +from .errors import BucketAlreadyExists, BucketNotEmpty, InvalidContinuationToken, MiniS3Error, NoSuchBucket, NoSuchKey, NoSuchVersion
+    +from .model import DeleteMarker, ObjectRecord, Version, content_etag
+    ```
+
+#### `tests/test_model.py`
+
+Executable proof of the stage behavior.
+
+Calls the learner-visible boundary and records the expected state or failure; start here only when verifying the mechanism.
+
+**Changed anchors:** `test_etag_is_quoted_lowercase_content_md5`, `test_keys_are_opaque_even_when_they_contain_slashes`, `test_delete_marker_has_no_object_body`
+
+??? note "File diff: tests/test_model.py"
+    ```diff
     diff --git a/tests/test_model.py b/tests/test_model.py
     new file mode 100644
     index 0000000..01151ba
@@ -254,6 +245,81 @@ After finishing, use `git checkout stage-01` to compare your result.
     +    )
     +    assert marker.is_delete_marker is True
     +
+    ```
+
+#### `README.md`
+
+Journey workspace orientation.
+
+Supports installation or orientation rather than the runtime data path; debug it when imports, builds, or commands fail before execution.
+
+**Changed anchors:** configuration, export, or documentation change
+
+??? note "File diff: README.md"
+    ```diff
+    diff --git a/README.md b/README.md
+    new file mode 100644
+    index 0000000..27585a5
+    --- /dev/null
+    +++ b/README.md
+    @@ -0,0 +1,3 @@
+    +# MiniS3 Journey workspace
+    +
+    +Build the object store one verified stage at a time.
+    ```
+
+#### `pyproject.toml`
+
+Install and test configuration.
+
+Supports installation or orientation rather than the runtime data path; debug it when imports, builds, or commands fail before execution.
+
+**Changed anchors:** configuration, export, or documentation change
+
+??? note "File diff: pyproject.toml"
+    ```diff
+    diff --git a/pyproject.toml b/pyproject.toml
+    new file mode 100644
+    index 0000000..9167f50
+    --- /dev/null
+    +++ b/pyproject.toml
+    @@ -0,0 +1,24 @@
+    +[build-system]
+    +requires = ["hatchling"]
+    +build-backend = "hatchling.build"
+    +
+    +[project]
+    +name = "minis3"
+    +version = "0.1.0"
+    +description = "A deterministic S3 system-in-miniature for teaching"
+    +readme = "README.md"
+    +requires-python = ">=3.12"
+    +dependencies = []
+    +
+    +[dependency-groups]
+    +dev = [
+    +    "pytest>=9,<10",
+    +]
+    +
+    +[tool.hatch.build.targets.wheel]
+    +packages = ["src/minis3"]
+    +
+    +[tool.pytest.ini_options]
+    +pythonpath = ["src", "."]
+    +testpaths = ["tests"]
+    +
+    ```
+
+#### `uv.lock`
+
+Reproducible dependency lock.
+
+Supports installation or orientation rather than the runtime data path; debug it when imports, builds, or commands fail before execution.
+
+**Changed anchors:** configuration, export, or documentation change
+
+??? note "File diff: uv.lock"
+    ```diff
     diff --git a/uv.lock b/uv.lock
     new file mode 100644
     index 0000000..90ad0d9
@@ -340,3 +406,33 @@ After finishing, use `git checkout stage-01` to compare your result.
     +    { url = "https://files.pythonhosted.org/packages/24/25/1de2678b631f5a49215c6c96fff41ba892b0a34df68d6d80292b1b48aa7f/pytest-9.1.1-py3-none-any.whl", hash = "sha256:37a86b45efb9a47a61a36449063e8e18d0cab3161329fc099eb21783169c4f0c", size = 386536, upload-time = "2026-06-19T10:58:31.347Z" },
     +]
     ```
+
+### Self-check
+
+1. Where is this stage's visibility or state transition owned?
+
+    ??? note "Answer"
+        S3 stores whole object values; a slash in a key is data, not a directory.
+
+2. Which test would fail first if the new boundary were bypassed?
+
+    ??? note "Answer"
+        Read `tests.txt`, identify the narrowest new node, and name the public call it exercises.
+
+### Pass command
+
+`uv run pytest -q $(cat journey/stages/01-scaffold-object-model/tests.txt)`
+
+### The real S3 lesson
+
+S3 stores whole object values; a slash in a key is data, not a directory.
+
+### Textbook
+
+[Chapter 1](https://github.com/system-in-miniature/mini-s3/blob/main/docs/tutorial/01-getting-started.md)
+
+[Compare this stage on GitHub](https://github.com/system-in-miniature/mini-s3/tree/stage-01)
+
+After finishing, use `git checkout stage-01` to compare your result.
+
+[Complete reference patch / 完整参考补丁](https://github.com/system-in-miniature/mini-s3/blob/main/journey/stages/01-scaffold-object-model/stage.patch)

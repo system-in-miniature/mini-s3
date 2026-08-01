@@ -19,6 +19,16 @@ Starting from stage-03, Implement `MiniS3.__init__`, bucket operations, object o
 - `tests/test_storage.py`
 - `tests/test_versioning.py`
 
+### Mechanism walkthrough
+
+#### Ownership and flow
+
+`MiniS3` is the application boundary: it locks, resolves a bucket, delegates state transitions to `Bucket`, persists successful mutations, and returns protocol-free values.
+
+#### Failure and debugging
+
+Follow one public call through `_bucket`, the aggregate operation, and `DiskStorage.persist_bucket`. If memory and restart results differ, the missing step is between mutation and publication.
+
 ### Self-check
 
 1. Where is this stage's visibility or state transition owned?
@@ -59,6 +69,16 @@ Strong consistency comes from one mutation lock plus publish-before-swap candida
 - `src/minis3/store.py`
 - `tests/test_storage.py`
 - `tests/test_versioning.py`
+
+### 机制走读
+
+#### 所有权与数据流
+
+`MiniS3` 是应用边界：加锁、解析 Bucket、把状态迁移委托给 `Bucket`、持久化成功变更，并返回协议无关的值。
+
+#### 失败与排查
+
+沿一次公开调用追踪 `_bucket`、聚合操作和 `DiskStorage.persist_bucket`；若内存结果与重启结果不同，缺口就在变更与发布之间。
 
 ### 自查
 

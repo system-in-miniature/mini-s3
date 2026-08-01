@@ -1,12 +1,13 @@
 # MiniS3 Journey / MiniS3 重建旅程
 
 Journey Mode turns the finished MiniS3 system into 15 cumulative, testable
-rebuild stages. Start from an empty tree, read each `goal.md`, implement it,
-and use `tests.txt` as the gate. Open `stage.patch` only after trying.
+rebuild stages. Each generated browser page is a complete lesson: understand
+the mechanism, follow its data flow, read every changed file separately, and
+then use `tests.txt` plus the checks as the gate.
 
-Journey Mode 把 MiniS3 成品系统拆成 15 个可累积、可测试的重建阶段。从空目录
-开始，阅读每段 `goal.md`，亲手实现后用 `tests.txt` 通关；先做，再看
-`stage.patch`。
+Journey Mode 把 MiniS3 成品系统拆成 15 个可累积、可测试的重建阶段。每个生成
+网页本身就是完整课程：先理解机制与数据流，再逐文件阅读变化，最后用
+`tests.txt`、理解题与面试表达完成闭环。
 
 | Stage | Topic / 主题 | New tests / 新增测试 | Book / 教材 |
 |---:|---|---:|---:|
@@ -66,4 +67,4 @@ After maintainer acceptance, omit `--check` to rebuild the orphan `journey`
 branch and `stage-NN` tags.
 
 
-> `journey attempt` is an experimental placeholder; it will be redesigned as CS336-style test-driven assignments (shipped tests + interface stubs, implement until green, `check` as grader).
+> `journey attempt` remains an experimental self-implementation path. It is not required for the complete browser or tutor-guided course, and test-first implementation is not the default teaching order.

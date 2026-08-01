@@ -15,45 +15,30 @@
 - `src/minis3/store.py`
 - `tests/test_versioning.py`
 
-### 自查
+### 机制走读
 
-1. 本阶段的可见性或状态迁移由谁负责？
+#### 所有权与数据流
 
-    ??? note "答案"
-        当前可见性与保留历史，是同一记录的两种投影。
+变更仍由 `Bucket` 负责；`listing.py` 把有序历史展平成只读 `ListedVersion` 行，同时保留 latest 与 delete-marker 标记。
 
-2. 如果绕过新边界，哪个测试会最先失败？
+#### 失败与排查
 
-    ??? note "答案"
-        阅读 `tests.txt`，找出最窄的新节点，并说出它覆盖的公开调用。
+先检查存储的 Tuple，再判断投影；null 槽替换错误属于变更问题，历史正确但顺序或标记错误才属于 Listing 问题。
 
-### 通关命令
+### 逐文件 Diff 走读
 
-`uv run pytest -q $(cat journey/stages/05-version-history/tests.txt)`
+按运行时职责阅读，而不是按补丁存储顺序阅读。每个代码块都直接来自 canonical `stage.patch`。
 
-### 对应真实 S3 的一课
+#### `src/minis3/listing.py`
 
-当前可见性与保留历史，是同一记录的两种投影。
+读取侧投影与分页逻辑。
 
-### 教材
+由服务读取路径调用；把存储历史转换成排序、分页的响应值，不修改状态。
 
-[第 3 章](https://github.com/system-in-miniature/mini-s3/blob/main/docs/zh/tutorial/03-versioning.md)
+**变化锚点:** `ListedVersion`, `ListObjectVersionsResult`, `list_object_versions`
 
-[在 GitHub 查看阶段差异](https://github.com/system-in-miniature/mini-s3/compare/stage-04...stage-05)
-
-完成后可运行 `git checkout stage-05` 对照你的结果。
-
-??? note "先做后看：stage.patch"
+??? note "文件差异：src/minis3/listing.py"
     ```diff
-    diff --git a/src/minis3/__init__.py b/src/minis3/__init__.py
-    index 11378e1..f9c1adf 100644
-    --- a/src/minis3/__init__.py
-    +++ b/src/minis3/__init__.py
-    @@ -4,3 +4,4 @@ from .bucket import SequenceCounter, VersioningState
-     from .model import DeleteMarker, ObjectRecord, Version, content_etag
-     from .store import MiniS3
-     from .storage import InjectedCrash
-    +from .listing import ListedVersion, ListObjectVersionsResult
     diff --git a/src/minis3/listing.py b/src/minis3/listing.py
     new file mode 100644
     index 0000000..3c40e0d
@@ -115,22 +100,34 @@
     +                )
     +            )
     +    return ListObjectVersionsResult(tuple(result))
+    ```
+
+#### `src/minis3/store.py`
+
+协调领域逻辑与持久化的应用服务。
+
+接收公开调用，拥有加锁与编排，再委托给领域、投影和存储边界。
+
+**变化锚点:** `list_object_versions`, `_bucket`
+
+??? note "文件差异：src/minis3/store.py"
+    ```diff
     diff --git a/src/minis3/store.py b/src/minis3/store.py
     index 5d418b8..23ddd8e 100644
     --- a/src/minis3/store.py
     +++ b/src/minis3/store.py
     @@ -9,6 +9,7 @@ from threading import RLock
-     
+
      from .bucket import Bucket, SequenceCounter, VersioningState
      from .errors import BucketAlreadyExists, BucketNotEmpty, NoSuchBucket
     +from .listing import ListObjectVersionsResult, list_object_versions
      from .model import ObjectVersion, Version
      from .storage import DiskStorage
-     
+
     @@ -96,6 +97,13 @@ class MiniS3:
                  return result
-     
-     
+
+
     +    def list_object_versions(
     +        self, bucket: str, *, prefix: str = ""
     +    ) -> ListObjectVersionsResult:
@@ -141,13 +138,46 @@
          def _bucket(self, name: str) -> Bucket:
              try:
                  return self._buckets[name]
+    ```
+
+#### `src/minis3/__init__.py`
+
+受支持的包级公开接口。
+
+由用户导入触达；接线错误会在运行时流程开始前表现为名称缺失。
+
+**变化锚点:** 配置、导出或文档变化
+
+??? note "文件差异：src/minis3/__init__.py"
+    ```diff
+    diff --git a/src/minis3/__init__.py b/src/minis3/__init__.py
+    index 11378e1..f9c1adf 100644
+    --- a/src/minis3/__init__.py
+    +++ b/src/minis3/__init__.py
+    @@ -4,3 +4,4 @@ from .bucket import SequenceCounter, VersioningState
+     from .model import DeleteMarker, ObjectRecord, Version, content_etag
+     from .store import MiniS3
+     from .storage import InjectedCrash
+    +from .listing import ListedVersion, ListObjectVersionsResult
+    ```
+
+#### `tests/test_versioning.py`
+
+本阶段行为的可执行证明。
+
+调用学习者可见边界并记录预期状态或失败；验证机制时再从这里进入。
+
+**变化锚点:** `test_unversioned_put_replaces_null_and_delete_removes_it`, `test_enabled_puts_stack_and_delete_marker_hides_history`, `test_suspended_put_replaces_null_but_preserves_named_history`, `test_latest_marker_is_404_even_when_older_data_exists`, `test_suspended_delete_replaces_null_with_null_marker`, `test_nonempty_bucket_cannot_be_deleted`
+
+??? note "文件差异：tests/test_versioning.py"
+    ```diff
     diff --git a/tests/test_versioning.py b/tests/test_versioning.py
     index 389e45d..3f305c6 100644
     --- a/tests/test_versioning.py
     +++ b/tests/test_versioning.py
     @@ -1,8 +1,17 @@
      """Versioning is the central state-machine contract of M1."""
-     
+
      from pathlib import Path
     +
      import pytest
@@ -162,12 +192,12 @@
     +    VersioningState,
     +)
      from minis3.bucket import Bucket
-     
-     
+
+
     @@ -47,6 +56,22 @@ def test_unversioned_delete_defensively_preserves_named_history() -> None:
          assert bucket.get("k", historical.version_id) == historical
-     
-     
+
+
     +def test_unversioned_put_replaces_null_and_delete_removes_it(tmp_path: Path) -> None:
     +    store = MiniS3(tmp_path, counter=SequenceCounter())
     +    store.create_bucket("photos")
@@ -189,8 +219,8 @@
          store.create_bucket("photos")
     @@ -87,6 +112,28 @@ def test_specific_delete_removes_only_addressed_version(tmp_path: Path) -> None:
              store.get_object("b", "k", version_id=new.version_id)
-     
-     
+
+
     +def test_suspended_put_replaces_null_but_preserves_named_history(
     +    tmp_path: Path,
     +) -> None:
@@ -218,8 +248,8 @@
          store.create_bucket("b")
     @@ -101,6 +148,24 @@ def test_latest_marker_is_404_even_when_older_data_exists(tmp_path: Path) -> Non
          assert store.get_object("b", "k").body == b"still here"
-     
-     
+
+
     +def test_suspended_delete_replaces_null_with_null_marker(tmp_path: Path) -> None:
     +    store = MiniS3(tmp_path)
     +    store.create_bucket("b")
@@ -242,3 +272,33 @@
          store = MiniS3(tmp_path)
          store.create_bucket("b")
     ```
+
+### 自查
+
+1. 本阶段的可见性或状态迁移由谁负责？
+
+    ??? note "答案"
+        当前可见性与保留历史，是同一记录的两种投影。
+
+2. 如果绕过新边界，哪个测试会最先失败？
+
+    ??? note "答案"
+        阅读 `tests.txt`，找出最窄的新节点，并说出它覆盖的公开调用。
+
+### 通关命令
+
+`uv run pytest -q $(cat journey/stages/05-version-history/tests.txt)`
+
+### 对应真实 S3 的一课
+
+当前可见性与保留历史，是同一记录的两种投影。
+
+### 教材
+
+[第 3 章](https://github.com/system-in-miniature/mini-s3/blob/main/docs/zh/tutorial/03-versioning.md)
+
+[在 GitHub 查看阶段差异](https://github.com/system-in-miniature/mini-s3/compare/stage-04...stage-05)
+
+完成后可运行 `git checkout stage-05` 对照你的结果。
+
+[Complete reference patch / 完整参考补丁](https://github.com/system-in-miniature/mini-s3/blob/main/journey/stages/05-version-history/stage.patch)

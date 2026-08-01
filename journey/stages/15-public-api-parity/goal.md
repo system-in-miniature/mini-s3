@@ -6,7 +6,7 @@
 
 ### Goal
 
-Expose the complete teaching API and prove the reconstructed source and tests equal main byte for byte.
+Expose the complete teaching API and prove the reconstructed source and Journey-owned tests equal main byte for byte.
 
 ### Hands-on task
 
@@ -15,6 +15,16 @@ Starting from stage-14, Finalize `minis3.__init__` exports and run the complete 
 ### Deliverable files / 交付文件
 
 - `src/minis3/__init__.py`
+
+### Mechanism walkthrough
+
+#### Ownership and flow
+
+`minis3.__init__` is the supported adapter surface; the Journey builder then applies every patch and compares final `src/minis3` plus Journey-owned tests byte for byte with main. Site-only documentation tests stay outside this rebuild contract.
+
+#### Failure and debugging
+
+An import failure belongs to export wiring; a final parity failure names missing, extra, or changed files and must be fixed in the stage chain rather than hidden in generated commits.
 
 ### Self-check
 
@@ -44,7 +54,7 @@ A rebuild journey stays trustworthy only when CI guards both behavior and final-
 
 ### 目标
 
-公开完整教学 API，并证明重建后的源码与测试逐字节等于 main。
+公开完整教学 API，并证明重建后的源码与 Journey 所有的测试逐字节等于 main。
 
 ### 动手任务
 
@@ -53,6 +63,16 @@ A rebuild journey stays trustworthy only when CI guards both behavior and final-
 ### 交付文件
 
 - `src/minis3/__init__.py`
+
+### 机制走读
+
+#### 所有权与数据流
+
+`minis3.__init__` 是受支持的适配器接口；Journey Builder 随后应用全部 Patch，并把最终 `src/minis3` 与 Journey 所有的测试和 main 逐字节比较。仅服务网站的文档测试不属于重建契约。
+
+#### 失败与排查
+
+导入失败属于导出接线问题；最终 Parity 失败会列出缺失、多余或变化文件，必须修复 Stage 链，不能藏在生成 Commit 中。
 
 ### 自查
 

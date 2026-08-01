@@ -19,6 +19,16 @@ Starting from stage-13, Implement `ExpirationRule`, `evaluate_expiration(...)`, 
 - `src/minis3/store.py`
 - `tests/test_lifecycle.py`
 
+### Mechanism walkthrough
+
+#### Ownership and flow
+
+`evaluate_expiration` is a pure policy over timestamped versions; `MiniS3.lifecycle_tick` injects time, applies returned actions under lock, and persists the resulting histories.
+
+#### Failure and debugging
+
+Run the pure evaluator first. Wrong candidates are policy/time bugs; correct actions with wrong stored state are mutation or persistence bugs.
+
 ### Self-check
 
 1. Where is this stage's visibility or state transition owned?
@@ -59,6 +69,16 @@ Lifecycle is deterministic when evaluation is pure and time enters only through 
 - `src/minis3/lifecycle.py`
 - `src/minis3/store.py`
 - `tests/test_lifecycle.py`
+
+### 机制走读
+
+#### 所有权与数据流
+
+`evaluate_expiration` 是针对带时间戳版本的纯策略；`MiniS3.lifecycle_tick` 注入时间、在锁内执行动作并持久化结果历史。
+
+#### 失败与排查
+
+先单独运行纯评估器；候选错误属于策略或时间问题，动作正确但存储状态错误属于变更或持久化问题。
 
 ### 自查
 
