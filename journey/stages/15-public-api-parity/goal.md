@@ -16,7 +16,9 @@ Expose the complete teaching API and prove the stage-built source and Journey te
 
 All mechanisms exist, but accumulated imports can still expose accidental names or omit intended ones. Passing behavioral tests also does not by itself prove the Journey reconstructs the exact maintained source and test corpus.
 
-### Failure preview
+### Test contract
+
+#### See the failure first
 
 The parity command rebuilds every patch into a fresh tree and compares bytes with main. One missing export line or stale stage test makes the check fail even if a narrow pytest selection remains green. This catches drift between the learning path and finished repository.
 
@@ -85,7 +87,9 @@ The final Stage makes the learning journey auditable. `__all__` states which con
 
 所有机制都已存在，但累积 import 仍可能意外公开内部名称，或漏掉预期名称。行为测试通过也不能单独证明 Journey 重建的是当前维护的精确源码与测试集合。
 
-### 先看会坏在哪里
+### 测试契约
+
+#### 先看会坏在哪里
 
 Parity 命令在全新树中重放每个 patch，再与 main 比较字节。即使窄范围 pytest 仍绿，只要漏一条 export 或 Stage 测试过期，检查就会失败。这直接捕获学习路径与完成仓库之间的漂移。
 

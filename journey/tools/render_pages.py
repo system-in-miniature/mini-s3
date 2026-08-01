@@ -79,6 +79,8 @@ REQUIRED_HEADINGS = {
         "### Goal",
         "### Deliverable files",
         "### The problem at this point",
+        "### Test contract",
+        "#### See the failure first",
         "### Basic concepts",
         "### Why this mechanism is necessary",
         "### Runtime mental model",
@@ -92,6 +94,8 @@ REQUIRED_HEADINGS = {
         "### 目标",
         "### 交付文件",
         "### 当前遇到的问题",
+        "### 测试契约",
+        "#### 先看会坏在哪里",
         "### 基本概念",
         "### 为什么需要这个机制",
         "### 运行时心智模型",
@@ -355,38 +359,36 @@ def parse_localized_lesson(
         item.path for item in file_patches if item.path.startswith("tests/")
     }
     regions: list[tuple[str, str]] = []
-    if expected_test_paths:
-        if test_heading not in body:
-            raise ValueError(f"{label}: missing {test_heading}")
-        test_start = body.index(test_heading) + len(test_heading)
-        concepts_start = body.index(concepts_heading, test_start)
-        if concepts_start > body.index(walkthrough_heading):
-            raise ValueError(f"{label}: test contract must precede basic concepts")
-        test_region = body[test_start:concepts_start].strip()
-        failure_matches = list(
-            re.finditer(rf"^{re.escape(nested_failure_heading)}$", test_region, re.MULTILINE)
+    test_start = body.index(test_heading) + len(test_heading)
+    concepts_start = body.index(concepts_heading, test_start)
+    if concepts_start > body.index(walkthrough_heading):
+        raise ValueError(f"{label}: test contract must precede basic concepts")
+    test_region = body[test_start:concepts_start].strip()
+    failure_matches = list(
+        re.finditer(rf"^{re.escape(nested_failure_heading)}$", test_region, re.MULTILINE)
+    )
+    if len(failure_matches) != 1:
+        raise ValueError(
+            f"{label}: expected one {nested_failure_heading!r} inside the test contract, "
+            f"found {len(failure_matches)}"
         )
-        if len(failure_matches) != 1:
-            raise ValueError(
-                f"{label}: expected one {nested_failure_heading!r} inside the test contract, "
-                f"found {len(failure_matches)}"
-            )
-        first_marker = FILE_MARKER.search(test_region)
+    first_marker = FILE_MARKER.search(test_region)
+    if expected_test_paths:
         if first_marker is None or failure_matches[0].start() > first_marker.start():
             raise ValueError(f"{label}: failure preview must precede test file walkthroughs")
         regions.append(("test contract", test_region))
         test_prelude = test_region[:first_marker.start()].strip()
-        pre_walkthrough = (
-            body[:test_start].rstrip()
-            + "\n\n"
-            + test_prelude
-            + "\n\n"
-            + body[concepts_start:walkthrough_start].strip()
-        )
     else:
-        if test_heading in body:
-            raise ValueError(f"{label}: empty test contract is not allowed")
-        pre_walkthrough = body[:walkthrough_start].rstrip()
+        if first_marker is not None:
+            raise ValueError(f"{label}: test contract has an unowned file walkthrough")
+        test_prelude = test_region
+    pre_walkthrough = (
+        body[:test_start].rstrip()
+        + "\n\n"
+        + test_prelude
+        + "\n\n"
+        + body[concepts_start:walkthrough_start].strip()
+    )
     regions.append(("mechanism blocks", walkthrough))
 
     if not any(FILE_MARKER.search(region) for _, region in regions):

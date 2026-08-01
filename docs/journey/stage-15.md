@@ -11,7 +11,9 @@ Expose the complete teaching API and prove the stage-built source and Journey te
 
 All mechanisms exist, but accumulated imports can still expose accidental names or omit intended ones. Passing behavioral tests also does not by itself prove the Journey reconstructs the exact maintained source and test corpus.
 
-### Failure preview
+### Test contract
+
+#### See the failure first
 
 The parity command rebuilds every patch into a fresh tree and compares bytes with main. One missing export line or stale stage test makes the check fail even if a narrow pytest selection remains green. This catches drift between the learning path and finished repository.
 

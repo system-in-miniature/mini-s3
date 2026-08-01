@@ -70,7 +70,7 @@ class RenderPagesTest(unittest.TestCase):
                 "### 需要真正记住的内容",
             ),
         )
-        for card in self.cards[:-1]:
+        for card in self.cards:
             for chinese, *ordered in headings:
                 body = card.chinese if chinese else card.english
                 with self.subTest(stage=card.number, chinese=chinese):
@@ -82,7 +82,7 @@ class RenderPagesTest(unittest.TestCase):
             (False, "### Test contract", "#### See the failure first", "### Basic concepts"),
             (True, "### 测试契约", "#### 先看会坏在哪里", "### 基本概念"),
         )
-        for card in self.cards[:-1]:
+        for card in self.cards:
             for chinese, contract, failure, concepts in expectations:
                 body = card.chinese if chinese else card.english
                 with self.subTest(stage=card.number, chinese=chinese):
@@ -114,7 +114,9 @@ class RenderPagesTest(unittest.TestCase):
 
 Problem.
 
-### Failure preview
+### Test contract
+
+#### See the failure first
 
 One failing behavior.
 
