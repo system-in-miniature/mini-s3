@@ -55,6 +55,18 @@ is`, `Runtime role`, `Key code`, and `Statement understanding` are rendered as
 bold labels, so the table of contents reflects mechanisms rather than file
 structure.
 
+## Test Placement
+
+Changed files under `tests/` are failure contracts, not implementation
+mechanisms. Render each test diff and its authored explanation immediately
+after `See the failure first` / `先看会坏在哪里`, before basic concepts and the
+mechanism walkthrough. Do not render the same test again inside its mechanism
+block.
+
+A test-only Stage keeps its conceptual block title and summary later in the
+page, but the executable test walkthrough remains in the early failure section.
+This preserves the Stage's mechanism map without repeating the test file.
+
 ## Stage Layout
 
 | Stage | Core blocks | Supporting block |
@@ -84,6 +96,8 @@ Automated contracts prove:
 - core files remain explained and retain their key-code slices;
 - each core patch file has one collapsed diff drawer in its owning block;
 - each supporting block has one combined diff drawer containing all its files;
+- each test file appears once in the early failure section and never repeats in
+  the later mechanism block;
 - each core explanation immediately follows its file drawer without a repeated
   path label;
 - file names and explanation labels do not become table-of-contents headings;

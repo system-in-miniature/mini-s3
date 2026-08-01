@@ -61,6 +61,10 @@
 - Modify: `journey/tools/render_pages.py`
 - Modify: `journey/tools/tests/test_render_pages.py`
 
+- [ ] Move every changed `tests/` diff and its authored explanation directly
+  after `See the failure first` / `先看会坏在哪里`.
+- [ ] Exclude test files from the later mechanism block body while retaining
+  the block title and summary for test-only Stages.
 - [ ] Render one collapsed diff drawer per core file in layout order.
 - [ ] Render one combined diff drawer for every supporting block.
 - [ ] Place each core explanation immediately after its file drawer without a
