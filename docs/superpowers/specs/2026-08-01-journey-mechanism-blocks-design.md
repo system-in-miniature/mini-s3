@@ -11,13 +11,14 @@ The walkthrough section becomes `Mechanism blocks` / `机制板块`. Each block 
 
 1. one conceptual block heading that appears in the page table of contents;
 2. a short explanation of the problem boundary and runtime relationship;
-3. one collapsed drawer containing the combined diffs for every file in the
-   block;
-4. optional explanations for substantive files, rendered with inline file
-   labels and inline explanation labels rather than additional headings.
+3. one collapsed diff drawer per file, in authored block order;
+4. the substantive file's explanation immediately after its drawer, without a
+   second file-path or `Explanation` label.
 
-The drawer label is an action, not a duplicate title:
-`View block diff (N files)` / `查看本板块差异（N 个文件）`.
+The drawer itself is the file-level separator:
+`File diff: path` / `文件差异：path`. This keeps the conceptual block as the
+only Markdown heading while making each file boundary visible without a
+duplicated `Explanation: path` / `讲解：path` line.
 
 ## Authored Layout Contract
 
@@ -40,15 +41,15 @@ A supporting block covers files that are necessary for the repository but do
 not deserve a separate conceptual explanation in that Stage, such as an early
 README, lockfile, packaging configuration, or a routine export update.
 
-Supporting blocks render only their block summary and combined diff drawer.
+Supporting blocks render only their block summary and per-file diff drawers.
 The existing authored per-file prose remains available in the canonical goal
 for Agent tutoring and future editing, but the browser page suppresses it.
 
 ## Core Changes
 
-Core blocks retain explanations for their member files. File paths are shown as
-bold inline labels rather than headings. Existing labels such as `What it is`,
-`Runtime role`, `Key code`, and `Statement understanding` are also rendered as
+Core blocks retain explanations for their member files. Each explanation
+follows its own file diff drawer directly. Existing labels such as `What it
+is`, `Runtime role`, `Key code`, and `Statement understanding` are rendered as
 bold labels, so the table of contents reflects mechanisms rather than file
 structure.
 
@@ -79,8 +80,9 @@ Automated contracts prove:
 - every Stage patch file belongs to exactly one block;
 - supporting files have no browser per-file explanation;
 - core files remain explained and retain their key-code slices;
-- each block has one collapsed combined diff drawer immediately after its
-  summary;
+- each patch file has one collapsed diff drawer in its owning block;
+- each core explanation immediately follows its file drawer without a repeated
+  path label;
 - file names and explanation labels do not become table-of-contents headings;
 - all 15 bilingual pages render, strict MkDocs builds, and the canonical
   Journey reconstruction remains unchanged.

@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Render all 15 Self-Guided Rebuild Stages as conceptual mechanism blocks with grouped diffs and compact supporting-file treatment.
+**Goal:** Render all 15 Self-Guided Rebuild Stages as conceptual mechanism blocks with per-file diff separators and compact supporting-file treatment.
 
-**Architecture:** Each Stage owns a `layout.toml` that groups canonical patch files into bilingual core or supporting blocks. The renderer validates complete ownership, emits one combined diff drawer per block, suppresses supporting-file prose, and converts core file labels to non-heading text.
+**Architecture:** Each Stage owns a `layout.toml` that groups canonical patch files into bilingual core or supporting blocks. The renderer validates complete ownership, emits one diff drawer per file inside its block, suppresses supporting-file prose, and lets the drawer replace the redundant core file-path label.
 
 **Tech Stack:** Python 3.12, `tomllib`, dataclasses, unittest/pytest, MkDocs Material, Markdown
 
@@ -16,8 +16,8 @@
 - Modify: `journey/tools/tests/test_render_pages.py`
 
 - [ ] Add failing tests for exact block coverage, duplicate rejection,
-  supporting-file suppression, grouped diff order, and absence of per-file
-  headings in rendered pages.
+  supporting-file suppression, per-file drawer order, absence of repeated
+  explanation labels, and absence of per-file headings in rendered pages.
 - [ ] Run `uv run pytest -q journey/tools/tests/test_render_pages.py` and verify
   failures identify the missing layout model and current file-centric output.
 
@@ -55,20 +55,22 @@
   exact one-to-one patch ownership with Stage-specific errors.
 - [ ] Run the focused renderer tests and verify the parsing contracts pass.
 
-### Task 4: Render Grouped Blocks
+### Task 4: Render Mechanism Blocks With File Diff Separators
 
 **Files:**
 - Modify: `journey/tools/render_pages.py`
 - Modify: `journey/tools/tests/test_render_pages.py`
 
-- [ ] Replace per-file diff rendering with one block diff drawer containing
-  path-labelled diff fences in layout order.
-- [ ] Render core file paths and their internal explanation labels as bold text
-  instead of Markdown headings.
+- [ ] Render one collapsed diff drawer per file in layout order.
+- [ ] Place each core explanation immediately after its file drawer without a
+  repeated path or `Explanation` label.
+- [ ] Render internal explanation labels as bold text instead of Markdown
+  headings.
 - [ ] Suppress authored per-file prose for supporting blocks.
 - [ ] Rename the authored/browser walkthrough headings to `Mechanism blocks`
   and `机制板块` and update the required heading contract.
-- [ ] Run focused renderer tests until all grouped-layout contracts pass.
+- [ ] Run focused renderer tests until all block and file-separator contracts
+  pass.
 
 ### Task 5: Regenerate And Verify
 
