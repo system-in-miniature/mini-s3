@@ -177,6 +177,39 @@ class MiniS3:
             return part.receipt
 
 
+    def complete_multipart_upload(
+        self,
+        bucket: str,
+        key: str,
+        upload_id: str,
+        parts: list[CompletionEntry] | tuple[CompletionEntry, ...],
+    ) -> Version:
+        """Validate, assemble, and publish through the bucket manifest rename."""
+
+        with self._lock:
+            self._bucket(bucket)
+            _upload, staged = self._storage.load_multipart_upload(
+                bucket, key, upload_id
+            )
+            selected, etag = validate_completion(
+                staged, parts, minimum_part_size=self.minimum_part_size
+            )
+            body = b"".join(part.body for part in selected)
+            candidate = deepcopy(self._bucket(bucket))
+            result = candidate.put(
+                key,
+                body,
+                self._counter,
+                etag=etag,
+                now=self._clock(),
+                multipart_upload_id=upload_id,
+            )
+            self._storage.persist_bucket(candidate)
+            self._buckets[bucket] = candidate
+            self._storage.remove_multipart_upload(bucket, key, upload_id)
+            return result
+
+
     def abort_multipart_upload(
         self, bucket: str, key: str, upload_id: str
     ) -> None:
